@@ -10,10 +10,6 @@
 #include <limits>
 using namespace vyruz;
 void check(bool v,const char* why) {
-#ifdef _WIN32
-    // CTest retains these breadcrumbs when Windows terminates without a message.
-    std::cerr<<"World checkpoint: "<<why<<std::endl;
-#endif
     if (!v) {std::cerr<<why<<'\n';std::exit(1);} }
 TextNode assignment(std::string name,std::string value) { TextNode n;n.kind=TextKind::Assignment;n.key=name;n.values={value};return n; }
 TextNode block(std::string name,std::vector<TextNode> fields,std::string type={}) {
@@ -545,7 +541,7 @@ int main() try {
     auto broken=saved;broken.actors[0].selectedWeapon=9999;
     check(!world.restoreSnapshot(broken,error)&&world.player().alive,"bad weapon selection restore is atomic");
     broken=saved;broken.randomState="not a random state";
-    check(!world.restoreSnapshot(broken,error),"bad RNG state rejected");
+    check(!world.restoreSnapshot(broken,error)&&world.player().alive&&world.snapshot().randomState==saved.randomState,"bad RNG state rejected without altering live state");
     SceneContent secondScene=fresh;GameWorld second;
     for(auto& object:secondScene.objects)for(auto* path:{&object.sprite.path,&object.shadow.path})
         for(auto& c:*path)if(c>='A'&&c<='Z')c+=32;else if(c=='/')c='\\';

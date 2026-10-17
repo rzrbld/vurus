@@ -99,7 +99,13 @@ bool GameWorld::restoreSnapshot(const WorldSnapshot& saved,std::string& error) {
        saved.saveDwellMs<0 || saved.saveDwellMs>5500 ||
        (!saved.savePlot && (saved.saveDwellMs!=0 || saved.saveAttempted)))return fail("invalid checkpoint clock or motion");
     std::mt19937 restoredRandom;std::istringstream random(saved.randomState);
-    if(!(random>>restoredRandom))return fail("invalid checkpoint random state");
+    // MSVC's random-engine extractor throws on corrupt input; other standard
+    // libraries set failbit. Both must reject transactionally through this API.
+    try {
+        if(!(random>>restoredRandom))return fail("invalid checkpoint random state");
+    } catch(const std::exception&) {
+        return fail("invalid checkpoint random state");
+    }
     const auto& effect=saved.surprise;
     for(float height:effect.orbitAttachmentAltitudes)if(!std::isfinite(height)||std::trunc(height)!=height)
         return fail("invalid attachment altitude");
