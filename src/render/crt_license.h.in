@@ -1,0 +1,13 @@
+#pragma once
+namespace vyruz {
+inline constexpr char crtLicenses[]=R"CRTNOTICE(MAME-PSGS CRT shader
+Copyright (C) 2019 Marco Gomez / TheCodeTherapy
+https://github.com/TheCodeTherapy/MAME-PSGS
+Revision9397be16086d694cffe33b4a4c55d5017aafd257
+Modified for Vurus: adaptive aspect, robust curvature, standalone framebuffer inputs;
+single-sample filtering, normalized brightness/masks; unused palette replacement
+and filmic grading omitted. Apache-2.0 license follows.
+
+@CRT_LICENSE@
+)CRTNOTICE";
+}

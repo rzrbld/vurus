@@ -1,0 +1,14 @@
+[package]
+name = "vyruz-indeo"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[lib]
+crate-type = ["staticlib"]
+
+[features]
+framework = []
+
+[profile.release]
+opt-level = 3

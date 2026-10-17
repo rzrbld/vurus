@@ -1,0 +1,14 @@
+MAME-PSGS CRT shader
+Copyright (C) 2019 Marco Gomez
+TheCodeTherapy — https://github.com/TheCodeTherapy/MAME-PSGS
+Pinned revision: 9397be16086d694cffe33b4a4c55d5017aafd257
+Licensed under Apache License, Version 2.0 (LICENSE).
+
+Vurus modifications (2026-10-17): explicit GLSL1.20; standalone framebuffer
+inputs; adaptive aspect; guarded curvature roots/acos/center singularities;
+inactive palette replacement removed; mirrored curvature for pointer hit tests.
+Brightness/performance revision: normalized corner fade at35% strength; one filtered texture
+sample and unit-mean scanline/phosphor masks replace expensive reconstruction,
+halation and filmic grading. Original curvature mapping retained. Mild luminance-preserving saturation mix added.
+Original shader files are preserved under upstream/; adapted files are under
+src/render/shaders/. This optional effect is not an original Vyruz mechanic.

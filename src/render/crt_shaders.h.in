@@ -1,0 +1,7 @@
+#pragma once
+namespace vyruz {
+inline constexpr char crtVertex[]=R"CRTGLSL(@CRT_VERTEX@)CRTGLSL";
+inline constexpr char crtFragment[]=R"CRTGLSL(@CRT_FRAGMENT@)CRTGLSL";
+inline constexpr char sceneVertex[]=R"SCENEGLSL(@SCENE_VERTEX@)SCENEGLSL";
+inline constexpr char sceneFragment[]=R"SCENEGLSL(@SCENE_FRAGMENT@)SCENEGLSL";
+}

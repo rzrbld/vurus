@@ -1,0 +1,4 @@
+#pragma once
+namespace vyruz { inline constexpr char smaaLicense[]=R"SMAALICENSE(SMAA — https://github.com/iryoku/smaa
+@SMAA_LICENSE@
+)SMAALICENSE"; }
