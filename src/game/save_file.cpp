@@ -349,7 +349,7 @@ constexpr char Magic[]="VYRZSAVE";
 } // namespace
 bool validSaveLevelPath(const std::string& p){
  if(p.empty()||p.size()>1024||p.front()=='/'||p.find('\\')!=std::string::npos||p.find(':')!=std::string::npos||p.find('\0')!=std::string::npos||p.find("//")!=std::string::npos)return false;
- std::filesystem::path path(p);for(auto& part:path)if(part==".."||part==".")return false;
+ std::filesystem::path path(p);for(const auto& part:path)if(part==".."||part==".")return false;
  auto ext=path.extension().string();for(char& c:ext)if(c>='a'&&c<='z')c-=32;return ext==".3DG";
 }
 bool encodeSave(const SaveGame& source,std::vector<uint8_t>& out,std::string& error){try{validate(source);SaveGame s=source;for(auto& [path,level]:s.levels)normalizeSavedSurprise(level.world);if(s.restartLevel)normalizeSavedSurprise(s.restartLevel->world);Archive payload;payload(s);Archive a;for(size_t i=0;i<8;++i)a.integer(uint8_t(Magic[i]),1);a.integer(payload.version,4);a.integer(payload.bytes.size(),8);a.integer(hash(payload.bytes),8);if(payload.bytes.size()>MaxFile-a.bytes.size())throw Failure("Save exceeds 256 MiB limit");a.bytes.insert(a.bytes.end(),payload.bytes.begin(),payload.bytes.end());out=std::move(a.bytes);error.clear();return true;}catch(const std::exception& e){error=e.what();return false;}}

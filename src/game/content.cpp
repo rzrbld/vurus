@@ -1,4 +1,5 @@
 #include "game/content.h"
+#include "platform/parse_float.h"
 #include "game/content_names.h"
 #include "game/enemy_behavior_native.h"
 #include <algorithm>
@@ -46,8 +47,7 @@ int integer(const TextNode& n) {
 }
 float number(const TextNode& n, std::string s) {
     s = numericToken(s); float v = 0;
-    const auto r = std::from_chars(s.data(), s.data() + s.size(), v);
-    if (r.ec != std::errc{} || r.ptr != s.data() + s.size() || !std::isfinite(v))
+    if (!platform::parseFiniteFloat(s, v))
         fail(n, "invalid finite number: " + s);
     return v;
 }

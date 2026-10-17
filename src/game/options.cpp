@@ -1,3 +1,5 @@
+#include "platform/parse_float.h"
+#include <type_traits>
 #include "game/options.h"
 #include "render/hud_layout.h"
 #include <algorithm>
@@ -28,9 +30,12 @@ std::string_view trim(std::string_view value) {
     return first==value.npos?std::string_view{}:value.substr(first,value.find_last_not_of(whitespace)-first+1);
 }
 template<class T> bool number(std::string_view value,T& out) {
+    if constexpr(std::is_same_v<T,float>) return platform::parseFiniteFloat(value,out);
+    else {
     T parsed{};const auto r=std::from_chars(value.data(),value.data()+value.size(),parsed);
     if(r.ec!=std::errc{}||r.ptr!=value.data()+value.size())return false;
     out=parsed;return true;
+    }
 }
 bool number(std::string_view value,bool& out) {
     if(value=="0"){out=false;return true;}if(value=="1"){out=true;return true;}return false;

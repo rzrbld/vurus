@@ -15,12 +15,16 @@ jobs:
         include:
           - os: ubuntu-22.04
             label: linux-x64
+            parallel: 4
           - os: windows-2022
             label: windows-x64
+            parallel: 4
           - os: macos-15
             label: macos-arm64
+            parallel: 2
           - os: macos-15-intel
             label: macos-x64
+            parallel: 3
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     env:
@@ -52,8 +56,10 @@ jobs:
       - name: Configure Windows
         if: runner.os == 'Windows'
         run: cmake -S . -B build -A x64 -DBUILD_TESTING=ON -DVYRUZ_SDL_SOURCE="$pwd/work/ci-sdl"
+      - name: Build engine first
+        run: cmake --build build --config Release --target vurus --parallel ${{ matrix.parallel }}
       - name: Build
-        run: cmake --build build --config Release --parallel 2
+        run: cmake --build build --config Release --parallel ${{ matrix.parallel }}
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure --parallel 2
       - name: Standalone CLI smoke test

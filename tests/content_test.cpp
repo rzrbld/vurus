@@ -1,4 +1,7 @@
 #include "game/content.h"
+#include "platform/parse_float.h"
+#include <bit>
+#include <cstdint>
 #include "game/content_names.h"
 #include <cstdlib>
 #include <iostream>
@@ -13,6 +16,23 @@ static TextDocument parse(const std::string& s, const std::string& name="COMMON/
     check(parseContentText(s,name,d,e),e); return d;
 }
 int main() {
+    for(const char* token:{"0","-0","1.25",".5","1e2","3.4028234e38","1.40129846e-45",
+                           "1.000000059604644775390625","-2.5e-3","","+1"," 1","1 ",
+                           "0x1p2","-0x1p2","nan","inf","1e999","1e-999","1,5","1junk"}) {
+        float standard=42,classic=42;
+        const bool accepted=platform::parseFiniteFloat(token,standard);
+#if defined(__linux__) || defined(__APPLE__)
+        const bool fallback=platform::parseFiniteFloatClassic(token,classic);
+        check(accepted==fallback && std::bit_cast<uint32_t>(standard)==std::bit_cast<uint32_t>(classic),
+              std::string("portable float parser parity: ")+token);
+#endif
+    }
+    float parsed=42;
+    check(platform::parseFiniteFloat("1.25",parsed)&&parsed==1.25f,"decimal float parsing");
+    for(const char* bad:{"+1"," 1","1 ","0x1p2","nan","inf","1e999","1e-999"}) {
+        parsed=42;check(!platform::parseFiniteFloat(bad,parsed)&&parsed==42,"strict transactional float parsing");
+    }
+
     check(contentNameEqual("Saving-Plot","saving-plot") && !contentNameEqual("ammo","ammunition"),"allocation-free content key comparison");
     check(contentNameIs("FX","fx") && !contentNameIs("FX","FX"),"attribute token comparison retains lowercase-token convention");
     std::vector<TextNode> duplicate(2);duplicate[0].key="Energy";duplicate[1].key="ENERGY";
