@@ -1291,7 +1291,7 @@ void render(App& a,float alpha=1) {
 
 int main(int argc, char** argv) {
     SDL_SetMainReady();
-    if(argc==2 && std::string_view(argv[1])=="--licenses"){std::fputs(vyruz::videoLicenses,stdout);std::fputs(vyruz::crtLicenses,stdout);std::fputs(vyruz::smaaLicense,stdout);return 0;}
+    if(argc==2 && std::string_view(argv[1])=="--licenses"){for(const char* notice:vyruz::videoLicenseChunks)std::fputs(notice,stdout);std::fputs(vyruz::crtLicenses,stdout);std::fputs(vyruz::smaaLicense,stdout);return 0;}
     const std::string executableDirectory=binaryDirectory();
     std::string dataDir=executableDirectory;
     if(const char* supplied=std::getenv("VYRUZ_DATA_DIR");supplied&&*supplied)dataDir=supplied;

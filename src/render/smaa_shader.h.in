@@ -1,4 +1,6 @@
 #pragma once
 namespace vyruz {
-inline constexpr char smaaSource[]=R"SMAASOURCE(@SMAA_SOURCE@)SMAASOURCE";
+inline constexpr const char* smaaSourceChunks[]={
+@SMAA_SOURCE_CHUNKS@
+};
 }

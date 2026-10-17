@@ -10,7 +10,7 @@ void textureParameters(){glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_
 std::string shaderText(int pass,bool vertex){
  std::string text="#version 130\n#define SMAA_GLSL_3\n#define SMAA_PRESET_MEDIUM\nuniform vec4 metrics;\n#define SMAA_RT_METRICS metrics\n";
  text+=vertex?"#define SMAA_INCLUDE_VS 1\n#define SMAA_INCLUDE_PS 0\n":"#define SMAA_INCLUDE_VS 0\n#define SMAA_INCLUDE_PS 1\n";
- text+=smaaSource;
+ for(const char* chunk:smaaSourceChunks)text+=chunk;
  text+=vertex?"\nout vec2 uv;out vec2 pixel;out vec4 offsets[3];\n":"\nin vec2 uv;in vec2 pixel;in vec4 offsets[3];out vec4 fragColor;uniform sampler2D colorTex,edgesTex,areaTex,searchTex,blendTex;\n";
  if(vertex){text+="void main(){gl_Position=gl_ModelViewProjectionMatrix*gl_Vertex;uv=gl_MultiTexCoord0.xy;pixel=vec2(0);offsets[0]=offsets[1]=offsets[2]=vec4(0);";
   text+=pass==0?"SMAAEdgeDetectionVS(uv,offsets);}":pass==1?"SMAABlendingWeightCalculationVS(uv,pixel,offsets);}":"SMAANeighborhoodBlendingVS(uv,offsets[0]);}";

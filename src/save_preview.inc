@@ -17,7 +17,12 @@ void captureSavePreview(App& a,std::filesystem::path path) {
         tga[destination]=pixels[source+2];tga[destination+1]=pixels[source+1];tga[destination+2]=pixels[source];
     }
     path.replace_extension(".tga");
-    if(FILE* file=std::fopen(path.c_str(),"wbx")) {
+#ifdef _WIN32
+    FILE* file=_wfopen(path.c_str(),L"wbx");
+#else
+    FILE* file=std::fopen(path.c_str(),"wbx");
+#endif
+    if(file) {
         const bool written=std::fwrite(tga.data(),1,tga.size(),file)==tga.size();
         const bool closed=std::fclose(file)==0;
         if(!written || !closed){std::error_code error;std::filesystem::remove(path,error);}
