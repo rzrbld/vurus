@@ -3,26 +3,6 @@
 #include <SDL_opengl.h>
 #include <string>
 namespace vyruz {
-#ifdef __APPLE__
-#define VYRUZ_GL_TYPE(type,fn) using type=decltype(&::fn);
-VYRUZ_GL_TYPE(PFNGLCREATESHADERPROC,glCreateShader)
-VYRUZ_GL_TYPE(PFNGLSHADERSOURCEPROC,glShaderSource)
-VYRUZ_GL_TYPE(PFNGLCOMPILESHADERPROC,glCompileShader)
-VYRUZ_GL_TYPE(PFNGLGETSHADERIVPROC,glGetShaderiv)
-VYRUZ_GL_TYPE(PFNGLGETSHADERINFOLOGPROC,glGetShaderInfoLog)
-VYRUZ_GL_TYPE(PFNGLDELETESHADERPROC,glDeleteShader)
-VYRUZ_GL_TYPE(PFNGLCREATEPROGRAMPROC,glCreateProgram)
-VYRUZ_GL_TYPE(PFNGLATTACHSHADERPROC,glAttachShader)
-VYRUZ_GL_TYPE(PFNGLLINKPROGRAMPROC,glLinkProgram)
-VYRUZ_GL_TYPE(PFNGLGETPROGRAMIVPROC,glGetProgramiv)
-VYRUZ_GL_TYPE(PFNGLGETPROGRAMINFOLOGPROC,glGetProgramInfoLog)
-VYRUZ_GL_TYPE(PFNGLDELETEPROGRAMPROC,glDeleteProgram)
-VYRUZ_GL_TYPE(PFNGLUSEPROGRAMPROC,glUseProgram)
-VYRUZ_GL_TYPE(PFNGLGETUNIFORMLOCATIONPROC,glGetUniformLocation)
-VYRUZ_GL_TYPE(PFNGLUNIFORM1IPROC,glUniform1i)
-VYRUZ_GL_TYPE(PFNGLUNIFORM2FPROC,glUniform2f)
-#undef VYRUZ_GL_TYPE
-#endif
 // Shared optional GLSL1.20 capture/pass runner for CRT or scene filters.
 // Programs/capture storage are independent; functions load only when enabled.
 class CrtPass {

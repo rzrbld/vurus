@@ -1,3 +1,4 @@
+#include <string>
 #include "game/ammo_radial_native.h"
 #include <array>
 #include <bit>

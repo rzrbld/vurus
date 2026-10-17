@@ -1,3 +1,4 @@
+#include <string>
 #include "game/health_damage_native.h"
 #include "fixtures/native_health_damage_records.h"
 #include <bit>

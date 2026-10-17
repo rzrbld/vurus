@@ -1,3 +1,4 @@
+#include <string>
 #include "game/ammo_radial_contract_native.h"
 #include "game/health_damage_native.h"
 #include "fixtures/native_radial_contract_records.h"

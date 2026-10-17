@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <dirent.h>
 #include <fstream>
 #include <filesystem>
 
