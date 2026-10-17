@@ -58,6 +58,12 @@ jobs:
         run: cmake -S . -B build -A x64 -DBUILD_TESTING=ON -DVYRUZ_SDL_SOURCE="$pwd/work/ci-sdl"
       - name: Build engine first
         run: cmake --build build --config Release --target vurus --parallel ${{ matrix.parallel }}
+      - name: Windows critical integration checks
+        if: runner.os == 'Windows'
+        run: |
+          cmake --build build --config Release --target world_test grenade_native_contacts_test --parallel 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ctest --test-dir build -C Release --output-on-failure -R "^(world|grenade_native_contacts)$"
       - name: Build
         run: cmake --build build --config Release --parallel ${{ matrix.parallel }}
       - name: Test

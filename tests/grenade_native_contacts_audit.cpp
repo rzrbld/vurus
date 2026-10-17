@@ -105,5 +105,6 @@ int main(int argc,char**argv){try{need(argc==1||argc==3,"usage: grenade_native_c
   maps<<path<<'\t'<<actual.nativeNavigationDecor.size()<<'\t'<<chosen<<'\t'<<(actual.nativeNavigationDecor[chosen].rectangle?"rectangle":"segment")<<'\t'<<history->center.x<<','<<history->center.y<<'\n';++mapCount;
  }
  std::ofstream(out/"result.txt")<<"PASS native grenade bridge: original-resource launch, graph initialization, line bounce caller displacement, independent native/surface return2, v30 disk continuation, Item priority, square Gate, stationary overlap, owner499/500, legacy reconstruction and "<<mapCount<<" original-map terrain contact fixtures. Original whole-game graph producer/closest-noncontact insertion hint and actor-moving-into-Ammo remain outside scope.\n";
+ maps.close();need(bool(maps),"finish terrain report");
  std::cout<<"PASS native Grenade integration and "<<mapCount<<" original terrain maps\n";if(argc==1)std::filesystem::remove_all(out);return 0;
 }catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}

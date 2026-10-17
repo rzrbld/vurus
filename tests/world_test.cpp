@@ -9,7 +9,12 @@
 #include <iostream>
 #include <limits>
 using namespace vyruz;
-void check(bool v,const char* why) { if (!v) {std::cerr<<why<<'\n';std::exit(1);} }
+void check(bool v,const char* why) {
+#ifdef _WIN32
+    // CTest retains these breadcrumbs when Windows terminates without a message.
+    std::cerr<<"World checkpoint: "<<why<<std::endl;
+#endif
+    if (!v) {std::cerr<<why<<'\n';std::exit(1);} }
 TextNode assignment(std::string name,std::string value) { TextNode n;n.kind=TextKind::Assignment;n.key=name;n.values={value};return n; }
 TextNode block(std::string name,std::vector<TextNode> fields,std::string type={}) {
     TextNode n;n.kind=TextKind::Block;n.key=name;n.children=fields;if (!type.empty())n.arguments={type};return n;
@@ -22,7 +27,7 @@ static bool loadFixture(GameWorld& world,SceneContent& scene,const Level& level,
         cls.properties.push_back(assignment("Managed","1"));
     return world.load(scene,level,error);
 }
-int main() {
+int main() try {
     SceneContent scene;Level level;level.mapW=100;level.mapH=100;level.hasTerrainCollision=true;
     ObjectClass player;player.id={0};player.name="Player";player.behaviours={"Player"};
     player.properties={assignment("Bounding-box-size","22"),block("Energy",{assignment("Initial","50"),assignment("Max","100")}),
@@ -758,4 +763,7 @@ int main() {
     check(propertyNumber(attribute(spent.properties,"lift")->children,"Usage-Count")==0&&!consumeLiftUse(spent),"exhausted Lift cannot spend another use");
     check(propertyNumber(attribute(liveLift.properties,"lift")->children,"Usage-Count")==1,"staging does not mutate live source Lift");
 
+} catch(const std::exception& error) {
+    std::cerr<<"World test exception: "<<error.what()<<std::endl;
+    return 1;
 }
