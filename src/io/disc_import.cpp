@@ -284,8 +284,19 @@ void music(const Disc& disc,const fs::path& directory,const ImportProgressCallba
     }
 }
 std::string discKey(const Disc& disc){
-    const auto stamp=fs::last_write_time(disc.image).time_since_epoch().count();
-    return hash("import-v1:"+disc.image.string()+":"+std::to_string(fs::file_size(disc.image))+":"+std::to_string(stamp)+":"+disc.cue);
+    auto stamp=fs::last_write_time(disc.image).time_since_epoch().count();
+    // libc++ can use a128-bit filesystem clock rep. Preserve every decimal
+    // digit (and existing import identities) without narrowing to long long.
+    const bool negative=stamp<0;
+    std::string timestamp;
+    do {
+        const auto digit=stamp%10;
+        timestamp.push_back(char('0'+(digit<0?-digit:digit)));
+        stamp/=10;
+    } while(stamp!=0);
+    if(negative)timestamp.push_back('-');
+    std::reverse(timestamp.begin(),timestamp.end());
+    return hash("import-v1:"+disc.image.string()+":"+std::to_string(fs::file_size(disc.image))+":"+timestamp+":"+disc.cue);
 }
 std::map<std::string,Iso::Entry> gameEntries(Iso& iso){
     auto entries=iso.directory(iso.root);

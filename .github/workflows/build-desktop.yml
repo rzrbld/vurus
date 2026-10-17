@@ -83,6 +83,7 @@ jobs:
             build/vurus-*.tar.gz
             build/Testing/Temporary/LastTest.log
           if-no-files-found: warn
+          retention-days: 7
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
