@@ -1,0 +1,67 @@
+name: Publish validated v0.1.0
+on:
+  workflow_dispatch:
+  push:
+    branches: [publish-v0.1.0]
+    paths: [".github/workflows/publish-v0.1.0.yml"]
+permissions:
+  actions: read
+  contents: write
+concurrency:
+  group: publish-v0.1.0
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_RUN: "39079125243"
+      BUILD_SHA: "81f14533c791043e4fb8787e15e0407aa40b28eb"
+    steps:
+      - name: Verify successful source build
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" > run.json
+          jq -e --arg sha "$BUILD_SHA" '.status == "completed" and .conclusion == "success" and .head_sha == $sha' run.json
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN/jobs" > jobs.json
+          jq -e '[.jobs[] | select(.name | startswith("build ("))] | length == 4 and all(.conclusion == "success")' jobs.json
+      - name: Download validated packages and prepare checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run download "$BUILD_RUN" --pattern 'vurus-*' --dir artifacts
+          mkdir packages
+          for name in vurus-linux.tar.gz vurus-windows-amd64.zip vurus-darwin-arm64.zip vurus-darwin-x86_64.zip; do
+            mapfile -d '' matches < <(find artifacts -type f -name "$name" -print0)
+            test "${#matches[@]}" -eq 1
+            test -s "${matches[0]}"
+            cp "${matches[0]}" "packages/$name"
+          done
+          cd packages
+          sha256sum vurus-* > SHA256SUMS.txt
+      - name: Publish release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > notes.md <<'NOTES'
+          First public Vurus desktop release: an unofficial, AI-assisted port of Vyruz: Destruction of the Untel Empire (2000, C2V).
+
+          **Your original game data is required.** No original game assets are included. Put your ISO/CUE-BIN beside the engine or supply it with `--data`. See the included README for import and launch instructions.
+
+          Downloads:
+          - `vurus-linux.tar.gz`: Linux x64 / Steam Deck.
+          - `vurus-windows-amd64.zip`: Windows x64, with SDL linked statically and the MSVC runtime bundled.
+          - `vurus-darwin-arm64.zip`: Apple Silicon, macOS 15 or later.
+          - `vurus-darwin-x86_64.zip`: Intel Mac, macOS 15 or later.
+
+          Mac builds are unsigned terminal executables, not notarized app bundles. SMAA is unavailable on macOS; FXAA remains available. Physical graphics, audio and controller testing remains separate from CI validation.
+
+          These are the exact packages from successful [CI run 39079125243](https://github.com/rzrbld/vurus/actions/runs/39079125243), commit `81f14533c791043e4fb8787e15e0407aa40b28eb`. Linux passed 147 tests; Windows and each Mac architecture passed 143 applicable tests. SHA-256 checksums are included.
+
+          Engine and third-party licenses are included in the packages and repository. Original game names, logos and assets remain the property of their respective owners; this project is not affiliated with or endorsed by them.
+          NOTES
+          gh release create v0.1.0 packages/* --target "$BUILD_SHA" --draft --title 'Vurus v0.1.0' --notes-file notes.md
+          gh release edit v0.1.0 --draft=false --latest
