@@ -18,9 +18,14 @@ bool applyOptionsRuntime(App& a,const vyruz::GameOptions& o,std::string& error,b
     a.hud.setLanguage(o.hudLanguage);a.world.setHudLanguage(o.hudLanguage);
     if(!vyruz::applyWindowVideo(a.window,o.windowMode,o.width,o.height,resizeWindow,a.windowedBounds,error)){if(displayFailure)*displayFailure=true;return false;}
     int w=0,h=0;SDL_GetWindowSize(a.window,&w,&h);a.gfx.resize(w,h);
+#if VYRUZ_GLES
+    // A copied desktop config must not prevent handheld startup or audio edits.
+    if(!a.gfx.setCRT(false,error)||!a.gfx.setSceneEffects(false,false,false,error,false))return false;
+#else
     a.gfx.setRetroCRT(o.crtRetro,o.crtBright);
     if(!a.gfx.setCRT(o.crt,error))return false;
     if(!a.gfx.setSceneEffects(o.fxaa,o.bloom,o.sharpen,error,o.smaa))return false;
+    #endif
     error.clear();return true;
 }
 bool commitOptions(App& a,vyruz::GameOptions next) {
@@ -77,8 +82,8 @@ void refreshOptions(App& a) {
         std::string aspect(vyruz::HudAspects[o.hudAspect].name);
         if(o.hudAspect==0){const float actual=float(a.gfx.windowWidth())/std::max(1,a.gfx.windowHeight());const auto closest=std::min_element(vyruz::HudAspects.begin()+1,vyruz::HudAspects.end(),[&](const auto& l,const auto& r){return std::abs(actual-float(l.numerator)/l.denominator)<std::abs(actual-float(r.numerator)/r.denominator);});aspect+=" ("+(std::abs(actual-float(closest->numerator)/closest->denominator)<actual*.03f?std::string(closest->name):std::string("window"))+")";}
         m.optionTitle="Advanced video";m.optionLabels={"Mode: "+std::string(o.windowMode==0?"Windowed":o.windowMode==1?"Fullscreen":o.windowMode==2?"Borderless fullscreen":"Borderless window"),"HUD aspect: "+aspect,
-            "Sprite filtering: "+std::string(o.spriteFiltering==0?"Off":o.spriteFiltering==1?"Bilinear":"Trilinear"),"Vignette: "+std::string(on(o.vignette)),"Screen shader: "+std::string(!o.crt?"Off":o.crtBright?"Bright":o.crtRetro?"Retro":"CRT"),"Scene effects","Reset advanced","Back"};
-        m.optionHelp={"Windowed / Fullscreen / Borderless fullscreen (desktop resolution) / Borderless window.","Auto follows the window. Manual ratios change only the HUD; camera and backgrounds stay unchanged.","Smooth world sprites. Off keeps sharp pixels. Trilinear also filters reduced sprites.","Original shaded screen edges. The HUD remains clear.","Off / CRT / Retro / Bright. Retro is warm; Bright adds a soft highlight glow.","FXAA, subtle bloom and gentle sharpening for the scene; HUD stays crisp.","",""};break;
+            "Sprite filtering: "+std::string(o.spriteFiltering==0?"Off":o.spriteFiltering==1?"Bilinear":"Trilinear"),"Vignette: "+std::string(on(o.vignette)),"Screen shader: "+std::string(!o.crt?"Off":o.crtBright?"Bright":o.crtRetro?"Retro":"CRT"),"Scene effects","FPS counter: "+std::string(on(o.fpsCounter)),"Reset advanced","Back"};
+        m.optionHelp={"Windowed / Fullscreen / Borderless fullscreen (desktop resolution) / Borderless window.","Auto follows the window. Manual ratios change only the HUD; camera and backgrounds stay unchanged.","Smooth world sprites. Off keeps sharp pixels. Trilinear also filters reduced sprites.","Original shaded screen edges. The HUD remains clear.","Off / CRT / Retro / Bright. Retro is warm; Bright adds a soft highlight glow.","FXAA, subtle bloom and gentle sharpening for the scene; HUD stays crisp.","Show rendered frames per second, averaged over half a second.","",""};break;
     }
     case 14:m.optionTitle="Scene effects";m.optionLabels={"FXAA: "+std::string(on(o.fxaa)),"SMAA: "+std::string(on(o.smaa)),"Subtle bloom: "+std::string(on(o.bloom)),"Gentle sharpening: "+std::string(on(o.sharpen)),"Reset effects","Back"};m.optionHelp={"Smooth jagged scene edges. May soften fine detail.","SMAA 1x Medium. Disables FXAA; requires OpenGL 3.0.","Soft glow around bright scene highlights.","Mild local contrast with bounded halos.","Turn all scene effects off.",""};
 #if defined(VYRUZ_ENABLE_SMAA) && !VYRUZ_ENABLE_SMAA
@@ -117,6 +122,10 @@ void refreshOptions(App& a) {
         break;
     case 7:m.optionTitle="Mouse";m.optionLabels={std::string("Fire: ")+optionMouseName(o.fireButton),std::string("Forward: ")+optionMouseName(o.thrustButton),"Back"};break;
     }
+#if VYRUZ_GLES
+    if(a.optionsPage==8){m.optionLabels[4]="Screen shader: unavailable";m.optionHelp[4]="Post-processing is disabled in this handheld build.";}
+    if(a.optionsPage==14)for(int i=0;i<4;++i){m.optionLabels[i]=std::string(i==0?"FXAA":i==1?"SMAA":i==2?"Subtle bloom":"Gentle sharpening")+": unavailable";m.optionHelp[i]="Post-processing is disabled in this handheld build.";}
+#endif
     m.selected=std::clamp(m.selected,0,int(m.optionLabels.size())-1);
 }
 void refreshMenuContext(App& a) {
@@ -187,18 +196,26 @@ void changeOption(App& a,int step=1) {
         else if(row==2)next.reactorFx=!next.reactorFx;
         else if(row==3)next.groundDetails=!next.groundDetails;
         else if(row==4)next.shadows=!next.shadows;
-        else {next.windowMode=defaults.windowMode;next.shadows=defaults.shadows;next.width=defaults.width;next.height=defaults.height;next.gamma=defaults.gamma;next.vignette=defaults.vignette;next.crt=defaults.crt;next.crtRetro=defaults.crtRetro;next.crtBright=defaults.crtBright;next.fxaa=defaults.fxaa;next.smaa=defaults.smaa;next.bloom=defaults.bloom;next.sharpen=defaults.sharpen;next.spriteFiltering=defaults.spriteFiltering;next.hudAspect=defaults.hudAspect;next.reactorFx=defaults.reactorFx;next.groundDetails=defaults.groundDetails;}
+        else {next.windowMode=defaults.windowMode;next.shadows=defaults.shadows;next.width=defaults.width;next.height=defaults.height;next.gamma=defaults.gamma;next.fpsCounter=defaults.fpsCounter;next.vignette=defaults.vignette;next.crt=defaults.crt;next.crtRetro=defaults.crtRetro;next.crtBright=defaults.crtBright;next.fxaa=defaults.fxaa;next.smaa=defaults.smaa;next.bloom=defaults.bloom;next.sharpen=defaults.sharpen;next.spriteFiltering=defaults.spriteFiltering;next.hudAspect=defaults.hudAspect;next.reactorFx=defaults.reactorFx;next.groundDetails=defaults.groundDetails;}
     } else if(a.optionsPage==8){
-        if(row==7){optionsBack(a);return;}
-        if(row==5){a.optionsPage=14;a.menu.selected=0;refreshOptions(a);return;}
-        if(row==0){a.optionsPage=13;a.menu.selected=next.windowMode;refreshOptions(a);return;}
+        if(row==8){optionsBack(a);return;}
+        if(row==6)next.fpsCounter=!next.fpsCounter;
+        else if(row==5){a.optionsPage=14;a.menu.selected=0;refreshOptions(a);return;}
+        else if(row==0){a.optionsPage=13;a.menu.selected=next.windowMode;refreshOptions(a);return;}
         else if(row==1)next.hudAspect=(next.hudAspect+step+int(vyruz::HudAspects.size()))%int(vyruz::HudAspects.size());
         else if(row==2)next.spriteFiltering=nextOption(next.spriteFiltering,{0,1,2},step);
         else if(row==3)next.vignette=!next.vignette;
-        else if(row==4){const int mode=((next.crt?(next.crtBright?3:next.crtRetro?2:1):0)+step+4)%4;next.crt=mode!=0;next.crtRetro=mode>=2;next.crtBright=mode==3;}
-        else {next.windowMode=defaults.windowMode;next.hudAspect=defaults.hudAspect;next.spriteFiltering=defaults.spriteFiltering;next.vignette=defaults.vignette;next.crt=defaults.crt;next.crtRetro=defaults.crtRetro;next.crtBright=defaults.crtBright;next.fxaa=defaults.fxaa;next.smaa=defaults.smaa;next.bloom=defaults.bloom;next.sharpen=defaults.sharpen;}
+        else if(row==4){
+#if VYRUZ_GLES
+            a.menu.error="Screen shaders are unavailable in this build";return;
+#endif
+            const int mode=((next.crt?(next.crtBright?3:next.crtRetro?2:1):0)+step+4)%4;next.crt=mode!=0;next.crtRetro=mode>=2;next.crtBright=mode==3;}
+        else {next.fpsCounter=defaults.fpsCounter;next.windowMode=defaults.windowMode;next.hudAspect=defaults.hudAspect;next.spriteFiltering=defaults.spriteFiltering;next.vignette=defaults.vignette;next.crt=defaults.crt;next.crtRetro=defaults.crtRetro;next.crtBright=defaults.crtBright;next.fxaa=defaults.fxaa;next.smaa=defaults.smaa;next.bloom=defaults.bloom;next.sharpen=defaults.sharpen;}
     } else if(a.optionsPage==14){
         if(row==5){optionsBack(a);return;}
+#if VYRUZ_GLES
+        if(row<4){a.menu.error="Post-processing is unavailable in this build";return;}
+#endif
         if(row==0){next.fxaa=!next.fxaa;if(next.fxaa)next.smaa=false;}
         else if(row==1){next.smaa=!next.smaa;if(next.smaa)next.fxaa=false;}
         else if(row==2)next.bloom=!next.bloom;

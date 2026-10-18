@@ -2,10 +2,11 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <memory>
 
 namespace vyruz {
 
-// Reverse-engineered Vyruz .rsc container (reverse-engineered format).
+// Reverse-engineered Vyruz .rsc container (clean-room documented format).
 //
 // Header (32 bytes, little-endian):
 //   u16 count, u16 version, u32 table1_off, u32 table1_size,
@@ -36,7 +37,10 @@ public:
     int find(const std::string& name) const;
 
 private:
-    std::string path_;
+    // Copies share immutable archive storage and a synchronized seek/read handle.
+    // Concurrent reads are supported; open/reassignment requires caller ownership.
+    struct File;
+    std::shared_ptr<File> file_;
     std::vector<uint8_t> table1_;  // decrypted
     std::vector<uint8_t> table2_;  // decrypted
     uint32_t data_off_ = 0;

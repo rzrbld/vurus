@@ -1,3 +1,4 @@
+#include "render/sprite_reachability.h"
 #include "render/presentation.h"
 #include "render/scene.h"
 #include "render/fx_trail.h"
@@ -250,15 +251,23 @@ bool SceneRenderer::restore(const SceneRendererState& state,std::string& error) 
     playerTurn_={};
     orbitTimeMs_=restoredTime;audioCues_.clear();queuedAudioStarts_=0;resetEnemyFire_=resetFire;error.clear();return true;
 }
+bool SceneRenderer::decodeBank(const std::string& path,GafAnimation& animation) {
+    std::vector<uint8_t> data;
+    if(!read_ || !read_(path,data))return false;
+    const auto use=sequenceUses_.find(bankKey(path));
+    if(use==sequenceUses_.end() || use->second.all)return decodeGafAnimation(data,animation);
+    return decodeGafAnimation(data,animation,GafDecodeMode::SelectedSequences,
+        [&](const GafAnimation& metadata){return use->second.select(metadata);});
+}
 bool SceneRenderer::load(const SceneContent& scene,const ContentReader& read,std::string& error) {
     if (!banks_.empty()) { error="scene renderer must be cleared before reload"; return false; }
     read_=read;
+    sequenceUses_=sceneSpriteSequenceUses(scene);
     if(!sync(scene,error))return false;
     if(scene.player) {
         auto [it,inserted]=banks_.try_emplace(timeWarpBank);
         if(inserted) {
-            std::vector<uint8_t> data;
-            if(!read_(timeWarpBank,data) || !decodeGafAnimation(data,it->second.animation) ||
+            if(!decodeBank(timeWarpBank,it->second.animation) ||
                it->second.animation.sequences.empty() || it->second.animation.sequences[0].subframes.empty()) {
                 error="cannot decode Time Warp effect";return false;
             }
@@ -274,8 +283,7 @@ bool SceneRenderer::load(const SceneContent& scene,const ContentReader& read,std
         sprite=cls->sprite;orbitAltitudes_[group]=attachedFxAltitudeConfig(*cls);
         auto [it,inserted]=banks_.try_emplace(bankKey(sprite.path));
         if(inserted) {
-            std::vector<uint8_t> data;
-            if(!read_(sprite.path,data) || !decodeGafAnimation(data,it->second.animation)) {
+            if(!decodeBank(sprite.path,it->second.animation)) {
                 error="cannot decode orbit effect: "+sprite.path;return false;
             }
             it->second.textures.resize(it->second.animation.frames.size());
@@ -285,14 +293,15 @@ bool SceneRenderer::load(const SceneContent& scene,const ContentReader& read,std
 }
 void SceneRenderer::preloadClassSprites(const SceneContent& scene) {
     std::set<std::string> attempted;
-    for(const auto& cls:scene.classes)for(const auto* ref:{&cls.sprite,&cls.shadow}) {
+    const auto reachable=reachableSpriteClasses(scene);
+    for(size_t i=0;i<scene.classes.size();++i)if(reachable[i])for(const auto* ref:{&scene.classes[i].sprite,&scene.classes[i].shadow}) {
         if(!ref->sequence.value || ref->path.empty())continue;
         const auto key=bankKey(ref->path);
         if(banks_.contains(key)||!attempted.insert(key).second)continue;
-        Bank bank;std::vector<uint8_t> data;
+        Bank bank;
         // Unused catalog entries need not exist. Preserve lazy-load failure
         // behavior for them; never leave a failed/partial bank in the cache.
-        if(!read_(ref->path,data)||!decodeGafAnimation(data,bank.animation))continue;
+        if(!decodeBank(ref->path,bank.animation))continue;
         bank.textures.resize(bank.animation.frames.size());
         banks_.emplace(key,std::move(bank));
     }
@@ -300,6 +309,17 @@ void SceneRenderer::preloadClassSprites(const SceneContent& scene) {
 bool SceneRenderer::loadTerrain(const NativeTileBodyCatalog& catalog,std::string& error,NativeRandomState presentationRandom) {
     if(!terrain_.empty() || !terrainCells_.empty()){error="terrain renderer must be cleared before reload";return false;}
     if(catalog.cells.size()!=size_t(catalog.width)*catalog.height){error="invalid terrain render grid";return false;}
+    // Terrain may share a bank with actors. Union every source before decoding;
+    // an already loaded partial bank is expanded only here, during level load.
+    std::set<std::string> expanded;
+    for(const auto& source:catalog.sources)if(!source.resolvedResource.empty() && source.sequence) {
+        const auto key=bankKey(source.resolvedResource);
+        auto& use=sequenceUses_[key];
+        if(use.sequences.insert(source.sequence).second && !use.all && banks_.contains(key))expanded.insert(key);
+    }
+    for(const auto& key:expanded)if(!decodeBank(key,banks_.at(key).animation)) {
+        error="cannot expand shared terrain bank: "+key;return false;
+    }
     std::vector<TerrainChannel> channels;
     std::vector<std::array<size_t,4>> cells(catalog.cells.size());
     for(auto& cell:cells)cell.fill(SIZE_MAX);
@@ -310,8 +330,7 @@ bool SceneRenderer::loadTerrain(const NativeTileBodyCatalog& catalog,std::string
     for(const auto& source:catalog.sources)if(source.kind==1 && (source.flags&1)) {
         auto [it,inserted]=banks_.try_emplace(bankKey(source.resolvedResource));
         if(inserted) {
-            std::vector<uint8_t> data;
-            if(!read_ || !read_(source.resolvedResource,data) || !decodeGafAnimation(data,it->second.animation)) {
+            if(!decodeBank(source.resolvedResource,it->second.animation)) {
                 error="cannot decode terrain animation: "+source.resolvedResource;return false;
             }
             it->second.textures.resize(it->second.animation.frames.size());
@@ -327,8 +346,7 @@ bool SceneRenderer::loadTerrain(const NativeTileBodyCatalog& catalog,std::string
         auto [it,inserted]=banks_.try_emplace(bankKey(source.resolvedResource));
         auto& bank=it->second;
         if(inserted) {
-            std::vector<uint8_t> data;
-            if(!read_ || !read_(source.resolvedResource,data) || !decodeGafAnimation(data,bank.animation)) {
+            if(!decodeBank(source.resolvedResource,bank.animation)) {
                 error="cannot decode terrain animation: "+source.resolvedResource;return false;
             }
             bank.textures.resize(bank.animation.frames.size());
@@ -397,8 +415,8 @@ bool SceneRenderer::sync(const SceneContent& scene,std::string& error) {
             for(const auto& sprite:{config.sprite,config.trailSprite}) {
                 if(sprite.path.empty())continue;
                 auto [it,inserted]=banks_.try_emplace(bankKey(sprite.path));
-                if(inserted){std::vector<uint8_t> data;
-                    if(!read_(sprite.path,data)||!decodeGafAnimation(data,it->second.animation)){error="cannot decode enemy orbit: "+sprite.path;return false;}
+                if(inserted){
+                    if(!decodeBank(sprite.path,it->second.animation)){error="cannot decode enemy orbit: "+sprite.path;return false;}
                     it->second.textures.resize(it->second.animation.frames.size());}
             }
             enemyOrbits_.push_back({i,std::move(config),{}});
@@ -409,8 +427,7 @@ bool SceneRenderer::sync(const SceneContent& scene,std::string& error) {
             auto [it,inserted]=banks_.try_emplace(bankKey(reference.path));
             auto& bank=it->second;
             if (inserted) {
-                std::vector<uint8_t> data;
-                if (!read_(reference.path,data) || !decodeGafAnimation(data,bank.animation)) {
+                if (!decodeBank(reference.path,bank.animation)) {
                     error="cannot decode placed sprite: "+reference.path; return false;
                 }
                 bank.textures.resize(bank.animation.frames.size());
@@ -500,7 +517,9 @@ bool SceneRenderer::sync(const SceneContent& scene,std::string& error) {
         fire.derivedInvisible=object.flags.invisible.value_or(false);
         enemyFire_.push_back(std::move(fire));
     }
-    for(auto& channel:channels_)if(channel.helicopter)channel.flightPosition=scene.objects[channel.object].position;
+    refreshChannelScan(previousChannels);
+    for(size_t i=0;i<channelScan_.size();++i)if(channelScan_[i].helicopter)
+        channels_[i].flightPosition=scene.objects[channelScan_[i].object].position;
     for(auto& orbit:enemyOrbits_) {
         const auto& object=scene.objects[orbit.object];orbit.parent=object.position;
         orbit.altitude=propertyNumber(object.properties,"Altitude");
@@ -521,33 +540,74 @@ bool SceneRenderer::sync(const SceneContent& scene,std::string& error) {
     for (auto opcode:unsupported) std::fprintf(stderr,"render diagnostic: opcode %u uses color-key fallback; native blend unresolved\n",opcode);
     return true;
 }
+void SceneRenderer::releaseTextures(Gfx& gfx) {
+    textureResidency_.clear();
+    for(auto& [path,bank]:banks_)for(auto& texture:bank.textures){gfx.deleteTexture(texture);texture=0;}
+}
 void SceneRenderer::clear(Gfx& gfx) {
+    sequenceUses_.clear();
+    releaseTextures(gfx);
+    channelScan_.clear();workingChannels_.clear();
     playerTurn_={};playerObject_.reset();
     terrain_.clear();terrainCells_.clear();terrainWidth_=terrainHeight_=0;
     terrainClockMs_=0;
-    for (auto& [path,bank]:banks_) for (auto texture:bank.textures) gfx.deleteTexture(texture);
     audioCues_.clear();queuedAudioStarts_=0;enemyObjectChannels_.clear();channels_.clear();enemyFire_.clear();resetEnemyFire_=false; banks_.clear(); objectCount_=0;read_={};enemyOrbits_.clear();orbitTimeMs_=0;
 }
 void SceneRenderer::rebuildEnemyObjectChannels() {
+    refreshChannelScan();
     enemyObjectChannels_.resize(objectCount_);
     for(auto& indices:enemyObjectChannels_)indices.clear();
     for(size_t index=0;index<channels_.size();++index)if(channels_[index].nativeEnemy&&channels_[index].object<objectCount_)
         enemyObjectChannels_[channels_[index].object].push_back(index);
+}
+void SceneRenderer::refreshChannelScan(size_t first) {
+    if(first>channelScan_.size())first=channelScan_.size();
+    channelScan_.resize(first);
+    for(size_t i=first;i<channels_.size();++i) {
+        const auto& c=channels_[i];
+        channelScan_.push_back({c.object,c.visualRevision,
+            !c.walker&&!c.spider&&!c.generatorBank&&!c.derivedInvisible&&
+            !c.nativeEnemy&&!c.helicopter&&!c.lift&&!c.firing,c.helicopter});
+    }
+    workingChannels_.resize(channels_.size());
+    for(size_t i=0;i<channels_.size();++i)workingChannels_[i]=i;
 }
 void SceneRenderer::syncActors(const std::vector<ActorState>& actors) {
     if(resetEnemyFire_) {
         for(auto& c:enemyFire_)if(c.object<actors.size())c.fireRevision=actors[c.object].fireRevision;
         resetEnemyFire_=false;
     }
-    for(auto& c:channels_) {
+    workingChannels_.clear();
+    for(size_t i=0;i<channelScan_.size();++i) {
+        auto& scan=channelScan_[i];
+        if(scan.object<actors.size()) {
+            const auto& actor=actors[scan.object];
+            if(scan.passive&&!actor.alive&&!actor.gate&&!actor.lift&&scan.visualRevision==actor.visualRevision) {
+                if(!scan.inactive)channels_[i].pendingAudio.clear();
+                scan.inactive=true;
+                continue;
+            }
+        }
+        scan.inactive=false;
+        workingChannels_.push_back(i);
+        auto& c=channels_[i];
         if(c.firing||c.object>=actors.size())continue;
         const auto& actor=actors[c.object];
         if(nativeEnemyPhases_&&c.nativeEnemy)continue;
         syncActorChannel(c,actor);
+        scan.visualRevision=c.visualRevision;
     }
+    std::stable_sort(workingChannels_.begin(),workingChannels_.end(),[&](size_t a,size_t b){
+        const auto x=channels_[a].object,y=channels_[b].object;
+        return (x<actors.size()?actorRecordOrder(actors[x],x):x)<
+               (y<actors.size()?actorRecordOrder(actors[y],y):y);
+    });
 }
 void SceneRenderer::syncActorChannel(Channel& c,const ActorState& actor) {
         if(c.visualRevision!=actor.visualRevision) {
+            // App advances existing channels before binding newly appended
+            // objects. A reused record must receive that same newborn phase.
+            if(actor.reusedRecord)c.skipNewbornAdvance=true;
             c.visualRevision=actor.visualRevision;c.pendingAudio.clear();c.enemyLean=0;
             forgetAudio(c);c.cursor.reset(c.bank->animation.sequences[c.sequence-1],[&](const auto& frame){if(c.pendingAudio.size()<256)c.pendingAudio.push_back(frame);});
         }
@@ -658,7 +718,8 @@ void SceneRenderer::advanceEnemyPhase(double milliseconds,const std::vector<Acto
     if(!std::isfinite(milliseconds)||milliseconds<0)return;
     nativeEnemyPhases_=true;
     if(phase==EnemyAnimationPhase::VisibleUpdate)advanceTerrain(milliseconds,view);
-    if(phase==EnemyAnimationPhase::Draw)for(auto& c:channels_)if(c.nativeEnemy)c.enemyDrawAdmitted=false;
+    if(phase==EnemyAnimationPhase::Draw)for(const auto& indices:enemyObjectChannels_)
+        for(const auto i:indices)channels_[i].enemyDrawAdmitted=false;
     const auto admitted=[&](size_t id,bool groundPass) {
         if(id>=actors.size()||id>=enemyObjectChannels_.size()||enemyObjectChannels_[id].empty()||!actors[id].alive)return;
         auto& c=channels_[enemyObjectChannels_[id].front()];
@@ -734,7 +795,10 @@ void SceneRenderer::advance(double milliseconds,const std::vector<ActorState>* a
             (!orbit.config.onlyWhenVisible || actor.enemyRevealed || orbit.visibility>=1);
         orbit.state.advance(orbit.config,milliseconds,orbitTimeMs_,orbit.parent,orbit.altitude,!actor.enemyRevealed,orbit.visibility);
     }
-    for (auto& channel:channels_) {
+    if(!actors)refreshChannelScan();
+    for (const auto channelIndex:workingChannels_) {
+        auto& channel=channels_[channelIndex];
+        if(channel.skipNewbornAdvance){channel.skipNewbornAdvance=false;continue;}
         if(playerOnly && (!playerObject_ || channel.object!=*playerObject_))continue;
         if(channel.firing)continue;
         if(nativeEnemyPhases_&&channel.nativeEnemy)continue;
@@ -794,22 +858,33 @@ void SceneRenderer::advance(double milliseconds,const std::vector<ActorState>* a
 }
 std::vector<std::pair<size_t,uint64_t>> SceneRenderer::finishedGates(const std::vector<ActorState>& actors) const {
     std::vector<std::pair<size_t,uint64_t>> result;
-    for(const auto& c:channels_)if(!c.shadow&&c.object<actors.size()&&(actors[c.object].gate||actors[c.object].lift)&&
+    for(size_t i=0;i<channelScan_.size();++i) {
+        const auto object=channelScan_[i].object;
+        if(object>=actors.size()||(!actors[object].gate&&!actors[object].lift))continue;
+        const auto& c=channels_[i];
+        if(!c.shadow&&
         c.gateRevision==actors[c.object].gateRevision&&c.cursor.atLast(c.bank->animation.sequences[c.sequence-1]))
         result.emplace_back(c.object,c.gateRevision);
+    }
     return result;
 }
 std::vector<size_t> SceneRenderer::finishedEffects(const std::vector<ActorState>& actors) const {
     std::vector<size_t> result;
-    for (const auto& channel:channels_) if (!channel.shadow && channel.object<actors.size() &&
-        actors[channel.object].effect && actors[channel.object].alive &&
+    for(size_t i=0;i<channelScan_.size();++i) {
+        const auto object=channelScan_[i].object;
+        if(object>=actors.size()||!actors[object].alive||!actors[object].effect)continue;
+        const auto& channel=channels_[i];
+        if (!channel.shadow &&
         !channel.cursor.frame(channel.bank->animation.sequences[channel.sequence-1])) result.push_back(channel.object);
+    }
+    std::stable_sort(result.begin(),result.end(),[&](size_t a,size_t b){return actorRecordOrder(actors[a],a)<actorRecordOrder(actors[b],b);});
     return result;
 }
 void SceneRenderer::draw(Gfx& gfx,const SceneContent& scene,const Level& level,float cameraX,float cameraY,
                          float playerX,float playerY,int direction,int forcedBitmap,
                          const std::function<void(const ForegroundTile&)>& drawTile,
                          const std::vector<ActorState>* actors,const std::vector<ContentPosition>* previous,float alpha,const SurpriseState* surprise,bool playerOnly) {
+    textureResidency_.beginDraw();
     if(!playerOnly)playerBodyCenter_.reset();
     // Draw calls never advance player turn state (including the Darkness second pass).
     // A direct debug heading/restore before the next tick uses its exact node.
@@ -855,7 +930,8 @@ void SceneRenderer::draw(Gfx& gfx,const SceneContent& scene,const Level& level,f
     // add persisted channels: older checkpoints retain their channel identity.
     struct Submission { Channel* channel; uint32_t overlay=0; float dx=0,dy=0; bool tripleBody=false; };
     std::vector<Submission> ordered;
-    for(auto& channel:channels_)if(!channel.firing) {
+    if(!actors)refreshChannelScan();
+    for(const auto index:workingChannels_)if(auto& channel=channels_[index];!channel.firing) {
         const bool body=scene.player && channel.object==scene.player->value && !channel.shadow;
         if(body)ordered.push_back({&channel,3});
         // 417b30/431ae0: the Turret's static ground base is sequence25
@@ -887,7 +963,7 @@ void SceneRenderer::draw(Gfx& gfx,const SceneContent& scene,const Level& level,f
         if(body!=ordered.end() && pose>=20 && pose<=41)ordered.insert(body,{&channel});
         else if(body!=ordered.end())ordered.insert(body+1,{&channel});
     };
-    for(auto& channel:channels_)if(channel.firing)insertFire(channel);
+    for(const auto index:workingChannels_)if(auto& channel=channels_[index];channel.firing)insertFire(channel);
     for(auto& channel:enemyFire_)insertFire(channel);
     if(surprise && scene.player) {
         const auto originals=ordered;
@@ -1048,15 +1124,15 @@ void SceneRenderer::draw(Gfx& gfx,const SceneContent& scene,const Level& level,f
         }
         if (player && sequence->subframes.size()>=48)
             pose=&sequence->subframes[playerPose];
-        const auto position=previous && channel.object<previous->size() && !(actor && actor->pooledTrail && actor->ageMs==0)
+        const auto position=previous && channel.object<previous->size() && !(actor && (actor->pooledTrail || actor->reusedRecord) && actor->ageMs==0)
             ?presentationPosition((*previous)[channel.object],object.position,alpha):object.position;
         const float groundX=(player?playerX:position.x)+submission.dx;
         const float groundY=(player?playerY:position.y)+submission.dy;
         float altitude=0;
-        if (!channel.shadow) if (const auto* property=contentProperty(object.properties,"Altitude"); property && !property->values.empty())
-            altitude=std::strtof(property->values.front().c_str(),nullptr);
         if (!channel.shadow && actor && actor->projectileAltitude)
             altitude=*actor->projectileAltitude;
+        else if (!channel.shadow) if (const auto* property=contentProperty(object.properties,"Altitude"); property && !property->values.empty())
+            altitude=std::strtof(property->values.front().c_str(),nullptr);
         if(overlay==8 || overlay==9)altitude=0; // Turret base / Tank hull stay on ground.
         // 431ae0 case19 lifts Walker artwork32px, preserving its ground depth.
         if(channel.walker)altitude+=32;
@@ -1070,7 +1146,7 @@ void SceneRenderer::draw(Gfx& gfx,const SceneContent& scene,const Level& level,f
         // 43333b: generator auxiliary layer sorts 0x168 units after the
         // adjusted base key (90 surface rows), so births do not cover its light.
         if(overlay==6){sortY+=90;subtype=0;}
-        auto appendPose=[&](const GafSubframe* layer,bool overrideBitmap,float trailX=0,float trailY=0) {
+        auto appendPose=[&](const GafSubframe* layer,bool overrideBitmap,float trailX=0,float trailY=0,bool deltaBase=false) {
             if (!layer) return;
             uint32_t frame=layer->frameIndex;
             if (overrideBitmap && player && !channel.shadow && !channel.firing && !overlay && forcedBitmap>=0 &&
@@ -1111,14 +1187,18 @@ void SceneRenderer::draw(Gfx& gfx,const SceneContent& scene,const Level& level,f
             if(left+bitmap.image.width<=cameraX || left>=cameraX+gfx.viewport().width ||
                top+bitmap.image.height<=cameraY || top>=cameraY+gfx.viewport().height ||
                bitmap.image.width<=0 || bitmap.image.height<=0)return;
+            // The base image has its own bounds and can remain visible when
+            // the current delta frame is blank/offscreen. Test those bounds
+            // before scanning the authored flag, without suppressing the base.
+            if(deltaBase && !propertyBool(object.properties,"Use-delta-packing"))return;
             bounds.push_back({static_cast<int>(sortY)*4+subtype,left,top,left+bitmap.image.width,top+bitmap.image.height});
             sprites.push_back({drawBank,frame,opacity<1?((layer->flags&~0xffU)|3U):(overlay==3 || overlay==4)?((layer->flags&~0xffU)|7U):(red>0 || green>0)?((layer->flags&~0xffU)|1U):layer->flags,intensity,red,opacity,green});
         };
         // Native 433710 draws subframe1 before the current delta-packed body.
         // The base remains visible even during a timed blank current frame.
         const auto submit=[&](float dx,float dy) {
-            if (!channel.shadow && !channel.firing && !overlay && propertyBool(object.properties,"Use-delta-packing") &&
-                !sequence->subframes.empty()) appendPose(&sequence->subframes.front(),false,dx,dy);
+            if (!channel.shadow && !channel.firing && !overlay &&
+                !sequence->subframes.empty()) appendPose(&sequence->subframes.front(),false,dx,dy,true);
             appendPose(pose,true,dx,dy);
         };
         if(actor && actor->trailSegment && !channel.shadow && !channel.firing && !overlay) {
@@ -1206,7 +1286,7 @@ void SceneRenderer::draw(Gfx& gfx,const SceneContent& scene,const Level& level,f
         const auto& box=bounds[command.sprite];
         auto& texture=sprite.bank->textures[sprite.frame];
         const auto& bitmap=sprite.bank->animation.frames[sprite.frame];
-        if (!texture) texture=gfx.uploadTexture(bitmap.image.rgba.data(),bitmap.image.width,bitmap.image.height,true);
+        if (!texture) texture=gfx.uploadTexture(bitmap.image,true);
         const auto opcode=sprite.flags&0xff;
         const bool shadow=opcode==8 || opcode==9;
         const bool additive=opcode==6 || opcode==7;
@@ -1233,7 +1313,7 @@ void SceneRenderer::draw(Gfx& gfx,const SceneContent& scene,const Level& level,f
         }
         // Alpha-composited world sprites. Additive lights and multiplicative
         // shadows retain their authored operation and unmodified RGB data.
-        gfx.beginQuads(texture,opcode==1 || opcode==3 || opcode==5);
+        gfx.beginQuads(texture,opcode==1 || opcode==3 || opcode==5,&bitmap.image);
         if(sprite.timeWarp) {
             const auto& p=timeWarpCorners;
             gfx.quad(p[0].x-cameraX,p[0].y-cameraY,u,v,p[1].x-cameraX,p[1].y-cameraY,1-u,v,
@@ -1241,10 +1321,15 @@ void SceneRenderer::draw(Gfx& gfx,const SceneContent& scene,const Level& level,f
         } else gfx.quad(box.left-cameraX,box.top-cameraY,u,v,box.right-cameraX,box.top-cameraY,1-u,v,
                        box.right-cameraX,box.bottom-cameraY,1-u,1-v,box.left-cameraX,box.bottom-cameraY,u,1-v);
         gfx.endQuads();
+        // Filtering may allocate or upgrade a copy during beginQuads. Count
+        // its actual uploaded payload, including copies retained after toggles.
+        // The separate count limit still bounds per-texture driver overhead.
+        textureResidency_.touch(texture,gfx.spriteTextureBytes(texture));
         glTexEnvi(GL_TEXTURE_ENV,GL_TEXTURE_ENV_MODE,GL_MODULATE);
         glColor4f(1,1,1,1);
         glDisable(GL_ALPHA_TEST);
         glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
     }
+    textureResidency_.trim(32u*1024*1024,1024,[&](auto texture){gfx.deleteTexture(texture);});
 }
 }

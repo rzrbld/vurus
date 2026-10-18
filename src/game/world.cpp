@@ -450,7 +450,7 @@ bool GameWorld::load(SceneContent& scene,const Level& level,std::string& error,i
     diagnosedActorCreates_.clear();actorCreateDepth_=0;
     shotsFired=pickupsTaken=actorsDestroyed=0;audioEvents_.clear();audioInput_.reset();audioMotorAttempt_=false;playerMoveCommanded_=false;notifications_.clear();
     contactMines_.clear();ammoContactVictims_.clear();
-    const size_t placed=scene.objects.size();
+    const size_t placed=scene.objects.size();nextRecordOrder_=placed;
     reserveRuntimeStorage(actors_);reserveRuntimeStorage(scene.objects);
     reserveRuntimeStorage(actorBounds_);reserveRuntimeStorage(actorBoundGroup_);reserveRuntimeStorage(actorBoundOrder_);
     reserveRuntimeStorage(actorBoundGroups_,(RuntimeActorLimit+15)/16);
@@ -480,7 +480,7 @@ bool GameWorld::load(SceneContent& scene,const Level& level,std::string& error,i
     nativePlayerFacing_=initializeNativePlayerFacing(motion_.direction,std::max(1,int(playerMotionConfig_.turnSeconds*1000)));
     nativePlayerPreviousSurface_=scene.objects[player_].position;
     initializeGates();
-    navigationCursor_=0;freeTrailSlots_.clear();
+    navigationCursor_=0;freeTrailSlots_.clear();freeTransientRecords_.clear();
     fastKillMs_=0;fastKillCount_=0;
     endingSource_.reset();endingRemainingMs_=0;
     // 43c700 counts all linked hostile actors, including temporarily inactive ones.
@@ -774,7 +774,7 @@ TerrainDisplacement GameWorld::move(size_t actor,float dx,float dy,bool physical
                 spiderCircleContact({step.x,step.y},radius,{target.x,target.y},actors_[i].radius);
             if(!point)return;
             if(i==player_ && surprise_.active(SurpriseKind::Touch) && !actors_[actor].indestructible) {
-                actors_[actor].vitals.energy=0;actors_[actor].solid=false;touchVictims_.push_back(actor);
+                actors_[actor].vitals.energy=0;touchVictims_.push_back(actor);
             }
             // 4449f0 restores the source before 436a50 tests the contact point.
             // 4105d0/41b770 chooses the contact closest to proposed center;
@@ -793,11 +793,13 @@ TerrainDisplacement GameWorld::move(size_t actor,float dx,float dy,bool physical
             if(travel.x*normal.x+travel.y*normal.y<0)return;
         }
         const auto hit=sweptCircleContact(p.x,p.y,p.x+delta.x,p.y+delta.y,q.x,q.y,radius+actors_[i].radius);
+        //442825 zeros Energy only. Let destroy() decide final removal;
+        //a Two-pieces top death retains a solid, damageable lower body.
         if(hit && actor==player_ && surprise_.active(SurpriseKind::Touch) && !actors_[i].indestructible) {
-            actors_[i].vitals.energy=0;actors_[i].solid=false;touchVictims_.push_back(i);return;
+            actors_[i].vitals.energy=0;touchVictims_.push_back(i);return;
         }
         if(hit && i==player_ && surprise_.active(SurpriseKind::Touch) && !actors_[actor].indestructible) {
-            actors_[actor].vitals.energy=0;actors_[actor].solid=false;touchVictims_.push_back(actor);
+            actors_[actor].vitals.energy=0;touchVictims_.push_back(actor);
         }
         if(hit && (*hit<t || (*hit==t && (!contact || i<*contact)))){t=*hit;contact=i;nativeContactPoint.reset();}
     };
@@ -1100,15 +1102,73 @@ TerrainDisplacement GameWorld::move(size_t actor,float dx,float dy,bool physical
     return delta;
 }
 void GameWorld::movePlayer(float dx,float dy) { if (player().alive) { move(player_,dx,dy);resolveAmmoContacts();for(const auto id:touchVictims_)destroy(id,player_);touchVictims_.clear();collect();updateLifts(); } }
+// Recycle only runtime transient bodies after native release. Keep the class
+// unchanged so renderer channels and retained audio-bank bindings remain valid.
+// Build once at the tick boundary, never while factory/manager callbacks hold
+// references. Native pool allocation and manager insertion order are unchanged.
+void GameWorld::collectReleasedTransientRecords() {
+    freeTransientRecords_.clear();
+    if(actors_.size()<1024)return;
+    std::vector<bool> pinned(actors_.size());
+    auto pin=[&](size_t id){if(id<pinned.size())pinned[id]=true;};
+    auto optional=[&](std::optional<size_t> id){if(id)pin(*id);};
+    pin(player_);optional(endingSource_);optional(savePlot_);
+    if(transition_)pin(transition_->lift);
+    if(saveRequest_)pin(saveRequest_->plot);
+    for(auto id:rejectedLifts_)pin(id);
+    for(auto id:touchVictims_)pin(id);
+    for(const auto& e:audioEvents_)pin(e.actor);
+    for(const auto& e:damageQueue_){pin(e.target);optional(e.source);}
+    for(const auto& e:contactDamage_){pin(e.target);optional(e.source);}
+    for(const auto& shot:projectiles_){pin(shot.owner);optional(shot.visual);optional(shot.guidanceTarget);}
+    for(const auto& held:heldItems_){pin(held.holder);pin(held.object.id.value);}
+    for(size_t i=0;i<actors_.size();++i){
+        const auto& a=actors_[i];
+        if(!a.alive && a.reactivateMs<0 && !a.nativeHeldOriginal)continue;
+        if(scene_->objects[i].owner)pin(scene_->objects[i].owner->value);
+        optional(a.generatorParent);if(a.explosion)optional(a.explosion->creator);
+        if(a.spiderAI)for(const auto* route:{&a.spiderAI->patrolRoute,&a.spiderAI->seekerRoute}){
+            optional(route->target);if(route->saved)optional(route->saved->target);
+        }
+        if(a.ordinaryAI)for(const auto* route:{&a.ordinaryAI->targeting,&a.ordinaryAI->base}){
+            optional(route->target);for(const auto& saved:route->saved)optional(saved.target);
+        }
+    }
+    // Descending insertion makes pop_back reuse the lowest eligible slot.
+    for(size_t i=actors_.size();i-->0;){
+        const auto& a=actors_[i];const auto& o=scene_->objects[i];
+        if(pinned[i]||a.alive||a.nativeGeneration||a.nativePoolSlot!=SIZE_MAX||
+           a.reactivateMs>=0||a.nativeHeldOriginal||a.pooledTrail||a.enemy||a.pickup||a.lift||a.gate||
+           !a.generators.empty()||a.generatorParent||!o.authored.key.empty()||
+           (!a.effect && !attribute(o.properties,"ammo")))continue;
+        if(i<actorCells_.cell.size()&&actorCells_.cell[i]!=NativeActorCells::Missing)continue;
+        freeTransientRecords_[o.classId.value].push_back(i);
+    }
+}
 size_t GameWorld::spawn(ClassId id,ContentPosition position) {
-    if (scene_->objects.size()>=RuntimeActorLimit || id.value>=scene_->classes.size()) return std::numeric_limits<size_t>::max();
+    if(id.value>=scene_->classes.size())return SIZE_MAX;
+    auto& available=freeTransientRecords_[id.value];
+    while(!available.empty() && actors_[available.back()].alive)available.pop_back();
+    const bool reused=!available.empty();
+    if(!reused && scene_->objects.size()>=RuntimeActorLimit)return SIZE_MAX;
+    const size_t created=reused?available.back():scene_->objects.size();
+    if(reused){
+        available.pop_back();freeTrailSlots_[id.value].erase(created);
+        std::erase(contactMines_,created);std::erase(attachedProtectionActors_,created);
+        // A recycled index can precede the tick's indexed prefix. Include it
+        // in the newborn fallback until the next bounds rebuild.
+        actorBoundsIndexedCount_=std::min(actorBoundsIndexedCount_,created);
+    }
+    const uint64_t revision=((nextRecordOrder_++ + 1)<<32) |
+        (reused?((actors_[created].visualRevision+1)&0xffffffffu):0);
     const auto& cls=scene_->classes[id.value];
     ObjectPlacement object;
-    object.id={static_cast<uint32_t>(scene_->objects.size())};object.classId=id;object.position=position;
+    object.id={static_cast<uint32_t>(created)};object.classId=id;object.position=position;
     object.flags=cls.flags;object.sprite=cls.sprite;object.shadow=cls.shadow;
     object.behaviours=cls.behaviours;object.properties=cls.properties;
-    const size_t created=object.id.value;
-    scene_->objects.push_back(std::move(object));actors_.push_back(makeActor(scene_->objects.back()));
+    if(reused){scene_->objects[created]=std::move(object);actors_[created]=makeActor(scene_->objects[created]);}
+    else {scene_->objects.push_back(std::move(object));actors_.push_back(makeActor(scene_->objects.back()));}
+    actors_[created].visualRevision=revision;actors_[created].reusedRecord=reused;
     initializeNativeIdentity(created);
     registerSavingPrice(created);
     if(actors_[created].contactMine)contactMines_.push_back(created);
@@ -1184,7 +1244,7 @@ void GameWorld::destroy(size_t id,std::optional<size_t> source) {
         actor.route.clear();actor.routePoint=0;actor.routeGoal.reset();actor.routeSearch.reset();
         // The existing saved object properties carry this runtime native bit.
         // This derived bit needs no additional portable actor field.
-        auto& properties=scene_->objects[id].properties;
+        auto& properties=scene_->objects[id].properties.write();
         std::erase_if(properties,[](const auto& n){return contentNameIs(n.key,"only-base");});
         TextNode base;base.kind=TextKind::Assignment;base.key="Only-base";base.values={"1"};
         properties.push_back(std::move(base));
@@ -2182,6 +2242,7 @@ bool GameWorld::advanceActorAI(size_t i,float seconds) {
 void GameWorld::tick(float seconds,const WorldInput& suppliedInput) {
     audioInput_.reset();audioMotorAttempt_=false;playerMoveCommanded_=false;
     if (!(seconds>0) || !std::isfinite(seconds) || seconds>0.1f || !scene_) return;
+    collectReleasedTransientRecords();
     currentTickMilliseconds_=seconds*1000.f;
     const WorldInput input=endingSource_?WorldInput{}:suppliedInput;
     audioMotorAttempt_=input.movement.forward>0;
@@ -2206,6 +2267,13 @@ void GameWorld::tick(float seconds,const WorldInput& suppliedInput) {
     actorBounds_.resize(actors_.size());actorBoundsIndexedCount_=actors_.size();
     for(size_t i=0;i<actors_.size();++i) {
         actors_[i].nativeAmmoAbort=false;
+        // Stable dead identities stay in saves, but a fully unlinked body has
+        // no spatial state left to refresh. Retain the cleanup path until both
+        // indexes confirm removal, and keep held/reactivating bodies eligible.
+        if(!actors_[i].alive && actors_[i].reactivateMs<0 && !actors_[i].nativeHeldOriginal &&
+           i<actorCells_.cell.size() && actorCells_.cell[i]==NativeActorCells::Missing &&
+           (!spiderNavigation_ || (i<spiderNavigationActors_.size() &&
+             spiderNavigationActors_[i]==std::numeric_limits<size_t>::max())))continue;
         updateActorBounds(i);
 
     }

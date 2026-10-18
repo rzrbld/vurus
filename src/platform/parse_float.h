@@ -14,7 +14,7 @@
 
 namespace vyruz::platform {
 #if defined(__APPLE__) || defined(__linux__)
-// Apple libc++ lacks floating from_chars. Use an explicit C locale without
+// Older libc++ lacks floating from_chars. Use an explicit C locale without
 // changing process locale; retain strict full-token decimal parsing.
 inline bool parseFiniteFloatClassic(std::string_view text,float& out) {
     if(text.empty() || text.front()=='+' ||
@@ -39,7 +39,7 @@ inline bool parseFiniteFloatClassic(std::string_view text,float& out) {
 }
 #endif
 inline bool parseFiniteFloat(std::string_view text,float& out) {
-#ifdef __APPLE__
+#if defined(__APPLE__) || (defined(__linux__) && defined(_LIBCPP_VERSION) && _LIBCPP_VERSION < 200000)
     return parseFiniteFloatClassic(text,out);
 #else
     float value{};

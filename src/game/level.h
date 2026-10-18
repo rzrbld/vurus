@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include "assets/tga.h"
+#include "assets/gaf_bitmap.h"
 
 namespace vyruz {
 
@@ -45,7 +45,7 @@ struct Level {
     // column. Zero denotes a synthetic/no-terrain-header fixture.
     int surfaceWidth = 0, surfaceHeight = 0;
     int layerCount = 6;
-    std::vector<Image> tiles;                       // tile 0 is real; map index 0 is empty
+    std::vector<GafBitmap> tiles;                       // tile 0 is real; map index 0 is empty
     std::vector<uint32_t> blockFlags;               // foreground row phase; UINT32_MAX = no redraw
     std::vector<uint32_t> tileDrawFlags;            // native bitmap draw flags, separate from row phase
     std::vector<std::vector<uint32_t>> layers;      // [layer][mapW*mapH], 0 = empty

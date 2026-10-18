@@ -12,14 +12,10 @@ namespace vyruz {
 namespace {
 constexpr float MusicGain=.35f; // Existing accepted port bus gain.
 AudioClipPtr readMusic(const std::string& path,std::string& error) {
-    std::ifstream input(path,std::ios::binary|std::ios::ate);
-    if(!input){error="Music file unavailable: "+path;return {};}
-    const auto size=input.tellg();
-    if(size<=0||size>512LL*1024*1024){error="Music WAV exceeds supported size";return {};}
-    input.seekg(0);std::vector<uint8_t> bytes(static_cast<size_t>(size));
-    if(!input.read(reinterpret_cast<char*>(bytes.data()),size)){error="Cannot read music WAV: "+path;return {};}
-    Wave wave;if(!loadWav(bytes,wave)){error="Unsupported music WAV: "+path;return {};}
-    return makeAudioClip(std::move(wave),error);
+    auto stream=WavStream::open(path,error);if(!stream)return {};
+    auto clip=std::make_shared<AudioClip>();clip->frames=stream->frames();
+    clip->wave.sampleRate=stream->rate();clip->wave.channels=stream->channels();clip->wave.bitsPerSample=stream->bits();
+    clip->stream=std::move(stream);return clip;
 }
 }
 // One worker, at most one pending job and one completed clip. Replacing a job
@@ -88,8 +84,10 @@ void MusicPlayback::loadSampleFallback(AudioClipPtr clip){
 }
 bool MusicPlayback::musicFile(const std::string& path,std::string& error){
     auto clip=reader_(path,error);if(!clip)return false;
-    retire();device_.setMusicNativeChannel(false);source_=Source::Fixed;sample_=std::move(clip);paths_.clear();
-    started_=advanceOnRestart_=false;if(enabled())start();error.clear();return true;
+    retire();device_.setMusicNativeChannel(false);source_=Source::Fixed;sample_=std::move(clip);paths_={path};
+    started_=advanceOnRestart_=false;
+    if(enabled()){device_.playMusic(sample_,MusicGain,true);started_=true;serial_=device_.musicState().serial;applyOverlay();}
+    error.clear();return true;
 }
 bool MusicPlayback::musicDirectory(const std::string& directory,std::string& error,std::optional<size_t> firstTrackIndex){
     std::vector<std::string> paths;
@@ -121,6 +119,8 @@ void MusicPlayback::start(){
     if(source_==Source::Playlist){
         if(advanceOnRestart_)index_=(index_+1)%paths_.size();
         advanceOnRestart_=false;started_=false;request(index_,Request::Start);
+    } else if(source_==Source::Fixed && sample_ && sample_->stream){
+        started_=false;request(0,Request::Start);
     } else if(sample_){
         device_.playMusic(sample_,MusicGain,true);started_=true;
         serial_=device_.musicState().serial;applyOverlay();
@@ -166,11 +166,13 @@ void MusicPlayback::update(){
         return;
     }
     if(kind==Request::Start){
-        index_=requestedIndex_;device_.playMusic(std::move(result->clip),MusicGain,false);
+        index_=requestedIndex_;
+        if(source_==Source::Fixed)sample_=result->clip;
+        device_.playMusic(std::move(result->clip),MusicGain,source_==Source::Fixed);
         serial_=device_.musicState().serial;started_=true;applyOverlay();
-        request((index_+1)%paths_.size(),Request::Next);
+        if(source_==Source::Playlist)request((index_+1)%paths_.size(),Request::Next);
     } else device_.queueMusic(std::move(result->clip),MusicGain);
 }
 std::vector<std::string> MusicPlayback::takeDiagnostics(){auto result=std::move(diagnostics_);diagnostics_.clear();return result;}
-MusicPlayback::State MusicPlayback::state()const{return{enabled(),source_==Source::Fixed||source_==Source::Playlist,request_!=Request::None,index_,paths_.size()};}
+MusicPlayback::State MusicPlayback::state()const{return{enabled(),source_==Source::Fixed||source_==Source::Playlist,request_!=Request::None,index_,source_==Source::Playlist?paths_.size():0};}
 }

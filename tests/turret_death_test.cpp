@@ -5,6 +5,14 @@
 #include <iostream>
 #include <stdexcept>
 using namespace vyruz;
+namespace vyruz { struct AmmoImpactNativeTestAccess {
+ static void touch(GameWorld& w) {w.surprise_.kind=SurpriseKind::Touch;w.surprise_.remainingMs=8000;w.surprise_.applied=true;}
+ static void moveTouch(GameWorld& w,bool physical) {
+  w.move(w.player_,500,0,physical);
+  auto victims=std::move(w.touchVictims_);w.touchVictims_.clear();
+  for(auto id:victims)w.destroy(id,w.player_);
+ }
+}; }
 static void need(bool b,const char* why){if(!b)throw std::runtime_error(why);}
 static TextNode value(std::string key,std::string v){TextNode n;n.kind=TextKind::Assignment;n.key=key;n.values={v};return n;}
 static TextNode block(std::string key,std::vector<TextNode> ns,std::string type={}){TextNode n;n.kind=TextKind::Block;n.key=key;n.children=ns;if(!type.empty())n.arguments={type};return n;}
@@ -21,6 +29,30 @@ static SceneContent fixture(){
  s.objects[1].properties.push_back(value("Energy","5"));s.objects[1].properties.push_back(value("Shield","0"));return s;
 }
 int main(){try{
+ // Touch's player sweep must retain the lower piece's collision/damage body.
+ for(const char* family:{"Turret","Tank"}) for(bool physical:{false,true}) {
+  auto content=fixture();
+  for(auto* properties:{&content.classes[1].properties,&content.objects[1].properties})
+   properties->push_back(value("Sub-type",family));
+  Level arena;arena.mapW=arena.mapH=100;arena.hasTerrainCollision=true;
+  const auto authored=content;
+  GameWorld w;std::string error;need(w.load(content,arena,error),error.c_str());
+  AmmoImpactNativeTestAccess::touch(w);
+  AmmoImpactNativeTestAccess::moveTouch(w,physical);
+  need(w.actors()[1].alive&&w.actors()[1].turretOnlyBase,"Touch removes upper piece");
+  need(w.actors()[1].solid,"Touch must not make retained lower piece nonsolid");
+  w.cancelSurprise();
+  SaveGame saved;saved.currentLevel=content.mapPath;saved.levels[content.mapPath].world=w.snapshot();
+  std::vector<uint8_t> encoded;SaveGame disk;
+  need(encodeSave(saved,encoded,error)&&decodeSave(encoded,disk,error),error.c_str());
+  auto restoredContent=authored;GameWorld restored;need(restored.load(restoredContent,arena,error),error.c_str());
+  if(!restored.restoreSnapshot(disk.levels.at(content.mapPath).world,error))throw std::runtime_error(error);
+  for(auto* game:{&w,&restored}) {
+   need(game->actors()[1].solid,"base remains solid after Touch expiry/save");
+   game->damage(1,279,0);need(game->actors()[1].alive&&game->actors()[1].vitals.energy==1,"retained base damage budget");
+   game->damage(1,1,0);need(!game->actors()[1].alive&&!game->actors()[1].solid,"ordinary damage destroys Touch-surviving base");
+  }
+ }
  //437ec6: independently test Z-shadow versus In-ground in both deaths.
  for(unsigned flags=0;flags<4;++flags) {
   auto content=fixture();content.objects[1].properties.push_back(value("Altitude","24"));

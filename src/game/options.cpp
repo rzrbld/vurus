@@ -111,7 +111,7 @@ bool loadOptions(const std::string& path,GameOptions& options,std::string& error
         bool known=true,valid=true;
 #define FIELD(name,member) if(key==name)valid=number(value,candidate.member);else
         if(key=="version"){int version=0;valid=number(value,version)&&version==1;}
-        else FIELD("video.width",width) FIELD("video.height",height) FIELD("video.window_mode",windowMode) FIELD("video.gamma",gamma) FIELD("video.sprite_filtering",spriteFiltering) FIELD("video.vignette",vignette) FIELD("video.crt",crt) FIELD("video.crt_retro",crtRetro) FIELD("video.crt_bright",crtBright) FIELD("video.fxaa",fxaa) FIELD("video.smaa",smaa) FIELD("video.bloom",bloom) FIELD("video.sharpen",sharpen)
+        else FIELD("video.width",width) FIELD("video.height",height) FIELD("video.window_mode",windowMode) FIELD("video.gamma",gamma) FIELD("video.fps_counter",fpsCounter) FIELD("video.sprite_filtering",spriteFiltering) FIELD("video.vignette",vignette) FIELD("video.crt",crt) FIELD("video.crt_retro",crtRetro) FIELD("video.crt_bright",crtBright) FIELD("video.fxaa",fxaa) FIELD("video.smaa",smaa) FIELD("video.bloom",bloom) FIELD("video.sharpen",sharpen)
         FIELD("hud.language",hudLanguage)
         FIELD("video.hud_aspect",hudAspect)
         FIELD("video.shadows",shadows) FIELD("video.reactor_fx",reactorFx) FIELD("video.ground_details",groundDetails)
@@ -144,7 +144,7 @@ bool saveOptions(const std::string& path,const GameOptions& options,std::string&
     if(!validateOptions(options,error))return false;
     std::ostringstream text;text.imbue(std::locale::classic());text<<std::setprecision(9)<<"# Vyruz port preferences\nversion=1\n";
 #define FIELD(key,member) text<<key<<'='<<options.member<<'\n';
-    FIELD("video.width",width) FIELD("video.height",height) FIELD("video.window_mode",windowMode) FIELD("video.gamma",gamma) FIELD("video.sprite_filtering",spriteFiltering) FIELD("video.vignette",vignette) FIELD("video.crt",crt) FIELD("video.crt_retro",crtRetro) FIELD("video.crt_bright",crtBright) FIELD("video.fxaa",fxaa) FIELD("video.smaa",smaa) FIELD("video.bloom",bloom) FIELD("video.sharpen",sharpen)
+    FIELD("video.width",width) FIELD("video.height",height) FIELD("video.window_mode",windowMode) FIELD("video.gamma",gamma) FIELD("video.fps_counter",fpsCounter) FIELD("video.sprite_filtering",spriteFiltering) FIELD("video.vignette",vignette) FIELD("video.crt",crt) FIELD("video.crt_retro",crtRetro) FIELD("video.crt_bright",crtBright) FIELD("video.fxaa",fxaa) FIELD("video.smaa",smaa) FIELD("video.bloom",bloom) FIELD("video.sharpen",sharpen)
     FIELD("hud.language",hudLanguage)
         FIELD("video.hud_aspect",hudAspect)
     FIELD("video.shadows",shadows) FIELD("video.reactor_fx",reactorFx) FIELD("video.ground_details",groundDetails)

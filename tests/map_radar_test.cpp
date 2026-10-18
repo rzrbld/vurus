@@ -57,15 +57,15 @@ int main() {
     check(markers.lifts==std::vector<size_t>({3,4,0}) && markers.saves==std::vector<size_t>({1}),"native descendingY/X enrollment and subtype mask");
     cells.relocate(0,3);check(markers.lifts.back()==0,"membership stays cached between rebuilds");
     Level level;level.mapW=2;level.mapH=1;level.tileW=2;level.tileH=1;
-    level.tiles={{2,1,{100,0,0,255,110,0,0,255}},{2,1,{0,200,0,255,0,0,0,0}}};
+    level.tiles={{2,1,{12u<<10,13u<<10}},{2,1,{24u<<5,0x7c1f}}}; // representable RGB555 colors
     level.layers={{1,1},{2,0}};
     auto map=makeLevelMap(level,4,1);
-    check(map.rgba==std::vector<uint8_t>({0,208,0,255,110,8,0,255,100,8,0,255,110,8,0,255}),"all-layer map honors transparent patches and top-left cells");
+    check(map.rgba==std::vector<uint8_t>({0,205,0,255,106,8,0,255,98,8,0,255,106,8,0,255}),"all-layer map honors transparent patches and top-left cells");
     map=makeLevelMap(level,2,1);
-    check(map.rgba[1]==208&&map.rgba[4]==110,"overview samples both map cells");
+    check(map.rgba[1]==205&&map.rgba[4]==106,"overview samples both map cells");
     level.layers.clear();map=makeLevelMap(level,4,1);
     for(size_t p=3;p<map.rgba.size();p+=4)check(map.rgba[p]==0,"unpainted overview leaves live gameplay visible");
-    level.layers={{1,1}};level.tiles[0].rgba={0,0,0,255,0,0,0,255};map=makeLevelMap(level,4,1);
+    level.layers={{1,1}};level.tiles[0].rgb555={0,0};map=makeLevelMap(level,4,1);
     for(size_t p=3;p<map.rgba.size();p+=4)check(map.rgba[p]==0,"native black key is rejected before green tint");
     check(makeLevelMap(level,0,1).rgba.empty(),"invalid output size");
 }

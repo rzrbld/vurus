@@ -1,0 +1,108 @@
+name: PortMaster ARM64 — Alpha Preview
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    tags: ["portmaster-v*"]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "cmake/**"
+      - "CMakeLists.txt"
+      - "third_party/**"
+      - "LICENSE.md"
+      - "packaging/portmaster/**"
+      - "packaging/README.txt"
+      - "tools/build_portmaster.sh"
+      - "tools/package_portmaster.sh"
+      - ".github/workflows/build-portmaster.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "cmake/**"
+      - "CMakeLists.txt"
+      - "third_party/**"
+      - "LICENSE.md"
+      - "packaging/portmaster/**"
+      - "packaging/README.txt"
+      - "tools/build_portmaster.sh"
+      - "tools/package_portmaster.sh"
+      - ".github/workflows/build-portmaster.yml"
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build pinned PortMaster environment
+        run: |
+          mkdir -p work/portmaster-logs
+          git rev-parse HEAD > work/portmaster-logs/source-revision.txt
+          docker build --platform linux/arm64 -t vurus-portmaster-builder:local packaging/portmaster 2>&1 | tee work/portmaster-logs/builder.log
+      - name: Build, test and package ARM64 GLES
+        run: |
+          mkdir -p work/portmaster-build dist/portmaster
+          docker run --rm --platform linux/arm64 \
+            -e VURUS_BUILD_TESTS=ON -e VURUS_BUILD_JOBS=4 \
+            -v "$PWD:/source:ro" \
+            -v "$PWD/work/portmaster-build:/build" \
+            -v "$PWD/dist/portmaster:/dist" \
+            vurus-portmaster-builder:local sh /source/tools/build_portmaster.sh /build /dist \
+            2>&1 | tee work/portmaster-logs/build.log
+      - name: Verify package and record checksum
+        run: |
+          unzip -t dist/portmaster/vurus-portmaster.zip
+          (cd dist/portmaster && sha256sum vurus-portmaster.zip > SHA256SUMS.txt)
+      - name: Retain validated Alpha Preview package
+        uses: actions/upload-artifact@v4
+        with:
+          name: vurus-portmaster-aarch64-alpha-preview
+          path: |
+            dist/portmaster/vurus-portmaster.zip
+            dist/portmaster/SHA256SUMS.txt
+            work/portmaster-logs/source-revision.txt
+          if-no-files-found: error
+          retention-days: 7
+      - name: Retain build and test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: portmaster-build-logs
+          path: |
+            work/portmaster-logs/
+            work/portmaster-build/Testing/Temporary/LastTest.log
+            work/portmaster-build/licenses-smoke.txt
+          if-no-files-found: warn
+          retention-days: 7
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/portmaster-v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: vurus-portmaster-aarch64-alpha-preview
+          path: release-assets
+      - name: Verify and create independent draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          (cd release-assets && sha256sum --check SHA256SUMS.txt)
+          cat > release-notes.txt <<'NOTES'
+          PortMaster Alpha Preview — ARM64 / OpenGL ES 3.0, optimized Release build. Original game data is required and is not included.
+
+          User-tested on Anbernic RG40XX H with muOS: roughly 30–40 FPS with FX and terrain effects disabled, dipping into the low 20s in heavy battles. These are user observations, not guarantees. Long-session and repeated-transition validation continues. Use the normal firmware Ports launcher. Advanced video → FPS counter toggles FPS and RSS memory display. Existing imported data does not need re-importing; preserve saves and settings when updating.
+          NOTES
+          gh release create "$RELEASE_TAG" release-assets/vurus-portmaster.zip release-assets/SHA256SUMS.txt --draft --prerelease --title "Vurus PortMaster Alpha Preview $RELEASE_TAG" --notes-file release-notes.txt

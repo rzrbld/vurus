@@ -19,7 +19,7 @@ inline uint16_t rd16(const uint8_t* p) {
 }
 
 // Packed RGB555 rows; the stored runtime pitch is not the disk row length.
-bool decodeBmpBlock(const uint8_t* p, size_t len, GafFrame& frame, size_t& blockLen) {
+bool decodeBmpBlock(const uint8_t* p, size_t len, GafFrame& frame, size_t& blockLen, bool pixels=true) {
     if (len < 68 || std::memcmp(p, "BMP_", 4) != 0) return false;
     const uint32_t bitmapFlags = rd32(p + 8);
     // EXPLO.GAF also stores 0x311; terrain groundlight.gaf stores0x111.
@@ -38,23 +38,21 @@ bool decodeBmpBlock(const uint8_t* p, size_t len, GafFrame& frame, size_t& block
     blockLen = 68 + pixelBytes;
     frame.bitmapFlags = bitmapFlags;
     frame.colorKey = rd16(p + 60);
-    Image& out = frame.image;
+    GafBitmap& out = frame.image;
+    out.colorKey=frame.colorKey;
     out.width = width;
     out.height = height;
-    out.rgba.resize(npix * 4);
+    if(!pixels)return true;
+    out.rgb555.resize(npix);
     const uint8_t* px = p + 68;
     for (size_t i = 0; i < npix; ++i) {
-        const uint16_t v = rd16(px + i * 2);
-        out.rgba[i * 4 + 0] = static_cast<uint8_t>(((v >> 10) & 0x1F) * 255 / 31);
-        out.rgba[i * 4 + 1] = static_cast<uint8_t>(((v >> 5) & 0x1F) * 255 / 31);
-        out.rgba[i * 4 + 2] = static_cast<uint8_t>((v & 0x1F) * 255 / 31);
-        out.rgba[i * 4 + 3] = (v == frame.colorKey) ? 0 : 0xFF;
+        out.rgb555[i] = rd16(px + i * 2);
     }
     return true;
 }
 
 // Decompresses the four component streams of a GAF DATA leaf (GOB_ or ANM_).
-bool gobStreams(const GafChunk& gob, std::vector<std::vector<uint8_t>>& comps) {
+bool gobStreams(const GafChunk& gob, std::vector<std::vector<uint8_t>>& comps, unsigned mask=15) {
     if (gob.payload.size() < 96) return false;
     struct Field { uint32_t compression, csize, usize; };
     Field f[4];
@@ -74,6 +72,9 @@ bool gobStreams(const GafChunk& gob, std::vector<std::vector<uint8_t>>& comps) {
         const size_t stored = f[i].compression ? f[i].csize : f[i].usize;
         const size_t aligned = (stored + 3) & ~size_t(3);
         if (aligned > gob.payload.size() - pos) return false;
+        if(!(mask & (1u<<i))) {
+            comps.emplace_back();pos+=aligned;continue;
+        }
         if (f[i].compression) {
             comps.push_back(lzssDecompress(gob.payload.data() + pos, stored, f[i].usize));
         } else {
@@ -87,7 +88,8 @@ bool gobStreams(const GafChunk& gob, std::vector<std::vector<uint8_t>>& comps) {
 
 } // namespace
 
-bool decodeGafAnimation(const std::vector<uint8_t>& data, GafAnimation& out) {
+bool decodeGafAnimation(const std::vector<uint8_t>& data, GafAnimation& out, GafDecodeMode mode,
+                        const std::function<std::vector<bool>(const GafAnimation&)>& selectSequences) {
     GafChunk root;
     if (!parseGaf(data, root)) return false;
     const GafChunk* head = root.findChild("HEAD");
@@ -101,7 +103,7 @@ bool decodeGafAnimation(const std::vector<uint8_t>& data, GafAnimation& out) {
         headGob->payload.size() < 4 || headAnm->payload.size() < 4) return false;
 
     std::vector<std::vector<uint8_t>> comps;
-    if (!gobStreams(*gob, comps) || comps.size() < 2) return false;
+    if (!gobStreams(*gob, comps, mode==GafDecodeMode::Metadata?1u:(mode==GafDecodeMode::All || mode==GafDecodeMode::SelectedSequences)?15u:3u) || comps.size() < 2) return false;
     const std::vector<uint8_t>& desc = comps[0]; // 44-byte frame descriptors
     const std::vector<uint8_t>& pix = comps[1];  // concatenated BMP_ blocks
 
@@ -109,26 +111,10 @@ bool decodeGafAnimation(const std::vector<uint8_t>& data, GafAnimation& out) {
     if (frameCount == 0 || frameCount > 100000 || desc.size() != frameCount * 44) return false;
 
     GafAnimation decoded;
-    decoded.frames.reserve(frameCount);
-    size_t pos = 0;
-    for (size_t i = 0; i < frameCount; ++i) {
-        if (pos + 4 > pix.size() || std::memcmp(pix.data() + pos, "BMP_", 4) != 0) return false;
-        GafFrame fr;
-        size_t blockLen = 0;
-        if (!decodeBmpBlock(pix.data() + pos, pix.size() - pos, fr, blockLen)) return false;
-        const uint8_t* d = desc.data() + i * 44;
-        fr.originX = static_cast<int>(rd32(d + 16));
-        fr.originY = static_cast<int>(rd32(d + 20));
-        fr.flippedOriginX = static_cast<int32_t>(rd32(d + 28));
-        fr.flippedOriginY = static_cast<int32_t>(rd32(d + 32));
-        decoded.frames.push_back(std::move(fr));
-        pos += blockLen;
-    }
-    if (pos != pix.size()) return false;
     const size_t sequenceCount = rd32(headAnm->payload.data());
     if (sequenceCount == 0 || sequenceCount > 100000) return false;
     std::vector<std::vector<uint8_t>> animComps;
-    if (!gobStreams(*anm, animComps) || animComps.size() < 3 ||
+    if (!gobStreams(*anm, animComps, (mode==GafDecodeMode::All || mode==GafDecodeMode::SelectedSequences)?15u:5u) || animComps.size() < 3 ||
         animComps[0].size() != sequenceCount * 32 || animComps[2].size() % 28 != 0) return false;
 
     const auto& headers = animComps[0];
@@ -155,14 +141,47 @@ bool decodeGafAnimation(const std::vector<uint8_t>& data, GafAnimation& out) {
         decoded.sequences.push_back(std::move(sequence));
     }
     if (subframeIndex != subframes.size() / 28) return false;
+    decoded.frames.reserve(frameCount);
+    std::vector<bool> selected(frameCount,mode==GafDecodeMode::All);
+    if(mode==GafDecodeMode::SelectedSequences) {
+        if(!selectSequences)return false;
+        const auto sequences=selectSequences(decoded);
+        if(sequences.size()!=decoded.sequences.size())return false;
+        for(size_t i=0;i<sequences.size();++i)if(sequences[i])
+            for(const auto& pose:decoded.sequences[i].subframes)
+                if(pose.frameIndex!=GafSubframe::Blank)selected[pose.frameIndex]=true;
+    }
+    if(mode==GafDecodeMode::FirstBitmap)selected[0]=true;
+    if(mode==GafDecodeMode::FirstSequencePose || mode==GafDecodeMode::SequenceFirstPoses)
+        for(size_t i=0;i<decoded.sequences.size();++i){
+            const auto& sequence=decoded.sequences[i];
+            if(!sequence.subframes.empty() && sequence.subframes.front().frameIndex!=GafSubframe::Blank)
+                selected[sequence.subframes.front().frameIndex]=true;
+            if(mode==GafDecodeMode::FirstSequencePose)break;
+        }
+    size_t pos = 0;
+    for (size_t i = 0; i < frameCount; ++i) {
+        if (mode!=GafDecodeMode::Metadata && (pos + 4 > pix.size() || std::memcmp(pix.data() + pos, "BMP_", 4) != 0)) return false;
+        GafFrame fr;
+        size_t blockLen = 0;
+        if (mode!=GafDecodeMode::Metadata && !decodeBmpBlock(pix.data() + pos, pix.size() - pos, fr, blockLen,selected[i])) return false;
+        const uint8_t* d = desc.data() + i * 44;
+        fr.originX = static_cast<int>(rd32(d + 16));
+        fr.originY = static_cast<int>(rd32(d + 20));
+        fr.flippedOriginX = static_cast<int32_t>(rd32(d + 28));
+        fr.flippedOriginY = static_cast<int32_t>(rd32(d + 32));
+        decoded.frames.push_back(std::move(fr));
+        pos += blockLen;
+    }
+    if (mode!=GafDecodeMode::Metadata && pos != pix.size()) return false;
     out = std::move(decoded);
     return true;
 }
 
 bool decodeGafSprite(const std::vector<uint8_t>& data, Image& out) {
     GafAnimation anim;
-    if (!decodeGafAnimation(data, anim)) return false;
-    out = anim.frames.front().image;
+    if (!decodeGafAnimation(data, anim, GafDecodeMode::FirstBitmap)) return false;
+    out = anim.frames.front().image.rgbaImage();
     return true;
 }
 

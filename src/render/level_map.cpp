@@ -30,12 +30,12 @@ Image makeLevelMap(const Level& level,int width,int height) {
                 const size_t cell=size_t(cy)*level.mapW+cx;
                 if(cell>=layer.size() || !layer[cell] || layer[cell]>level.tiles.size())continue;
                 const auto& tile=level.tiles[layer[cell]-1];
-                if(tile.width<=0 || tile.height<=0)continue;
+                if(!tile.valid())continue;
                 for(int y=top;y<=bottom;++y)for(int x=left;x<=right;++x) {
-                    const size_t pixel=(size_t(sample(y-top,tile.height,bottom-top+1))*tile.width+sample(x-left,tile.width,right-left+1))*4;
-                    if(pixel+3>=tile.rgba.size() || !tile.rgba[pixel+3])continue;
+                    const size_t pixel=(size_t(sample(y-top,tile.height,bottom-top+1))*tile.width+sample(x-left,tile.width,right-left+1));
+                    const auto color=tile.pixel(pixel);if(!color[3])continue;
                     auto* destination=out.rgba.data()+(size_t(y)*width+x)*4;
-                    std::copy_n(tile.rgba.data()+pixel,3,destination);
+                    std::copy_n(color.data(),3,destination);
                     destination[3]=255;
                 }
             }

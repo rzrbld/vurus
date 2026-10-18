@@ -33,7 +33,7 @@ int main(){try{
  for(float shield:{1.01f,1.f,0.f}){Run r;auto s=r.world.snapshot();s.actors[0].vitals.shield=shield;r.restore(s);r.world.tick(.0625f,{});auto v=r.voices();if(shield<=1)event(v,"V-SHIELD-LOW.WAV",0,1000,15000);else need(v.empty(),"one percent threshold, not ten percent");}
  const char* locked[]={"V-WARNING.WAV","V-WATCH-OUT.WAV","V-TAKE-CARE.WAV","V-LOCKED.WAV"};
  for(unsigned residue=0;residue<4;++residue){Run r;
-  const auto authored=[](std::vector<TextNode>& props){for(auto& n:props)if(n.key=="TYPE"&&!n.arguments.empty()&&n.arguments[0]=="Seeker"){for(auto& p:n.children)if(p.key=="Sensor-Range")p.values={"5000"};n.children.push_back(val("Scan-Delay","400"));}};
+  const auto authored=[](SharedProperties& props){for(auto& n:props)if(n.key=="TYPE"&&!n.arguments.empty()&&n.arguments[0]=="Seeker"){for(auto& p:n.children)if(p.key=="Sensor-Range")p.values={"5000"};n.children.push_back(val("Scan-Delay","400"));}};
   authored(r.scene.classes[2].properties);authored(r.scene.objects[1].properties);need(vyruz_test::loadManagedFixture(r.world,r.scene,r.level,r.error),r.error);r.world.setDebugEnemyAI(true);
   // Native begin and completed-wave visits precede the first steering/lock.
   r.world.tick(.014f,{});need(r.voices().empty(),"begin-search visit cannot emit locked warning");r.world.tick(.014f,{});need(r.voices().empty(),"route-selection visit cannot emit locked warning");

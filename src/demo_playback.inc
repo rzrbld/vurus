@@ -2,7 +2,7 @@
 // App owns vyruz::DemoReplay demo and bool demoActive=false.
 void stopDemo(App& a) {
     a.demoActive=false;a.demo.reset();
-    a.sessionStarted=false;a.restart=false;a.restartLevel.reset();a.visited.clear();
+    a.sessionStarted=false;a.restart=false;a.restartLevel.reset();
     a.inventory={};a.menuAction=vyruz::MenuAction::None;
     a.presentation.close();a.audio.reset();a.audio.device().stopEffects();
     a.retryCheckedProfile.clear();recoverRetrySession(a);
@@ -18,7 +18,7 @@ bool startDemo(App& a) {
     if(!loadLevelData(a,"CAVE/DEMO.3DG",nullptr,false,false,false))return false;
     a.demo=std::move(replay);a.demoActive=true;a.sessionStarted=true;
     a.hud.beginDemoOverlay();
-    a.restart=false;a.restartLevel.reset();a.visited.clear();
+    a.restart=false;a.restartLevel.reset();
     a.menu.close(a.paused);a.inventory={};a.suppressFireUntilRelease=true;
     const auto initial=a.demo.advance(0);
     if(initial.pose) {

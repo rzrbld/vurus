@@ -123,4 +123,14 @@ jobs:
         run: |
           mapfile -d '' packages < <(find artifacts -type f \( -name 'vurus-*.zip' -o -name 'vurus-*.tar.gz' \) -print0)
           test "${#packages[@]}" -eq 4
-          gh release create "$RELEASE_TAG" "${packages[@]}" --draft --title "Vurus $RELEASE_TAG" --notes "Native engine builds for Linux, Windows and macOS. Original game data is required and is not included."
+          mkdir release-assets
+          for package in "${packages[@]}"; do
+            name=$(basename "$package")
+            test ! -e "release-assets/$name"
+            cp "$package" "release-assets/$name"
+          done
+          (cd release-assets && sha256sum vurus-*.zip vurus-*.tar.gz > SHA256SUMS.txt)
+          cat > release-notes.txt <<'NOTES'
+          Native engine builds for Linux, Windows and macOS. Original game data is required and is not included. Verify downloads with SHA256SUMS.txt. PortMaster Alpha Preview has its own independent build and release workflow.
+          NOTES
+          gh release create "$RELEASE_TAG" release-assets/* --draft --title "Vurus $RELEASE_TAG" --notes-file release-notes.txt

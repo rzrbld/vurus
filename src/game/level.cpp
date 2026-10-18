@@ -76,27 +76,23 @@ int slotFromClass(uint8_t type) {
     }
 }
 
-// Decode one 64x32 RGB555 BMP_ block (68-byte header + pixels) to RGBA.
+// Decode one 64x32 RGB555 BMP_ block (68-byte header + pixels) without expanding RGB555.
 //
 // The baked `.3DG` tiles are triangular half-faces (see docs/formats/render.md):
 // opaque regions are encoded by the pixels' color key. Decode them as-is;
 // there is no reflection or compositing here.
-Image decodeTile(const uint8_t* p, size_t len) {
-    Image img;
+GafBitmap decodeTile(const uint8_t* p, size_t len) {
+    GafBitmap img;
     if (len < 68 || std::memcmp(p, "BMP_", 4) != 0) return img;
     const int w = static_cast<int>(rd32(p + 32));
     const int h = static_cast<int>(rd32(p + 36));
     if (w != 64 || h != 32 || len < 68u + 64u * 32u * 2u) return img;
     img.width = w;
     img.height = h;
-    img.rgba.resize(64 * 32 * 4);
+    img.rgb555.resize(64 * 32);
     const uint8_t* px = p + 68;
     for (size_t i = 0; i < 64 * 32; ++i) {
-        const uint16_t v = rd16(px + i * 2);
-        img.rgba[i * 4 + 0] = static_cast<uint8_t>(((v >> 10) & 0x1F) * 255 / 31);
-        img.rgba[i * 4 + 1] = static_cast<uint8_t>(((v >> 5) & 0x1F) * 255 / 31);
-        img.rgba[i * 4 + 2] = static_cast<uint8_t>((v & 0x1F) * 255 / 31);
-        img.rgba[i * 4 + 3] = (v == 0x7c1f) ? 0 : 0xFF; // 0x7c1f = transparent key
+        img.rgb555[i] = rd16(px + i * 2);
     }
     return img;
 }
@@ -131,7 +127,7 @@ bool loadLevel(const std::vector<uint8_t>& d3gData, Level& out) {
     for (int i = 0; i < tileCount; ++i) {
         out.tileDrawFlags[i] = rd32(tileStrip.data() + static_cast<size_t>(i) * stride + 20);
         out.tiles[i] = decodeTile(tileStrip.data() + static_cast<size_t>(i) * stride, stride);
-        if (out.tiles[i].rgba.empty()) return false;
+        if (out.tiles[i].rgb555.empty()) return false;
     }
 
     // Foreground row phases from the block descriptor table (16 bytes each,

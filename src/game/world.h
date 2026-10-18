@@ -1,5 +1,6 @@
 #pragma once
 #include "game/effect_camera_native.h"
+#include "game/indirect_optional.h"
 #include "game/demo_replay.h"
 #include "game/enemy_turn_native.h"
 #include "game/native_random.h"
@@ -76,7 +77,7 @@ struct ActorState {
     std::size_t nativeAwakeIndex=0;
     std::uint32_t nativeGeneration=0,nativeCreatorGeneration=0;
     NativeAmmoOwnerCounters nativeAmmoOwner;
-    std::optional<OrdinaryEnemyNativeState> ordinaryAI;
+    IndirectOptional<OrdinaryEnemyNativeState> ordinaryAI;
     OrdinaryEnemyNativeConfig ordinaryAIConfig; // Derived; rebuilt on restore.
     std::optional<EnemyTurnState> enemyTurn;
     EnemyTurnConfig enemyTurnConfig; // Class-derived; rebuilt on restore.
@@ -90,7 +91,7 @@ struct ActorState {
     bool contactMotion=false;
     float enemyThrust=0,enemyMagnitude=0;
     bool spiderPatrolTurning=false; // retired save23 field
-    std::optional<SpiderAIState> spiderAI;
+    IndirectOptional<SpiderAIState> spiderAI;
     // Shared native wall-contact coordinates; Spider v25 history stays in its AI.
     std::optional<SpiderMotionHistory> nativeMotion;
     std::optional<NativeGeneratorSquareState> nativeGeneratorSquare;
@@ -119,8 +120,12 @@ struct ActorState {
     std::vector<ActorCreate> creates;
     bool createsInitialized=false;
     bool pooledTrail=false;
+    bool reusedRecord=false; // Transient interpolation guard, like a newly appended body.
     std::size_t nativePoolSlot=SIZE_MAX;
     bool nativeHeldOriginal=false; //Derived local inventory alias; never spatial while held.
+    // Low32: visual reset revision. High32: runtime birth order +1 (zero
+    // preserves legacy slot order). This opaque saved token also preserves
+    // completion order when a physical record is recycled.
     uint64_t visualRevision=0;
     std::vector<GeneratorState> generators;
     std::optional<size_t> generatorParent;
@@ -191,6 +196,9 @@ struct ActorState {
     uint64_t gateRevision=0;
     bool gateAnimationFinished=false;
 };
+inline uint64_t actorRecordOrder(const ActorState& actor,size_t index) {
+    const auto birth=actor.visualRevision>>32;return birth?birth-1:index;
+}
 struct HeldItem {
     ObjectPlacement object;
     ActorState actor;
@@ -301,6 +309,7 @@ public:
     const SurpriseState& surprise() const { return surprise_; }
     void cancelSurprise();
     int difficulty() const { return difficulty_.level; }
+    NativeRandomState presentationRandomState() const { return nativeGlobalRandom_; }
     WorldSnapshot snapshot() const;
     bool restoreSnapshot(const WorldSnapshot&,std::string& error);
     void setNativeTileCatalog(NativeTileBodyCatalog catalog){nativeTileCatalog_=std::move(catalog);}
@@ -484,6 +493,9 @@ private:
     size_t spawnTrail(ClassId,ContentPosition);
     bool reusableTrail(ClassId) const;
     std::map<uint32_t,std::set<size_t>> freeTrailSlots_;
+    std::map<uint32_t,std::vector<size_t>> freeTransientRecords_;
+    void collectReleasedTransientRecords();
+    uint64_t nextRecordOrder_=0;
     void configureProjectileCreates(Projectile&,bool fromConstructor=false);
     void updateProjectileCreates(Projectile&,ContentPosition previous);
     bool spawnProjectileHitEffect(const Projectile&,bool contact);

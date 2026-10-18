@@ -50,8 +50,13 @@ AudioClipPtr GameAudio::preload(const std::string& path,const ContentReader& rea
 }
 bool GameAudio::load(const SceneContent& scene,const ContentReader& read,const std::string& language,std::string& error,const NativeTileBodyCatalog* terrain) {
     reset();diagnostics_.clear();weapons_.clear();language_=folded(language)=="french"?"FRENCH":"ENGLISH";
+    std::set<std::string> neededClips,neededBanks;
+    auto keepClip=[&](const std::string& path,const ContentReader& reader){
+        if(!path.empty())neededClips.insert(normalized(path));
+        return preload(path,reader);
+    };
     for(const auto* name:{"pickup-heavy.wav","weapon-switch.wav","vz-motor.wav","start-engine.wav","aaaa.wav",
-                         "shield-alarm.wav","money.wav","select.wav","bip.wav","techno.wav","darken.wav","hardcore.wav","electric.wav"})preload(soundPath(name),read);
+                         "shield-alarm.wav","money.wav","select.wav","bip.wav","techno.wav","darken.wav","hardcore.wav","electric.wav"})keepClip(soundPath(name),read);
     for(const auto* name:{"V-CODE.WAV","V-KEY.WAV","V-BONUS.WAV","V-MALUS.WAV","V-GAME-OVER.WAV","V-GAME-SAVED.WAV",
             "V-PAUSE.WAV","V-MENU.WAV","V-MAP.WAV","V-INVENTORY.WAV","V-NEED-CASH.WAV","V-NEED-CODE.WAV","V-NEED-KEY.WAV",
             "V-LOCKED.WAV","V-GUN.WAV","V-FLAME.WAV","V-GRENADE.WAV","V-HOMING.WAV","V-LAZER.WAV","V-MINE.WAV",
@@ -60,7 +65,7 @@ bool GameAudio::load(const SceneContent& scene,const ContentReader& read,const s
             "V-HEY.WAV","V-YO.WAV","V-GIVE-ME.WAV","V-THE-BEST.WAV","V-WANT-MORE.WAV",
             "V-WELL-DONE.WAV","V-COME-ON.WAV","V-ARIBA.WAV",
             "V-WAKE-UP.WAV","V-WAITING-FOR.WAV","V-WHAT-DOING.WAV","V-FORGET-MISSION.WAV",
-            "V-OOH.WAV","V-LOOSER.WAV","V-SAD-MAN.WAV"})preload("COMMON/DATA/SOUND/"+language_+"/"+name,read);
+            "V-OOH.WAV","V-LOOSER.WAV","V-SAD-MAN.WAV"})keepClip("COMMON/DATA/SOUND/"+language_+"/"+name,read);
     std::set<std::string> paths;
     for(const auto& cls:scene.classes) {
         if(const auto* weapon=attribute(cls.properties,"weapon")) {
@@ -72,7 +77,7 @@ bool GameAudio::load(const SceneContent& scene,const ContentReader& read,const s
             sound.loop=propertyBool(weapon->children,"Fire-sound-loop");
             sound.mask=channelMask(cls.properties,0xff00);
             sound.priority=int(propertyNumber(cls.properties,"Sample-channel-priority",129));
-            for(const auto* path:{&sound.start,&sound.sound,&sound.end,&sound.dry})preload(*path,read);
+            for(const auto* path:{&sound.start,&sound.sound,&sound.end,&sound.dry})keepClip(*path,read);
             weapons_[folded(cls.name)]=std::move(sound);
         }
         if(!cls.sprite.path.empty())paths.insert(cls.sprite.path);
@@ -90,7 +95,7 @@ bool GameAudio::load(const SceneContent& scene,const ContentReader& read,const s
         return true;
     });
     for(const auto& path:paths) {
-        const auto key=normalized(path);if(banks_.contains(key))continue;
+        const auto key=normalized(path);neededBanks.insert(key);if(banks_.contains(key))continue;
         std::vector<uint8_t> bytes;std::vector<Wave> waves;std::vector<AudioClipPtr> clips;
         if(!read(path,bytes)||!decodeGafSamples(bytes,waves,error))diagnostics_.push_back("Unavailable embedded audio: "+path+" "+error);
         else for(auto& wave:waves) clips.push_back(makeAudioClip(std::move(wave),error));
@@ -98,15 +103,21 @@ bool GameAudio::load(const SceneContent& scene,const ContentReader& read,const s
     }
     if(scene.player){
         const std::string path="COMMON/DATA/PANEL/PANEL.GAF",key=normalized(path);
+        neededBanks.insert(key);
         if(!banks_.contains(key)){
             std::vector<uint8_t> bytes;std::vector<Wave> waves;GafAnimation animation;
-            if(read(path,bytes)&&decodeGafSamples(bytes,waves,error)&&decodeGafAnimation(bytes,animation)&&!animation.sequences.empty()){
+            if(read(path,bytes)&&decodeGafSamples(bytes,waves,error)&&decodeGafAnimation(bytes,animation,GafDecodeMode::Metadata)&&!animation.sequences.empty()){
                 std::vector<AudioClipPtr> samples;
                 for(auto& wave:waves)samples.push_back(makeAudioClip(std::move(wave),error));
                 banks_[key]=std::move(samples);shieldSequence_=animation.sequences.front();
             }else diagnostics_.push_back("Unavailable HUD audio: "+path);
         }
     }
+    // Preserve shared samples needed by this map, release earlier-map and
+    // previous-language PCM. Re-loading the same map still needs no I/O.
+    std::erase_if(clips_,[&](const auto& entry){return !neededClips.contains(entry.first);});
+    std::erase_if(banks_,[&](const auto& entry){return !neededBanks.contains(entry.first);});
+    if(!scene.player)shieldSequence_={};
     fullShieldAlarm_.reset(shieldSequence_);
     error.clear();return true;
 }

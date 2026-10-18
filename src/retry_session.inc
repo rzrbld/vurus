@@ -8,10 +8,10 @@ void persistRetrySession(App& a,bool asynchronous=false) {
         if(!startAsyncRetry(a,error))std::fprintf(stderr,"Could not start retry save: %s (in-memory retry retained)\n",error.c_str());
         a.retryDiskPath.clear();a.retryCheckedProfile=a.options.storageProfile();return;
     }
-    vyruz::SaveGame save;save.currentLevel=a.restartPath;save.levels=a.visited;
+    vyruz::SaveGame save;save.currentLevel=a.restartPath;
     save.levels[save.currentLevel]=*a.restartLevel;
     std::string error;
-    if(!vyruz::writeDefaultRetry(a.savePath,a.options.storageProfile(),save,error))
+    if(!vyruz::writeDefaultRetry(a.savePath,a.options.storageProfile(),std::move(save),error))
         std::fprintf(stderr,"Could not store default retry session: %s (in-memory retry retained)\n",error.c_str());
     a.retryDiskPath.clear();a.retryCheckedProfile=a.options.storageProfile();
 }

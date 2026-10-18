@@ -1,5 +1,6 @@
 #pragma once
 #include "assets/wav.h"
+#include "audio/wav_stream.h"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -10,8 +11,8 @@
 #include <SDL2/SDL.h>
 
 namespace vyruz {
-// Source PCM is retained, so a long music track needs only its original storage.
-struct AudioClip { Wave wave; size_t frames = 0; };
+// Effects keep PCM; disk music uses a bounded worker-fed buffer.
+struct AudioClip { Wave wave; size_t frames = 0; std::shared_ptr<WavStream> stream; };
 using AudioClipPtr = std::shared_ptr<const AudioClip>;
 AudioClipPtr makeAudioClip(Wave wave, std::string& error);
 
@@ -66,6 +67,7 @@ private:
         bool native=false;
         unsigned nativeVolume=65535;
         int nativePan=0;
+        uint64_t streamOffset=0;
     };
     size_t mixVoice(Voice& voice, float* stereo, size_t frames);
     std::array<Voice, MaxVoices> voices_{};

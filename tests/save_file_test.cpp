@@ -119,6 +119,19 @@ void strip31AbsentActorTail(std::vector<uint8_t>& bytes,size_t start){
  bytes.erase(bytes.begin()+start,bytes.begin()+start+3);
 }
 int main(){
+ {
+  TextNode child;child.key="Usage-Count";child.values={"2"};
+  TextNode node;node.key="TYPE";node.children={child};
+  SharedProperties live{node};auto restart=live;auto worker=live;
+  const auto* shared=live.read().data();
+  check(restart.read().data()==shared&&worker.read().data()==shared,"Property copies share immutable definition storage");
+  worker[0].children[0].values={"1"};
+  check(live.read()[0].children[0].values[0]=="2"&&restart.read().data()==shared,"Nested worker mutation cannot change live/Restart properties");
+  live.push_back(child);
+  check(restart.size()==1&&live.size()==2,"Live mutation detaches from Restart");
+  restart.clear();check(worker.size()==1&&live.size()==2,"Clearing one owner preserves other values");
+ }
+
  // Captured with the unmodified version 1 writer: retain its original checksum and layout.
  const std::string legacyHex="5659525a5341564501000000d9000000000000000ada55c616332a600b000000000000004c4556454c2f412e33444701000000000000000b000000000000004c4556454c2f412e3344471503000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001100000000000000a69b443b000000000000f042000000000000f0c10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
  std::vector<uint8_t> legacy;for(size_t i=0;i<legacyHex.size();i+=2)legacy.push_back(uint8_t(std::stoul(legacyHex.substr(i,2),nullptr,16)));
@@ -191,7 +204,14 @@ int main(){
  auto surpriseHeld=held;surpriseHeld.surprise=true;surpriseHeld.className="temporary-surprise";w.heldItems.push_back(surpriseHeld);
  original.levels["LEVEL/NEXT.3DG"]=level;
  level.render.effects.emplace().orbitTimeMs=812.5;
- std::vector<uint8_t> bytes;std::string error;check(encodeSave(original,bytes,error),error.c_str());{auto owned=original;std::vector<uint8_t> movedBytes;check(encodeSave(std::move(owned),movedBytes,error)&&movedBytes==bytes,"Owned encoder preserves exact v35 bytes");}
+ std::vector<uint8_t> bytes;std::string error;check(encodeSave(original,bytes,error),error.c_str());
+ {auto checkpoint=original;const auto& props=original.levels.begin()->second.world.objects[0].properties;
+  const auto* shared=props.read().data();std::vector<uint8_t> encoded;
+  check(checkpoint.levels.begin()->second.world.objects[0].properties.read().data()==shared,"Save copy shares original properties");
+  check(encodeSave(checkpoint,encoded,error)&&encoded==bytes,"Shared property encoder retains exact bytes");
+  check(props.read().data()==shared&&checkpoint.levels.begin()->second.world.objects[0].properties.read().data()==shared,"Encoding never detaches or mutates shared definitions");
+ }
+{auto owned=original;std::vector<uint8_t> movedBytes;check(encodeSave(std::move(owned),movedBytes,error)&&movedBytes==bytes,"Owned encoder preserves exact v35 bytes");}
  SaveGame decoded;check(decodeSave(bytes,decoded,error),error.c_str());std::vector<uint8_t> again;check(encodeSave(decoded,again,error)&&bytes==again,"Round trip retains every serialized field and navigation heap order");auto& restored=decoded.levels.at(original.currentLevel);check(!restored.render.effects,"Native-style disk load drops transient live renderer effects");check(restored.world.projectiles[0].fuseMs==83&&restored.world.actors[0].gateState.flags==GateClosing&&restored.render.channels[0].cursor.remaining==5.25,"Pending projectile, gate and animation state survives");check(bytes[8]==35&&restored.world.motion.thrust==4.5f&&restored.world.motion.magnitude==w.motion.magnitude&&restored.world.motion.velocityZ==-3,"Version35 retains native magnitude, thrust and both velocity axes");check(restored.world.difficulty==3,"Difficulty survives version 3 round trip");check(restored.world.savePlot==0&&restored.world.saveDwellMs==5500&&restored.world.saveAttempted,"Save terminal dwell and attempt latch survive");
  for(const auto* savedActor : {&restored.world.actors[0],&restored.world.heldItems[0].actor})
   check(savedActor->spiderPatrolTurning&&savedActor->enemyMoveCommand==208&&savedActor->enemyMovedLastStep&&savedActor->enemyMotionInitialized&&savedActor->enemyThrust==7.25f&&savedActor->enemyMagnitude==3.75f&&savedActor->driveSegmentStart->x==12&&savedActor->driveSegmentEnd->y==78,"World and held enemy propulsion state survives version20");
@@ -504,6 +524,9 @@ int main(){
   auto native=original;auto& w=native.levels.begin()->second.world;
   w.spiderNavigation=NativeNavGraph{{{0,{12,34,12,34},true,true}},{{0,false}},{{0,false}}};
   w.actors[0].spiderAI.emplace();w.actors[0].spiderAI->patrolRoute.points={{12,34,0}};
+  {auto copy=w.actors[0];copy.spiderAI->patrolRoute.points[0].x=999;
+   check(w.actors[0].spiderAI->patrolRoute.points[0].x==12,"Snapshot Spider state owns an independent route");
+   copy.spiderAI.reset();check(w.actors[0].spiderAI.has_value(),"Reset copied Spider state preserves original");}
   w.actors[0].spiderAI->motion=SpiderMotionHistory{{2538.49609375f,285.657684326171875f},{2015,1263}};
   w.actors[0].spiderAI->turn=initializeEnemyTurn({0x1f,false,true,42,0},0,0);
   w.actors[0].spiderAI->turn->bodyPose=2;w.actors[0].spiderAI->turn->bodyDesiredPose=13;w.actors[0].spiderAI->turn->bodyRemainingMs=26;
@@ -536,6 +559,9 @@ int main(){
   ai.patrol.initialized=true;ai.patrol.reverse=true;ai.patrol.point=2;ai.patrol.goal=ContentPosition{80,160};
   ai.patrol.goalCellX=1;ai.patrol.goalCellY=5;ai.random.reuseCount=3;ai.random.replayRandom={87654,32109};
   ai.actorFlags=0x8000000;ai.targeting.clock.scanRemainingMs=17;ai.base.clock.pathRemainingMs=19;
+  {ActorState copy;copy=body;copy.ordinaryAI->targeting.clock.scanRemainingMs=999;
+   check(ai.targeting.clock.scanRemainingMs==17,"Snapshot ordinary AI assignment owns independent state");
+   auto moved=std::move(copy);check(moved.ordinaryAI->targeting.clock.scanRemainingMs==999,"Moving actor preserves owned AI state");}
   std::vector<uint8_t> packet,repeat;SaveGame read;
   check(encodeSave(native,packet,error)&&decodeSave(packet,read,error)&&encodeSave(read,repeat,error)&&packet==repeat,
         "v31 producer/pending/ordinary-AI state roundtrips exact bytes");

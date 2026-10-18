@@ -4,7 +4,7 @@
 #include "game/spider_contact_native.h"
 #include <set>
 namespace {
-void set(std::vector<TextNode>& p,const std::string& key,const std::string& text){for(auto& n:p)if(n.key==key){n.values={text};return;}p.push_back(value(key,text));}
+void set(auto& p,const std::string& key,const std::string& text){for(auto& n:p)if(n.key==key){n.values={text};return;}p.push_back(value(key,text));}
 SceneContent heli(std::string base="Random",std::string mode="Seeker"){
  auto s=fixture(base);auto& c=s.classes[1];c.name="Heli";c.behaviours={base,mode};
  for(const auto& [key,text]:{std::pair{"Sub-type","Heli"},{"Move-during-path-search","0"},{"Turn-timeout","42"},{"Speed-max","35"},{"Speed-min","-35"},{"Use-inertia","1"},{"Grip","1"},{"Friction-factor","0.97"},{"Friction-threshold","0.01"},{"Acceleration-step","2"},{"Decceleration-step","2"}})set(c.properties,key,text);

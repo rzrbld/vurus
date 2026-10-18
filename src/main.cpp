@@ -8,12 +8,16 @@
 #include <future>
 #include <cstdio>
 #include <cstdlib>
+#if defined(__GLIBC__)
+#include <malloc.h>
+#endif
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
 #include "io/portable_storage.h"
+#include "io/process_memory.h"
 
 #include "assets/gaf.h"
 #include "audio/game_audio.h"
@@ -58,6 +62,15 @@
 
 namespace {
 
+void releaseUnusedPortMemory() {
+#if defined(__GLIBC__)
+    // Large level/snapshot temporaries leave free pages inside glibc arenas.
+    // Return unused pages on desktop and handheld before large load/save allocations.
+    // Keep this outside per-frame simulation and rendering.
+    malloc_trim(0);
+#endif
+}
+
 constexpr int kVirtualW = 640;
 constexpr int kVirtualH = 480;
 constexpr int kTileW = 64;
@@ -70,8 +83,13 @@ constexpr float kMoveDt = 1.f / 60.f;
 struct SaveResult { bool ok=false,retry=false;std::string path,error; };
 struct App {
     bool debugEnabled=false;
+    bool profileTick=false;
+    double profileWorldMs=0;
     double debugFrameSum=0,debugFramePeak=0;unsigned debugFrameCount=0;
-    std::string debugFrameText="FPS --  FRAME -- MS";
+    Uint64 debugMemoryNext=0;
+    std::vector<std::string> debugMemoryText;
+    std::string debugFrameText="FPS --  FRAME -- MS",fpsText="FPS --";
+    std::string rssText="RSS N/A";
     vyruz::DemoReplay demo;
     bool demoActive=false;
     GLuint extraTex=0;int extraWidth=640,extraHeight=480;
@@ -99,14 +117,13 @@ struct App {
     vyruz::Level level;
     vyruz::SceneContent content;
     vyruz::GameWorld world;
-    std::map<std::string,vyruz::SavedLevel> visited;
     std::optional<vyruz::SavedLevel> restartLevel;
     std::string restartPath,restartProfile,retryDiskPath,retryCheckedProfile;
     std::string retryTitlePath,retryTitle;
     bool retryPersistence=false; //Only actual interactive campaign entries write defaults.
     std::string savePath,lastSavedPath,loadError;
     bool saveHistory=false,saveCatalogDirty=true;
-    // The worker only reads visited/restartLevel; replacement actions wait until
+    // The worker only reads restartLevel; replacement actions wait until
     // completion. Declared after those snapshots so its destructor joins first.
     std::future<SaveResult> saveFuture;
     std::string saveCatalogProfile;
@@ -252,15 +269,25 @@ void beginPresentation(App& a,vyruz::PresentationPage page,std::string text={}) 
     if(page!=vyruz::PresentationPage::DeathPrompt)a.audio.reset();
     a.audio.device().setMusicPaused(page!=vyruz::PresentationPage::Mission && page!=vyruz::PresentationPage::DeathPrompt);
 }
+vyruz::AudioClipPtr introAudio(App& a,std::string& error){
+    const auto& wave=a.intro.audio();
+    if(a.intro.audioChunks().empty())return {};
+    auto stream=vyruz::WavStream::openPcm(a.intro.path(),wave.sampleRate,wave.channels,wave.bitsPerSample,a.intro.audioChunks(),error);
+    if(!stream)return {};
+    auto clip=std::make_shared<vyruz::AudioClip>();clip->wave.sampleRate=wave.sampleRate;
+    clip->wave.channels=wave.channels;clip->wave.bitsPerSample=wave.bitsPerSample;
+    clip->frames=stream->frames();clip->stream=std::move(stream);return clip;
+}
 bool beginMovie(App& a) {
     if(!a.introAttempted) {
-        a.introAttempted=true;std::vector<uint8_t> bytes;std::string error;
-        a.introLoaded=a.vfs.read("Intro.avi",bytes) && a.intro.load(std::move(bytes),error);
+        a.introAttempted=true;std::string error;
+        a.introLoaded=a.intro.loadFile(a.vfs.loosePath("Intro.avi"),error);
         if(!a.introLoaded)std::fprintf(stderr,"intro skipped: %s\n",error.empty()?"Intro.avi is absent; restore it from your original disc image":error.c_str());
     }
     if(!a.introLoaded)return false;
     beginPresentation(a,vyruz::PresentationPage::Movie);
-    std::string error;auto audio=vyruz::makeAudioClip(a.intro.audio(),error);
+    std::string error;auto audio=introAudio(a,error);
+    if(!audio&&!error.empty())std::fprintf(stderr,"intro audio: %s\n",error.c_str());
     a.presentationVoice=audio?a.audio.device().play(audio,255,1,0,false,true,vyruz::AudioBus::Presentation):0;
     a.movieFrame=SIZE_MAX;return true;
 }
@@ -271,6 +298,10 @@ void finishPresentation(App& a) {
     a.audio.device().stop(a.presentationVoice);a.presentationVoice=0;
     a.presentation.close();a.suppressFireUntilRelease=true;
     a.gfx.deleteTexture(a.movieTex);a.movieTex=0;a.movieFrame=SIZE_MAX;
+    if(page==vyruz::PresentationPage::Movie){
+        a.intro={};a.introLoaded=false;a.introAttempted=false;
+        releaseUnusedPortMemory(); // Extras can reopen the movie on demand.
+    }
     if(page==vyruz::PresentationPage::DeathPrompt){beginGameOverCard(a);return;}
     if(page==vyruz::PresentationPage::GameOver){finishGameOver(a);return;}
     if(a.presentationReturnMain){a.presentationReturnMain=false;a.menu.show(a.paused,true);a.menu.retryAvailable=a.restartLevel.has_value();a.audio.device().setMusicPaused(false);return;}
@@ -342,6 +373,10 @@ bool readLoadingResource(App& a,const std::string& path,std::vector<uint8_t>& by
 bool loadLevelData(App& a, const std::string& path,const vyruz::SavedLevel* saved=nullptr,
                    bool entering=false,bool validateOnly=false,bool present=false,int requestedDifficulty=-1,
                    const vyruz::PlayerCarry* carried=nullptr) {
+    // CPU images and cursors remain available for transactional failure
+    // recovery; old GPU copies need not overlap the replacement level.
+    a.sceneRenderer.releaseTextures(a.gfx);
+    releaseUnusedPortMemory();
     a.assistedAim={};a.aimAssistTarget=SIZE_MAX;
     a.loadError="Could not load level resources: "+path;
     // Validation-only paths also run without a graphics context. Failed loads
@@ -423,20 +458,25 @@ bool loadLevelData(App& a, const std::string& path,const vyruz::SavedLevel* save
     if(carried)validation.restore(*carried);
     showLoadingProgress(a,.3f,.7f);
     if (!nextRenderer.load(nextContent, [&a](const auto& name, auto& bytes) { return readLoadingResource(a,name,bytes); }, contentError) ||
-        !nextRenderer.loadTerrain(*validation.nativeTileCatalog(),contentError,validation.snapshot().nativeGlobalRandom) ||
+        !nextRenderer.loadTerrain(*validation.nativeTileCatalog(),contentError,validation.presentationRandomState()) ||
         (saved && !nextRenderer.restore(saved->render,contentError)) ||
         !nextHud.load([&a](const auto& name,auto& bytes){return readLoadingResource(a,name,bytes);},worldName,contentError)) {
         std::fprintf(stderr, "gameplay load failed: %s\n", contentError.c_str());
         a.loadError=contentError;nextRenderer.clear(a.gfx);return false;
     }
     if(validateOnly){nextRenderer.clear(a.gfx);showLoadingProgress(a,1,1);return true;}
-    nextRenderer.preloadClassSprites(nextContent);
     // Additional port-only validation Worlds never consume live session IDs.
     // Commit a fresh native pool reconstruction only after every asset/scene
     // check succeeds; failure leaves the active World and allocator intact.
     if(!validation.reconstructNativePoolForReplacement(a.world.nativePoolReplacementContext(),contentError,saved!=nullptr)) {
         a.loadError=contentError;nextRenderer.clear(a.gfx);return false;
     }
+    // Parsed data now belongs to nextLevel/content. Drop raw input buffers
+    // before atlas creation and release the old sprite cache before preloading
+    // unused/new class banks. All fallible validation still precedes commit.
+    std::vector<uint8_t>().swap(data);
+    std::vector<uint8_t>().swap(instances);
+    std::vector<uint8_t>().swap(catalog);
     showLoadingProgress(a,.75f,.85f);
     if(entering)validation.setPlayerPosition(entry.x,entry.y);
     const auto atlas=vyruz::paddedTileAtlas(nextLevel.tiles,kAtlasPerRow);
@@ -447,6 +487,8 @@ bool loadLevelData(App& a, const std::string& path,const vyruz::SavedLevel* save
     a.level = std::move(nextLevel);
     a.content = std::move(nextContent);
     a.sceneRenderer = std::move(nextRenderer);
+    releaseUnusedPortMemory();
+    a.sceneRenderer.preloadClassSprites(a.content);
     nextHud.setLevel(a.level);
     if(entering)nextHud.inheritInventory(a.hud);
     a.hud.clear(a.gfx);a.hud=std::move(nextHud);a.deathPresented=false;a.presentationReturnMain=false;a.presentationReturnExtras=false;a.paused=false;a.inventory={};a.menu={};a.menu.debugEnabled=a.debugEnabled;a.menu.slidesAvailable=a.slidesAvailable;
@@ -476,6 +518,7 @@ bool loadLevelData(App& a, const std::string& path,const vyruz::SavedLevel* save
         for(const auto& diagnostic:a.audio.diagnostics())std::fprintf(stderr,"audio: %s\n",diagnostic.c_str());
     }
     showLoadingProgress(a,1,1);
+    releaseUnusedPortMemory();
     return true;
 }
 
@@ -487,7 +530,7 @@ bool captureLevel(App& a,vyruz::SavedLevel& saved,std::string& error) {
 #include "save_preview.inc"
 bool saveSession(App& a,int64_t cost,std::string& error) {
     if(a.demoActive){error="Demo playback cannot be saved.";return false;}
-    vyruz::SaveGame save;save.currentLevel=levelKey(a.content.mapPath);save.levels=a.visited;save.restartLevel=a.restartLevel;
+    vyruz::SaveGame save;save.currentLevel=levelKey(a.content.mapPath);save.restartLevel=a.restartLevel;
     vyruz::SavedLevel current;
     if(!captureLevel(a,current,error))return false;
     auto& money=current.world.actors.at(current.world.player).vitals.money;
@@ -526,7 +569,6 @@ bool startAsyncSave(App& a,int64_t cost,std::string& error) {
                 // Destroy large working state here, never in future::get on the
                 // render thread. Only the small result crosses back.
                 auto save=std::move(*snapshot);snapshot.reset();
-                for(const auto& [key,level]:a.visited)save.levels.emplace(key,level);
                 save.restartLevel=a.restartLevel;
                 std::error_code ec;const auto parent=std::filesystem::path(path).parent_path();
                 if(!parent.empty())std::filesystem::create_directories(parent,ec);
@@ -542,6 +584,7 @@ bool startAsyncSave(App& a,int64_t cost,std::string& error) {
                 // Optional preview failure must never undo a committed save.
                 if(result.ok)try{writeSavePreview(result.path,preview);}catch(...){}
             }catch(const std::exception& e){result.error=e.what();}
+            releaseUnusedPortMemory();
             return result;
         });
         error.clear();return true;
@@ -549,14 +592,16 @@ bool startAsyncSave(App& a,int64_t cost,std::string& error) {
 }
 bool startAsyncRetry(App& a,std::string& error) {
     try {
+        releaseUnusedPortMemory();
         const auto path=a.savePath,profile=a.options.storageProfile(),level=a.restartPath;
         a.saveFuture=std::async(std::launch::async,[&a,path,profile,level] {
             SaveResult result;result.retry=true;
             try {
-                vyruz::SaveGame save;save.currentLevel=level;save.levels=a.visited;
+                vyruz::SaveGame save;save.currentLevel=level;
                 save.levels[save.currentLevel]=*a.restartLevel;
-                result.ok=vyruz::writeDefaultRetry(path,profile,save,result.error);
+                result.ok=vyruz::writeDefaultRetry(path,profile,std::move(save),result.error);
             }catch(const std::exception& e){result.error=e.what();}
+            releaseUnusedPortMemory();
             return result;
         });
         error.clear();return true;
@@ -593,19 +638,22 @@ bool loadSession(App& a,const std::string& selectedPath={}) {
     vyruz::SaveGame save;std::string error;
     const auto& source=selectedPath.empty()?a.savePath:selectedPath;
     if(!vyruz::readSaveFile(source,save,error)){a.loadError=error;return false;}
-    // Validate every retained level before committing, including asset references.
-    for(const auto& [path,state]:save.levels)
-        if(path!=save.currentLevel && !loadLevelData(a,path,&state,false,true))return false;
+    // Legacy saves may contain completed maps. Validate them transactionally,
+    // but never retain them after loading the current level.
+    for(auto it=save.levels.begin();it!=save.levels.end();) {
+        if(it->first==save.currentLevel){++it;continue;}
+        if(!loadLevelData(a,it->first,&it->second,false,true))return false;
+        it=save.levels.erase(it);
+    }
     const auto current=save.levels.find(save.currentLevel);
     if(current==save.levels.end()){a.loadError="Save has no current level.";return false;}
     if(save.restartLevel && !loadLevelData(a,current->first,&*save.restartLevel,false,true))return false;
     if(!loadLevelData(a,current->first,&current->second,false,false,true))return false;
     // Legacy saves have no entry history: retry the loaded live checkpoint.
-    a.restartLevel=save.restartLevel;
+    a.restartLevel=std::move(save.restartLevel);
     if(!a.restartLevel && a.world.player().alive)a.restartLevel=current->second;
     const auto currentPath=current->first;
     a.restartPath=currentPath;a.restartProfile=a.options.storageProfile();a.retryDiskPath.clear();
-    a.visited=std::move(save.levels);a.visited.erase(currentPath);
     a.sessionStarted=true;a.scoreRecorded=false;a.suppressFireUntilRelease=true;
     std::printf("loaded save: %s\n",source.c_str());return true;
 }
@@ -667,21 +715,15 @@ bool changeLevel(App& a,const vyruz::TransitionRequest& request) {
             terminal?vyruz::endingTerminalText(a.audioLanguage):a.endingFirstText);return true;
     }
     const bool debugAI=a.world.debugEnemyAI(),debugGod=a.world.debugGodMode();
-    auto carried=a.world.carry();vyruz::SavedLevel departing;std::string error;
-    if(!captureLevel(a,departing,error)){a.world.rejectTransition(error);return false;}
-    const auto source=levelKey(a.content.mapPath),destination=levelKey(request.path);
-    departing.world.transition.reset();
-    if(request.lift<departing.world.objects.size())
-        vyruz::consumeLiftUse(departing.world.objects[request.lift]);
-    // Native transition saves omit temporary Surprise association. Normalize
-    // only the retained copy so a failed destination keeps the live effect.
-    vyruz::normalizeSavedSurprise(departing.world);
-    const auto retained=a.visited.find(destination);
+    // Native41f7c0 replaces the previous world. Campaign exits are forward-only;
+    // keep player carry, not a snapshot of every completed map. loadLevelData
+    // validates the destination before committing, preserving failure rollback.
+    auto carried=a.world.carry();
+    const auto destination=levelKey(request.path);
     carried.vitals.money-=request.cost;
-    if(!loadLevelData(a,destination,retained==a.visited.end()?nullptr:&retained->second,true,false,true,-1,&carried)) {
+    if(!loadLevelData(a,destination,nullptr,true,false,true,-1,&carried)) {
         a.world.rejectTransition(a.loadError);return false;
     }
-    a.visited[source]=std::move(departing);a.visited.erase(destination);
     a.world.setDebugEnemyAI(debugAI);a.world.setDebugGodMode(debugGod);
     a.restartLevel=vyruz::SavedLevel{a.world.snapshot(),a.sceneRenderer.capture()};
     a.restartPath=levelKey(a.content.mapPath);a.restartProfile=a.options.storageProfile();
@@ -696,7 +738,6 @@ bool restartLevel(App& a) {
     const auto checkpoint=a.restartLevel;
     if(!loadLevelData(a,path,checkpoint?&*checkpoint:nullptr,false,false,true))return false;
     if(checkpoint)a.restartLevel=checkpoint;
-    a.visited.erase(levelKey(path));
     a.scoreRecorded=false;a.sessionStarted=true;a.suppressFireUntilRelease=true;
     return true;
 }
@@ -712,7 +753,7 @@ bool selectDebugLevel(App& a,size_t selected) {
     // Same staged loader as normal gameplay: failures retain the live session.
     // Fresh test session, no departing-level capture, reward, or disk write.
     if(!loadLevelData(a,vyruz::debugLevels()[selected],nullptr,false,false,true))return false;
-    a.visited.clear();a.sessionStarted=true;a.suppressFireUntilRelease=true;
+    a.sessionStarted=true;a.suppressFireUntilRelease=true;
     a.world.setDebugEnemyAI(ai);a.world.setDebugGodMode(god);
     return true;
 }
@@ -754,7 +795,7 @@ bool applyMenuAction(App& a) {
                 levelChanged=action==vyruz::MenuAction::Restart?restartLevel(a):
                     loadLevelData(a,path,nullptr,false,false,true,a.options.difficulty);
                 if(levelChanged){
-                    if(action==vyruz::MenuAction::NewGame){a.visited.clear();a.scoreRecorded=false;persistRetrySession(a,true);}
+                    if(action==vyruz::MenuAction::NewGame){a.scoreRecorded=false;persistRetrySession(a,true);}
                     a.sessionStarted=true;a.suppressFireUntilRelease=true;
                 }
                 else a.menu.error="Could not load level. Try again.";
@@ -769,7 +810,13 @@ bool saveScreenshot(const char* path, int w, int h) {
     }
     std::vector<uint8_t> px(static_cast<size_t>(w) * h * 3);
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
+#if VYRUZ_GLES
+    std::vector<uint8_t> rgba(size_t(w)*h*4);
+    glReadPixels(0,0,w,h,GL_RGBA,GL_UNSIGNED_BYTE,rgba.data());
+    for(size_t i=0;i<size_t(w)*h;++i)for(int c=0;c<3;++c)px[i*3+c]=rgba[i*4+c];
+#else
     glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, px.data());
+#endif
     if(glGetError()!=GL_NO_ERROR) {std::fprintf(stderr,"screenshot framebuffer read failed\n");return false;}
     FILE* f = std::fopen(path, "wb");
     if (!f) {std::fprintf(stderr,"cannot create screenshot: %s\n",path);return false;}
@@ -1104,7 +1151,9 @@ void handleInput(App& a) {
     applyControllerAimAssist(a,command,controller.aimActive);
     if (a.forcedDir >= 0) a.world.setPlayerDirection(a.forcedDir);
     bindEffectCamera(a);
+    const auto worldStart=a.profileTick?SDL_GetPerformanceCounter():0;
     a.world.tick(kMoveDt, {command, fire && !a.suppressFireUntilRelease, weaponDelta});
+    if(a.profileTick)a.profileWorldMs=1000.0*(SDL_GetPerformanceCounter()-worldStart)/SDL_GetPerformanceFrequency();
     const auto position = a.world.playerPosition();
     a.worldX = position.x; a.worldY = position.y;
     a.motion.direction = a.world.player().direction;
@@ -1132,24 +1181,54 @@ void endingColor(App& a,double remaining) {
 // Presentation-only diagnostics. Half-second averages include swap and pacing;
 // peak exposes stalls without adding GL queries or synchronizing the GPU.
 void recordDebugFrame(App& a,double milliseconds) {
-    if(!a.debugEnabled || milliseconds<=0)return;
+    if(!a.debugEnabled && !a.options.fpsCounter){
+        a.debugFrameSum=0;a.debugFramePeak=0;a.debugFrameCount=0;a.fpsText="FPS --";return;
+    }
+    if(milliseconds<=0)return;
     a.debugFrameSum+=milliseconds;++a.debugFrameCount;
     a.debugFramePeak=std::max(a.debugFramePeak,milliseconds);
     if(a.debugFrameSum>=500){
         char label[128];std::snprintf(label,sizeof(label),"FPS %.1f  FRAME %.2f MS  MAX %.2f MS",
             1000.0*a.debugFrameCount/a.debugFrameSum,a.debugFrameSum/a.debugFrameCount,a.debugFramePeak);
-        a.debugFrameText=label;a.debugFrameSum=0;a.debugFramePeak=0;a.debugFrameCount=0;
+        a.debugFrameText=label;
+        std::snprintf(label,sizeof(label),"FPS %.1f",1000.0*a.debugFrameCount/a.debugFrameSum);a.fpsText=label;
+        a.debugFrameSum=0;a.debugFramePeak=0;a.debugFrameCount=0;
     }
 }
 void presentApplication(App& a) {
-    if(a.debugEnabled){
+    if((a.debugEnabled || a.options.fpsCounter) && SDL_GetTicks64()>=a.debugMemoryNext){
+        a.debugMemoryNext=SDL_GetTicks64()+1000;
+        const auto memory=vyruz::processMemory(a.debugEnabled);
+        const auto mib=[](std::optional<uint64_t> kib){
+            if(!kib)return std::string("N/A");
+            char text[32];std::snprintf(text,sizeof(text),"%.1f",double(*kib)/1024);return std::string(text);
+        };
+        a.rssText="RSS "+mib(memory.rss)+(memory.rss?" MIB":"");
+        if(a.debugEnabled){
+        a.debugMemoryText={
+            "RAM MIB: RSS "+mib(memory.rss)+"  PSS "+mib(memory.pss),
+            "ANON "+mib(memory.anonymous)+"  FILE "+mib(memory.file)+"  SHMEM "+mib(memory.shmem),
+            "PRIVATE "+mib(memory.privatePages)+"  SHARED "+mib(memory.sharedPages)+" (ALT VIEW)"};
+        const auto& actors=a.world.actors();
+        const auto live=std::count_if(actors.begin(),actors.end(),[](const auto& actor){return actor.alive;});
+        a.debugMemoryText.push_back("OBJECTS "+std::to_string(actors.size())+"  LIVE "+std::to_string(live)+"  DEAD "+std::to_string(actors.size()-live));
+        char storage[96];std::snprintf(storage,sizeof(storage),"ROW DATA %.1f MIB (EXCLUDES DYNAMIC DATA)",
+            double(actors.size()*sizeof(vyruz::ActorState)+a.content.objects.size()*sizeof(vyruz::ObjectPlacement))/(1024*1024));
+        a.debugMemoryText.push_back(storage);
+        }
+    }
+    if(a.debugEnabled || a.options.fpsCounter){
+        const float right=a.debugEnabled?480.f:230.f;
         glMatrixMode(GL_MODELVIEW);glPushMatrix();glLoadIdentity();
         glPushAttrib(GL_ENABLE_BIT|GL_COLOR_BUFFER_BIT|GL_CURRENT_BIT);
         glDisable(GL_TEXTURE_2D);glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
         glColor4f(0,0,0,.65f);glBegin(GL_QUADS);
-        glVertex2f(10,72);glVertex2f(480,72);glVertex2f(480,100);glVertex2f(10,100);glEnd();
+        const float bottom=100+(a.debugEnabled?20.f*a.debugMemoryText.size():0);
+        glVertex2f(10,72);glVertex2f(right,72);glVertex2f(right,bottom);glVertex2f(10,bottom);glEnd();
         glEnable(GL_TEXTURE_2D);glColor4f(1,1,1,1);
-        a.hud.drawMenuText(a.gfx,a.debugFrameText,18,94,4,460);
+        a.hud.drawMenuText(a.gfx,a.debugEnabled?a.debugFrameText:a.fpsText+"  "+a.rssText,18,94,4,right-20);
+        if(a.debugEnabled)for(size_t i=0;i<a.debugMemoryText.size();++i)
+            a.hud.drawMenuText(a.gfx,a.debugMemoryText[i],18,114+20.f*i,4,right-20);
         glPopAttrib();glPopMatrix();
     }
     a.gfx.present();
@@ -1258,6 +1337,12 @@ void render(App& a,float alpha=1) {
             a.camX+=a.world.surprise().shakeOffset.x;
             a.camY+=a.world.surprise().shakeOffset.y;
         }
+#if VYRUZ_GLES
+        // Keep baked tiles and scenery overlays on one raster grid while the
+        // interpolated camera moves. Simulation/player interpolation is intact.
+        a.camX=vyruz::Viewport::pixelAligned(a.camX,view.width,a.gfx.drawableWidth());
+        a.camY=vyruz::Viewport::pixelAligned(a.camY,view.height,a.gfx.drawableHeight());
+#endif
 
         const auto& L = a.level;
         // Visible cell range (margin for tile extents).
@@ -1523,8 +1608,14 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return 1;
     }
+#if VYRUZ_GLES
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#else
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+#endif
 
     if(!controllerMap.empty() && SDL_GameControllerAddMappingsFromFile(controllerMap.c_str())<0){
         std::fprintf(stderr,"controller mapping failed: %s\n",SDL_GetError());SDL_Quit();return 1;
@@ -1704,7 +1795,7 @@ int main(int argc, char** argv) {
     double pendingTime = 0.0;
     double softwareDeadline = static_cast<double>(lastFrame);
     std::string lastTitle;
-    std::vector<double> frameTimes,tickTimes,renderTimes,workTimes,warmupTimes;
+    std::vector<double> frameTimes,tickTimes,renderTimes,workTimes,warmupTimes,worldTimes,animationTimes;
     int profileFrame=0,profileCatchups=0,profileDroppedTicks=0;
     if(profileFrames) {
         frameTimes.reserve(profileFrames);tickTimes.reserve(profileFrames*2);
@@ -1715,6 +1806,7 @@ int main(int argc, char** argv) {
         const Uint64 now = SDL_GetPerformanceCounter();
         const double menuFrameMs=1000.0*static_cast<double>(now-lastFrame)/timerFrequency;
         const bool measuring=profileFrames && profileFrame>=profileWarmup;
+        a.profileTick=measuring;
         pendingTime += std::min(0.1, static_cast<double>(now - lastFrame) / timerFrequency);
         lastFrame = now;
         // Movement constants are per 1/60-second simulation step. Keep their
@@ -1725,12 +1817,16 @@ int main(int argc, char** argv) {
             const auto tickStart=SDL_GetPerformanceCounter();
             a.previousPositions.clear();
             for(const auto& object:a.content.objects)a.previousPositions.push_back(object.position);
+            a.profileWorldMs=0;
             handleInput(a);
+            if(measuring)worldTimes.push_back(a.profileWorldMs);
             advanceDeathPrompt(a,kMoveDt*1000.0);
             const bool liveDeath=a.presentation.page==vyruz::PresentationPage::DeathPrompt && !a.presentation.suspended;
             if(a.paused||(a.presentation.open()&&!liveDeath))a.previousPositions.clear();
             a.audio.device().setPaused(a.presentation.open()?a.presentation.suspended:(a.paused && a.sessionStarted));
+            const auto animationStart=measuring?SDL_GetPerformanceCounter():0;
             if (liveDeath || (!a.presentation.open() && !a.paused && a.world.player().alive)) { advanceSceneAnimation(a,kMoveDt*1000,a.world.elapsedMilliseconds());a.hud.advance(kMoveDt*1000,&a.world); }
+            if(measuring)animationTimes.push_back(1000.0*(SDL_GetPerformanceCounter()-animationStart)/timerFrequency);
             if(a.inventory.open)a.hud.advanceInventory(kMoveDt*1000,a.world,a.inventory);
             a.audio.setListenerHalfWidth(unsigned(std::max(1.f,a.gfx.viewport().width*.5f)));
             if(a.sessionStarted&&(!a.presentation.open()||liveDeath))a.audio.consume(a.world,a.content,a.sceneRenderer.takeAudioCues());
@@ -1801,6 +1897,11 @@ int main(int argc, char** argv) {
             for(unsigned i=0;i<flashes;++i)a.audio.cue("electric.wav");
         }
         const auto renderStart=SDL_GetPerformanceCounter();
+#if VYRUZ_GLES
+        // EGL may discard/exchange the backbuffer on swap. --shot exits after
+        // this frame, so read its final pixels before any swap occurs.
+        a.gfx.setSwapEnabled(shotPath.empty());
+#endif
         render(a,shotPath.empty()?static_cast<float>(pendingTime/kMoveDt):1.f);
         if(a.options.crt&&!a.gfx.crtEnabled()){a.options.crt=false;a.menu.error="CRT disabled: "+a.gfx.crtError();}
         if(a.options.smaa&&!a.gfx.smaaEnabled()){a.options.smaa=false;a.menu.error="SMAA unavailable; disabled for this run.";}
@@ -1852,7 +1953,9 @@ int main(int argc, char** argv) {
         report("warmup frame (excluded)",warmupTimes);
         report("frame (including present/pacing)",frameTimes);
         report("simulation/input/animation/audio tick",tickTimes);
+        report("World tick",worldTimes);report("scene/HUD animation tick",animationTimes);
         report("render/present",renderTimes);report("frame before software pacing",workTimes);
+        std::printf("profile level=%s objects=%zu actors=%zu resolution=%dx%d\n",a.content.mapPath.c_str(),a.content.objects.size(),a.world.actors().size(),a.options.width,a.options.height);
         const double budget=1000.0/renderHz;
         const auto overruns=std::count_if(frameTimes.begin(),frameTimes.end(),[&](double ms){return ms>budget*1.5;});
         std::printf("profile requested_hz=%d vsync=%d warmup=%zu frames_over_1.5_budget=%zu catchup_frames=%d dropped_ticks=%d\n",

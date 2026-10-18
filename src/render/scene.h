@@ -1,4 +1,6 @@
 #pragma once
+#include "render/texture_residency.h"
+#include "render/sprite_sequences.h"
 #include "render/animation.h"
 #include "game/attached_fx_altitude.h"
 #include "render/enemy_orbits.h"
@@ -49,6 +51,8 @@ public:
     bool loadTerrain(const NativeTileBodyCatalog&,std::string& error,NativeRandomState presentationRandom={});
     bool sync(const SceneContent&, std::string& error);
     void clear(Gfx&);
+    // Discard reproducible GPU copies while retaining images and animation state.
+    void releaseTextures(Gfx&);
     void advance(double milliseconds,const std::vector<ActorState>* actors=nullptr,double worldTimeMs=-1,const SurpriseState* surprise=nullptr);
     // Legacy advance remains an unbounded single-pass adapter for isolated art
     // fixtures. Gameplay enables this protocol and supplies every native phase.
@@ -65,12 +69,16 @@ public:
               const std::vector<ActorState>* actors=nullptr,
               const std::vector<ContentPosition>* previous=nullptr,float alpha=1,const SurpriseState* surprise=nullptr,bool playerOnly=false);
 private:
+    SpriteSequenceUses sequenceUses_;
+    bool decodeBank(const std::string&,GafAnimation&);
     PlayerTurnPresentation playerTurn_;
     std::optional<size_t> playerObject_;
     std::optional<ContentPosition> playerBodyCenter_;
+    TextureResidency textureResidency_;
     struct Bank { GafAnimation animation; std::vector<GLuint> textures; };
     struct Channel { size_t object; bool shadow; Bank* bank; uint32_t sequence; AnimationCursor cursor; uint64_t gateRevision=0; bool firing=false; uint64_t fireRevision=0; bool lift=false; std::vector<GafSubframe> pendingAudio{}; bool spider=false; uint32_t baseSequence=0; uint64_t visualRevision=0; Bank* generatorBank=nullptr; bool derivedInvisible=false; float visibility=0,fadeClockMs=0; bool visibilityAlpha=true; bool helicopter=false; bool walker=false; bool walkerTurned=false; int flightTilt=0; double flightClockMs=0; ContentPosition flightPosition{},flightPrevious{};
         // Derived pose policy: -1 timed, 0 fixed, 1/2 entries per heading.
+        bool skipNewbornAdvance=false;
         int shadowPoseStride=-1;
         bool turretBase=false; // Native primary-bank sequence25, ground anchor.
         bool bankedEnemy=false,tank=false;
@@ -101,6 +109,12 @@ private:
     double terrainClockMs_=0;
     void advanceTerrain(double,const EnemyAnimationView&);
     std::vector<Channel> channels_;
+    // Compact traversal metadata keeps expired FX history out of hot cursor
+    // scans without changing channel indices or persisted animation state.
+    struct ChannelScan { size_t object; uint64_t visualRevision; bool passive,helicopter,inactive=false; };
+    std::vector<ChannelScan> channelScan_;
+    std::vector<size_t> workingChannels_;
+    void refreshChannelScan(size_t first=0);
     // Enemy firing is derived presentation state, excluded from old save layouts.
     std::vector<Channel> enemyFire_;
     bool resetEnemyFire_=false;

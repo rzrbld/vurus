@@ -26,6 +26,10 @@ int main(){
     GameWorld empty;audio.consume(empty,scene,{});check(reads==loaded);
     audio.reset();check(audio.load(scene,reader,"ENGLISH",error));check(reads==loaded);
     check(audio.load(scene,reader,"FRENCH",error));check(paths.contains("COMMON/DATA/SOUND/FRENCH/V-KEY.WAV"));
+    paths.clear();const auto frenchReads=reads;
+    check(audio.load(scene,reader,"ENGLISH",error));
+    check(reads>frenchReads&&paths.contains("COMMON/DATA/SOUND/ENGLISH/V-KEY.WAV"));
+    check(!paths.contains("common/data/sound/money.wav")); // common clips retained
     check(!audio.musicFile("/tmp/vyruz-no-such-track-128731.wav",error));check(!error.empty());
     // Tiny CD fixtures exercise asynchronous queue handoff and repeat, without
     // loading disc-sized PCM or depending on a particular randomized first track.

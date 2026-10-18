@@ -1,5 +1,6 @@
 #pragma once
 #include "assets/content_text.h"
+#include "game/shared_properties.h"
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -20,7 +21,7 @@ struct ObjectClass {
     ClassId id{};
     std::string name;
     std::optional<ClassId> parent;
-    std::vector<TextNode> properties; // resolved snapshot, unknown fields retained
+    SharedProperties properties; // resolved snapshot, unknown fields retained
     SpriteReference sprite, shadow;
     ActorFlags flags;
     std::vector<std::string> behaviours;
@@ -43,7 +44,7 @@ struct ObjectPlacement {
     ActorFlags flags;
     SpriteReference sprite, shadow;
     std::vector<std::string> behaviours;
-    std::vector<TextNode> properties;
+    SharedProperties properties;
     std::vector<PatrolReference> patrols;
     TextNode authored;
 };

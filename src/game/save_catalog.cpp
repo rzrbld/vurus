@@ -102,7 +102,7 @@ SaveCatalogEntry metadata(const std::filesystem::path& path,int fd,uint64_t numb
 }
 std::filesystem::path saveHistoryDirectory(const std::filesystem::path& base,const std::string& profile){return base.parent_path()/"saves"/profileComponent(profile);}
 std::filesystem::path defaultRetryPath(const std::filesystem::path& base,const std::string& profile){return saveHistoryDirectory(base,profile)/"default.vzs";}
-bool writeDefaultRetry(const std::filesystem::path& base,const std::string& profile,const SaveGame& save,std::string& error){
+bool writeDefaultRetry(const std::filesystem::path& base,const std::string& profile,SaveGame save,std::string& error){
     Fd directory(historyFd(base,profile,true));
     if(directory.value<0){error="Cannot open retry directory: "+std::string(std::strerror(errno));return false;}
     struct stat status{};
@@ -110,9 +110,9 @@ bool writeDefaultRetry(const std::filesystem::path& base,const std::string& prof
     //The held directory FD prevents parent symlink replacement from redirecting
     //atomic temporary creation/rename. The generic writer never follows the old file.
 #if defined(__linux__) && !defined(VYRUZ_PORTABLE_POSIX_FILES)
-    return writeSaveFile("/proc/self/fd/"+std::to_string(directory.value)+"/default.vzs",save,error);
+    return writeSaveFile("/proc/self/fd/"+std::to_string(directory.value)+"/default.vzs",std::move(save),error);
 #else
-    std::vector<uint8_t> bytes;if(!encodeStoredSave(save,bytes,error))return false;
+    std::vector<uint8_t> bytes;if(!encodeStoredSave(std::move(save),bytes,error))return false;
     static std::atomic<uint64_t> serial{0};std::string temporary;int fd=-1;
     for(int i=0;i<100;++i){temporary=".retry-"+std::to_string(::getpid())+"-"+std::to_string(++serial);fd=::openat(directory.value,temporary.c_str(),O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC,0600);if(fd>=0||errno!=EEXIST)break;}
     if(fd<0){error=std::strerror(errno);return false;}

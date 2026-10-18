@@ -16,7 +16,13 @@ bool HudRenderer::load(const ContentReader& read,const std::string& world,std::s
         if (!read(world+"/DATA/"+path,bytes) && !read("COMMON/DATA/"+path,bytes)) {
             error="missing HUD resource: "+path;return false;
         }
-        if (!decodeGafAnimation(bytes,bank.animation) ||
+        // These call sites draw static poses only. Keep all indices/metadata,
+        // and leave fonts, menu animation and status indicators fully decoded.
+        auto mode=GafDecodeMode::All;
+        if(&bank==&darkness_ || &bank==&pause_)mode=GafDecodeMode::FirstBitmap;
+        else if(&bank==&cursor_ || &bank==&score_)mode=GafDecodeMode::FirstSequencePose;
+        else if(&bank==&coins_ || &bank==&failed_ || &bank==&vPanel_)mode=GafDecodeMode::SequenceFirstPoses;
+        if (!decodeGafAnimation(bytes,bank.animation,mode) ||
             (fonts && (!decodeGafFonts(bytes,bank.animation.frames.size(),fonts_) || fonts_.empty()))) {
             error="invalid HUD resource: "+path;return false;
         }
@@ -90,7 +96,7 @@ void HudRenderer::drawScreenBorders(Gfx& gfx) {
         const float sx=horizontal?view.width/image.width:1.f,sy=horizontal?1.f:view.height/image.height;
         const float x=(number==10?view.width-1:0)+(pose.offsetX+frame.originX)*sx;
         const float y=(number==8?view.height-1:0)+(pose.offsetY+frame.originY)*sy;
-        auto& texture=vPanel_.textures[pose.frameIndex];if(!texture)texture=gfx.uploadTexture(image.rgba.data(),image.width,image.height);
+        auto& texture=vPanel_.textures[pose.frameIndex];if(!texture)texture=gfx.uploadTexture(image);
         gfx.beginQuads(texture);gfx.quad(x,y,0,0,x+image.width*sx,y,1,0,x+image.width*sx,y+image.height*sy,1,1,x,y+image.height*sy,0,1);gfx.endQuads();
     }
     glDisable(GL_ALPHA_TEST);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);glPopMatrix();
@@ -156,7 +162,7 @@ void HudRenderer::drawSurpriseWorld(Gfx& gfx,const GameWorld& world,float camera
     if(e.kind==SurpriseKind::Darkness && !darkness_.animation.frames.empty()) {
         const auto& frame=darkness_.animation.frames.front();
         auto& tex=darkness_.textures.front();
-        if(!tex)tex=gfx.uploadTexture(frame.image.rgba.data(),frame.image.width,frame.image.height);
+        if(!tex)tex=gfx.uploadTexture(frame.image);
         // Original 128x103 quadrant stretched to half the 376x309 bounds.
         const auto native=nativeHeading(world.player().direction);
         const auto heading=nativeToSurface(native.x,native.y);
@@ -345,7 +351,7 @@ void HudRenderer::bitmap(Gfx& gfx,Bank& bank,size_t id,float x,float y,float cli
     const float w=std::floor(image.width*clip),h=image.height;
     if(!w||!h)return;
     auto& texture=bank.textures[id];
-    if(!texture)texture=gfx.uploadTexture(image.rgba.data(),image.width,image.height);
+    if(!texture)texture=gfx.uploadTexture(image);
     gfx.beginQuads(texture);
     const float u=w/image.width;
     gfx.quad(x,y,0,0,x+w,y,u,0,x+w,y+h,u,1,x,y+h,0,1);gfx.endQuads();

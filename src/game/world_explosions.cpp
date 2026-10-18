@@ -27,7 +27,7 @@ const GafSequence* GameWorld::effectSequence(const SpriteReference& sprite) {
         std::optional<GafSequence> sequence;
         std::vector<uint8_t> bytes;GafAnimation bank;
         if(effectReader_ && sprite.sequence.value && effectReader_(sprite.path,bytes) &&
-           decodeGafAnimation(bytes,bank) && sprite.sequence.value<=bank.sequences.size())
+           decodeGafAnimation(bytes,bank,GafDecodeMode::Metadata) && sprite.sequence.value<=bank.sequences.size())
             sequence=std::move(bank.sequences[sprite.sequence.value-1]);
         found=effectSequences_.emplace(key,std::move(sequence)).first;
         if(!found->second)diagnostics_.push_back("Explosion animation unavailable: "+sprite.path);

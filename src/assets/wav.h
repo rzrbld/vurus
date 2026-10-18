@@ -4,6 +4,9 @@
 
 namespace vyruz {
 
+// File extents for PCM interleaved with other media (for example AVI).
+struct PcmChunk { uint64_t offset=0,bytes=0; };
+
 struct Wave {
     uint32_t sampleRate = 0;
     uint16_t channels = 0;

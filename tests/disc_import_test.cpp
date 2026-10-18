@@ -11,6 +11,8 @@
 #include <fstream>
 #include <vector>
 #include <string>
+#include <thread>
+#include <array>
 namespace fs=std::filesystem;
 using Bytes=std::vector<unsigned char>;
 void put(Bytes& b,size_t off,uint32_t n,int size=4){for(int i=0;i<size;++i)b[off+i]=n>>(i*8);}
@@ -21,6 +23,33 @@ Bytes rsc(){
  for(auto range:{std::pair{32,12},std::pair{44,int(name.size()+1)}})for(int i=0;i<range.second;++i){unsigned char x=~b[range.first+i];const int n=i%8;b[range.first+i]=n?((x<<n)|(x>>(8-n))):x;}
  for(int i=0;i<4;++i)b[data+i]=(i+1)^255;return b;
 }
+// Three entries larger than a stream buffer expose shared seek-position races.
+Bytes threadedRsc(){
+ constexpr size_t count=3,span=32771,names=32+count*12,payload=names+6;
+ Bytes b(payload+count*span);put(b,0,count,2);put(b,2,0x102,2);
+ put(b,4,32);put(b,8,count*12);put(b,12,names);put(b,16,6);
+ put(b,20,payload);put(b,24,count*span);put(b,28,0x5f584b5f);
+ for(size_t i=0;i<count;++i){put(b,32+i*12,i*2,2);put(b,36+i*12,i*span);put(b,40+i*12,span);b[names+i*2]='a'+i;
+  for(size_t j=0;j<span;++j)b[payload+i*span+j]=uint8_t((j+i*37)^255);}
+ for(auto [off,size]:{std::pair{size_t(32),count*12},std::pair{names,size_t(6)}})
+  for(size_t i=0;i<size;++i){uint8_t x=~b[off+i];const auto n=i%8;b[off+i]=n?uint8_t((x<<n)|(x>>(8-n))):x;}
+ return b;
+}
+void archiveHandleChecks(const fs::path& root){
+ const auto path=root/"threaded.rsc";write(path,threadedRsc());
+ vyruz::RscArchive a;assert(a.open(path.string()));auto copy=a;auto moved=std::move(a);
+ std::array<std::thread,4> readers;
+ for(size_t t=0;t<readers.size();++t)readers[t]=std::thread([&,t]{
+  for(size_t n=0;n<150;++n){const auto id=(n+t)%3;auto bytes=(t%2?copy:moved).read(id);
+   assert(bytes.size()==32771);for(size_t j=0;j<bytes.size();++j)assert(bytes[j]==uint8_t(j+id*37));}
+ });
+ for(auto& reader:readers)reader.join();
+ assert(!moved.open((root/"missing-archive").string())&&moved.entryCount()==0);
+ assert(copy.read(2).front()==74); // resetting one owner must not close another
+ bool rejected=false;try{copy.read(3);}catch(const std::out_of_range&){rejected=true;}assert(rejected);
+ copy={};moved={};a={}; // release handles before filesystem cleanup on Windows
+ fs::remove(path);
+}
 size_t record(Bytes& b,size_t at,const std::string& name,uint32_t block,uint32_t size,bool directory){
  const size_t n=33+name.size()+(name.size()%2==0);b[at]=n;put(b,at+2,block);put(b,at+10,size);b[at+25]=directory?2:0;b[at+32]=name.size();for(size_t i=0;i<name.size();++i)b[at+33+i]=name[i];return n;
 }
@@ -30,8 +59,47 @@ Bytes iso(bool movie=false){
  if(movie){record(b,at,"Intro.avi;1",24,5,false);for(int i=0;i<5;++i)b[24*2048+i]=i+10;}
  std::copy(archive.begin(),archive.end(),b.begin()+22*2048);std::copy(archive.begin(),archive.end(),b.begin()+23*2048);return b;
 }
+void chunkedImportChecks(const fs::path& root){
+ const auto archive=threadedRsc();Bytes movie(65537);for(size_t i=0;i<movie.size();++i)movie[i]=uint8_t(i*7);
+ const uint32_t archiveBlocks=(archive.size()+2047)/2048;
+ const uint32_t second=22+archiveBlocks,video=second+archiveBlocks,blocks=video+(movie.size()+2047)/2048;
+ auto image=iso();image.resize(size_t(blocks)*2048);put(image,16*2048+80,blocks);
+ std::fill(image.begin()+21*2048,image.begin()+22*2048,0);
+ size_t at=21*2048;at+=record(image,at,"VZ-DATA.RSC;1",22,archive.size(),false);
+ at+=record(image,at,"VZ-SLIDE.RSC;1",second,archive.size(),false);
+ record(image,at,"INTRO.AVI;1",video,movie.size(),false);
+ std::copy(archive.begin(),archive.end(),image.begin()+22*2048);
+ std::copy(archive.begin(),archive.end(),image.begin()+second*2048);
+ std::copy(movie.begin(),movie.end(),image.begin()+video*2048);
+ auto read=[](const fs::path& path){std::ifstream f(path,std::ios::binary);return Bytes(std::istreambuf_iterator<char>(f),{});};
+ for(int layout:{0,16,24}){
+  const auto dir=root/("chunked-"+std::to_string(layout));fs::create_directories(dir);
+  fs::path source=dir/"disc.iso";
+  if(!layout)write(source,image);
+  else{
+   // Nonzero data-track start plus poisoned raw-sector headers/trailers.
+   Bytes raw(size_t(blocks+7)*2352,0xa5);
+   for(size_t n=0;n<blocks;++n)std::copy_n(image.begin()+n*2048,2048,raw.begin()+(n+7)*2352+layout);
+   write(dir/"disc.bin",raw);source=dir/"disc.cue";
+   std::ofstream cue(source);cue<<"FILE \"disc.bin\" BINARY\nTRACK 01 "<<(layout==16?"MODE1":"MODE2")<<"/2352\nINDEX 01 00:00:07\n";
+  }
+  vyruz::DataLocation location;std::string error;std::vector<vyruz::ImportProgress> progress;
+  assert(vyruz::prepareData(source.string(),(dir/"cache").string(),location,error,[&](const auto&p){progress.push_back(p);return true;}));
+  assert(read(fs::path(location.directory)/"vz-data.rsc")==archive);
+  assert(read(fs::path(location.directory)/"Vz-slide.rsc")==archive);
+  assert(read(fs::path(location.directory)/"Intro.avi")==movie);
+  size_t checkpoints=0;for(const auto&p:progress)if(p.stage==vyruz::ImportStage::Resources&&p.completed==65536)++checkpoints;
+  assert(checkpoints==3); // both archives and the partial-final-sector movie
+  const auto canceled=dir/"canceled";
+  assert(!vyruz::prepareData(source.string(),canceled.string(),location,error,[](const auto&p){return p.stage!=vyruz::ImportStage::Resources||p.completed<65536;}));
+  assert(error.find("cancelled")!=std::string::npos&&!fs::exists(canceled/"current.txt"));
+  for(const auto&e:fs::directory_iterator(canceled))assert(!e.path().filename().string().starts_with(".import-"));
+ }
+}
 int main(){
  const auto root=fs::temp_directory_path()/("vyruz-import-test-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));fs::create_directories(root/"game");
+ archiveHandleChecks(root);
+ chunkedImportChecks(root);
  const auto image=root/"game/disc.iso",cache=root/"user/imports";write(image,iso());vyruz::DataLocation location;std::string error;
  assert(vyruz::prepareData((root/"game").string(),cache.string(),location,error)&&location.imported);const auto imported=location.directory;
  vyruz::Vfs vfs;assert(vfs.init(imported));Bytes data;assert(vfs.read("underground/t1u1.3dg",data)&&data==Bytes({1,2,3,4}));
