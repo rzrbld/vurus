@@ -1,0 +1,86 @@
+name: Publish validated v0.1.3
+'on':
+  workflow_dispatch: null
+  push:
+    branches:
+    - publish-v0.1.3
+    paths:
+    - .github/workflows/publish-v0.1.3.yml
+permissions:
+  actions: read
+  contents: write
+  statuses: write
+concurrency:
+  group: publish-v0.1.3
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_SHA: 74da7615f0074949a02457ee2ae65f59aec8b6b2
+      BUILD_WORKFLOW: build-desktop.yml
+      RELEASE_TAG: v0.1.3
+    steps:
+    - name: Verify successful source build
+      shell: bash
+      run: "set -euo pipefail\nfor attempt in $(seq 1 40); do\n  gh run list --workflow \"$BUILD_WORKFLOW\" --commit \"$BUILD_SHA\"\
+        \ --event push --branch main --json databaseId,headSha,status,conclusion --limit 10 > runs.json\n  BUILD_RUN=$(jq\
+        \ -r '.[0].databaseId // empty' runs.json)\n  if [ -n \"$BUILD_RUN\" ]; then break; fi\n  sleep 15\ndone\ntest -n\
+        \ \"$BUILD_RUN\"\necho \"BUILD_RUN=$BUILD_RUN\" >> \"$GITHUB_ENV\"\ngh api --method POST \"repos/$GH_REPO/statuses/$BUILD_SHA\"\
+        \ -f state=pending -f context=\"release/$RELEASE_TAG\" -f description=\"Waiting for validated CI run $BUILD_RUN\"\
+        \ -f target_url=\"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN\"\ngh run watch \"$BUILD_RUN\" --exit-status\
+        \ --interval 30\ngh api \"repos/$GH_REPO/actions/runs/$BUILD_RUN\" > run.json\njq -e --arg sha \"$BUILD_SHA\" --arg\
+        \ workflow \".github/workflows/$BUILD_WORKFLOW\" '.status == \"completed\" and .conclusion == \"success\" and .head_sha\
+        \ == $sha and .event == \"push\" and .head_branch == \"main\" and .path == $workflow' run.json\ngh api \"repos/$GH_REPO/actions/runs/$BUILD_RUN/jobs?per_page=100\"\
+        \ > jobs.json\njq -e '[.jobs[] | select(.name | startswith(\"build (\"))] | length == 4 and all(.conclusion == \"\
+        success\")' jobs.json\n"
+    - name: Validate CI packages and checksums
+      shell: bash
+      run: "set -euo pipefail\ngh run download \"$BUILD_RUN\" --pattern 'vurus-*' --dir artifacts\nmkdir packages\nfor name\
+        \ in vurus-linux.tar.gz vurus-windows-amd64.zip vurus-darwin-arm64.zip vurus-darwin-x86_64.zip; do\n  mapfile -d ''\
+        \ matches < <(find artifacts -type f -name \"$name\" -print0)\n  test \"${#matches[@]}\" -eq 1\n  test -s \"${matches[0]}\"\
+        \n  cp \"${matches[0]}\" \"packages/$name\"\ndone\npython3 - <<'CHECK'\nfrom pathlib import Path, PurePosixPath\n\
+        import tarfile, zipfile\nfor p in Path('packages').iterdir():\n if p.suffix == '.txt': continue\n if p.suffix == '.zip':\n\
+        \  with zipfile.ZipFile(p) as z:\n   assert z.testzip() is None\n   names=z.namelist()\n else:\n  with tarfile.open(p)\
+        \ as t: names=t.getnames()\n for name in names:\n  q=PurePosixPath(name)\n  assert not q.is_absolute() and '..' not\
+        \ in q.parts, name\n  assert not any(part.lower() in {'work','.git','.agents','.codex','saves','data'} for part in\
+        \ q.parts), name\n  assert q.suffix.lower() not in {'.iso','.bin','.rsc','.gaf','.vzs','.cfg'}, name\n assert any('license'\
+        \ in n.lower() for n in names), p\n print(p.name, 'validated', len(names), 'entries')\nCHECK\n(cd packages && sha256sum\
+        \ vurus-* > SHA256SUMS.txt)\n"
+    - name: Publish release
+      shell: bash
+      run: "set -euo pipefail\ncat > notes.md <<'NOTES'\nLower memory use and faster resource loading for Vurus.\n\n- Keep\
+        \ the current level and restart state without retaining completed worlds.\n- Stream CD music and intro video through\
+        \ bounded buffers.\n- Store decoded sprite and terrain pixels in compact 16-bit form; reduce unnecessary decoding\
+        \ and filtering allocations.\n- Recycle released transient effects and account for actual sprite texture payload.\n\
+        - Retain archive handles, read only archive directories at startup, and extract disc resources in chunks.\n- Fix Touch\
+        \ and Destroy leaving turret/tank bases noncolliding and impossible to damage.\n- Add an optional FPS/RSS counter\
+        \ in Advanced video settings; detailed memory diagnostics remain available with --debug.\n- Fix the Windows retry-save\
+        \ ownership signature.\n\nUser-observed ordinary gameplay RSS decreased from roughly 500\u2013700 MB to 170\u2013\
+        250 MB. These are observations across sessions, not a matched benchmark or a RAM guarantee. See the repository's performance\
+        \ report for measured allocation and I/O results.\n\nSave compatibility: schema v35 and the existing zlib envelope\
+        \ remain unchanged. Supported legacy saves still load; older builds without compression support cannot read compressed\
+        \ saves. Preserve your saves and settings when updating.\n\nDownloads: Linux x64 / Steam Deck, Windows x64, Apple\
+        \ Silicon macOS and Intel macOS. Mac builds require macOS 15+, are unsigned terminal executables, and do not support\
+        \ SMAA; FXAA remains available. Physical hardware testing is separate from CI validation.\n\nYour original game data\
+        \ is required and is not included. Engine and third-party licenses accompany the packages. Verify downloads using\
+        \ SHA256SUMS.txt.\nNOTES\nprintf '\\nBuilt and tested by [GitHub CI](https://github.com/%s/actions/runs/%s), source\
+        \ commit `%s`.\\n' \"$GH_REPO\" \"$BUILD_RUN\" \"$BUILD_SHA\" >> notes.md\ngh release create \"$RELEASE_TAG\" packages/*\
+        \ --target \"$BUILD_SHA\" --draft --title \"Vurus v0.1.3\" --notes-file notes.md\ngh release edit \"$RELEASE_TAG\"\
+        \ --draft=false --latest\n"
+    - name: Report publication result
+      if: always()
+      shell: bash
+      env:
+        RESULT: ${{ job.status }}
+      run: 'state=failure
+
+        if [ "$RESULT" = success ]; then state=success; fi
+
+        gh api --method POST "repos/$GH_REPO/statuses/$BUILD_SHA" -f state="$state" -f context="release/$RELEASE_TAG" -f description="Publication
+        job $RESULT" -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+        '
