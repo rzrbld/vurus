@@ -31,13 +31,17 @@ struct GameOptions {
     float effectsVolume = 1.f, voicesVolume = 1.f, musicVolume = 1.f;
     int audioBits = 32, audioRate = 48000, audioChannels = 2;
     std::string playerName = "Player";
+    // Stable save directory identity; empty preserves legacy name-based storage.
+    std::string saveProfile;
+    const std::string& storageProfile() const { return saveProfile.empty()?playerName:saveProfile; }
     int difficulty = 1; // Easy, Normal, Hard, Insane.
     std::array<int, optionActionCount> keyBindings = {26,22,4,7,44,8,20,16,12,19};
     // -1 leaves that action unbound; analog sticks and trigger keep their roles.
     std::array<int, optionActionCount> controllerBindings = {11,12,13,14,0,10,9,4,3,2};
     int fireButton = 1, thrustButton = 3; // SDL mouse buttons; 0 means unbound.
     int joystickMoveSensitivity = 100, joystickAimSensitivity = 100;
-    int aimAssist = 0; // Off, Slight, Medium, Full; controller only.
+    bool crosshair = true;
+    int aimAssist = 0; // Off, Slight, Medium, Full, Retaliate; controller only.
     int joystickDeadzone = 22; // Percent; defaults retain the accepted controller response.
     bool operator==(const GameOptions&) const = default;
 };

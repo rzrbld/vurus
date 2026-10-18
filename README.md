@@ -49,8 +49,11 @@ builds and tests on all four platforms; physical hardware testing remains ongoin
   anti-aliasing, CRT/Retro/Bright shaders, bloom, sharpening and vignette.
 - **Keyboard, mouse and controller support:** remappable controls, stick/D-pad
   menu navigation and optional enemy-only controller aim assistance.
-- **Portable storage and first-run import:** settings and saves stay beside the
-  executable; an in-game progress screen handles resource extraction and CD music.
+  Aim assist offers Off, Slight, Medium, Full and Retaliate (the last enemy
+  whose projectile damaged you), with terrain visibility checks.
+  Control → Sensitivity groups move/aim sensitivity and stick deadzone;
+  the Crosshair switch follows Aim assist and defaults to On.
+- Changing your player name keeps your existing save history.
 
 ## Performance notes
 

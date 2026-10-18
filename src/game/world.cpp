@@ -437,6 +437,7 @@ bool GameWorld::load(SceneContent& scene,const Level& level,std::string& error,i
     for (const auto& object:scene.objects) if (object.classId.value>=scene.classes.size()) {
         error="invalid runtime class reference";return false;
     }
+    retaliationTarget_=SIZE_MAX;retaliationGeneration_=0;
     difficulty_=policy;debugEnemyAI_=true;debugGodMode_=false;playerLocked_=false;
     spiderNavigation_.reset();spiderNavigationActors_.clear();
     scene_=&scene;level_=&level;player_=scene.player->value;elapsedMs_=0;playerKills_=0;ammoHits_=ammoMisses_=0;motion_={};map_={};

@@ -63,6 +63,8 @@ bool validateOptions(const GameOptions& o,std::string& error) {
     if(o.playerName.empty()||o.playerName.size()>32)return fail("Player name must contain 1..32 characters");
     for(unsigned char c:o.playerName)if(c<32||c>126)return fail("Player name must use printable ASCII");
     if(trim(o.playerName).empty())return fail("Player name cannot be blank");
+    if(o.saveProfile.size()>32)return fail("Invalid save profile");
+    for(unsigned char c:o.saveProfile)if(c<32||c>126)return fail("Invalid save profile");
     if(o.difficulty<0||o.difficulty>3)return fail("Difficulty must be 0..3");
     std::set<int> keys,buttons;
     for(int key:o.keyBindings){
@@ -80,7 +82,7 @@ bool validateOptions(const GameOptions& o,std::string& error) {
     if(o.joystickMoveSensitivity<10||o.joystickMoveSensitivity>100 ||
        o.joystickAimSensitivity<10||o.joystickAimSensitivity>100)
         return fail("Joystick sensitivity must be 10..100");
-    if(o.aimAssist<0||o.aimAssist>3)return fail("Aim assist must be 0..3");
+    if(o.aimAssist<0||o.aimAssist>4)return fail("Aim assist must be 0..4");
     if(o.joystickDeadzone<0||o.joystickDeadzone>50)return fail("Joystick deadzone must be 0..50");
     error.clear();return true;
 }
@@ -120,10 +122,10 @@ bool loadOptions(const std::string& path,GameOptions& options,std::string& error
         FIELD("audio.rate",audioRate) FIELD("audio.channels",audioChannels)
         FIELD("session.difficulty",difficulty) FIELD("mouse.fire",fireButton) FIELD("mouse.thrust",thrustButton)
         FIELD("controller.move_sensitivity",joystickMoveSensitivity) FIELD("controller.aim_sensitivity",joystickAimSensitivity)
-        FIELD("controller.deadzone",joystickDeadzone) FIELD("controller.aim_assist",aimAssist)
-        if(key=="session.name"){
+        FIELD("controller.deadzone",joystickDeadzone) FIELD("controller.aim_assist",aimAssist) FIELD("controls.crosshair",crosshair)
+        if(key=="session.name"||key=="session.save_profile"){
             std::istringstream quoted{std::string(value)};quoted.imbue(std::locale::classic());
-            valid=!value.empty()&&value.front()=='"'&&bool(quoted>>std::quoted(candidate.playerName));
+            valid=!value.empty()&&value.front()=='"'&&bool(quoted>>std::quoted(key=="session.name"?candidate.playerName:candidate.saveProfile));
             if(valid){quoted>>std::ws;valid=quoted.eof();}
         }else{
             known=false;
@@ -153,9 +155,10 @@ bool saveOptions(const std::string& path,const GameOptions& options,std::string&
     FIELD("audio.rate",audioRate) FIELD("audio.channels",audioChannels)
     FIELD("session.difficulty",difficulty) FIELD("mouse.fire",fireButton) FIELD("mouse.thrust",thrustButton)
     FIELD("controller.move_sensitivity",joystickMoveSensitivity) FIELD("controller.aim_sensitivity",joystickAimSensitivity)
-    FIELD("controller.deadzone",joystickDeadzone) FIELD("controller.aim_assist",aimAssist)
+    FIELD("controller.deadzone",joystickDeadzone) FIELD("controller.aim_assist",aimAssist) FIELD("controls.crosshair",crosshair)
 #undef FIELD
     text<<"session.name="<<std::quoted(options.playerName)<<'\n';
+    text<<"session.save_profile="<<std::quoted(options.saveProfile)<<'\n';
     for(size_t i=0;i<optionActionCount;++i)
         text<<"key."<<actionKeys[i]<<'='<<options.keyBindings[i]<<'\n'<<"controller."<<actionKeys[i]<<'='<<options.controllerBindings[i]<<'\n';
     const auto bytes=text.str();

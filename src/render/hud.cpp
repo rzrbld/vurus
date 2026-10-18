@@ -601,6 +601,21 @@ void HudRenderer::drawHighScores(Gfx& gfx,const HighScores& scores) {
     }
     glColor4f(1,1,1,1);
 }
+void HudRenderer::drawNameCaret(std::string_view label,float x,float y) {
+    if(menuFonts_.size()<2)return;
+    const auto& font=menuFonts_[1];const float left=x;
+    for(unsigned char c:label) {
+        const auto* glyph=font.glyph(c);uint32_t width=0;
+        if(glyph&&glyph->layers[0].frameIndex<vMenu_.animation.frames.size())
+            width=vMenu_.animation.frames[glyph->layers[0].frameIndex].image.width;
+        x+=c==' '?font.fixedAdvance():font.advance(width);
+    }
+    x=std::min(x+2,left+356); // Keep the caret inside the options panel.
+    glDisable(GL_TEXTURE_2D);glColor3ub(255,220,80);
+    glBegin(GL_QUADS);glVertex2f(x,y-23);glVertex2f(x+2,y-23);
+    glVertex2f(x+2,y+2);glVertex2f(x,y+2);glEnd();
+    glEnable(GL_TEXTURE_2D);glColor4f(1,1,1,1);
+}
 void HudRenderer::drawMenu(Gfx& gfx,const MenuView& view,bool backgroundOnly) {
     if(!view.open())return;
     glDisable(GL_BLEND);sequence(gfx,menu_,4,0,0);glEnable(GL_BLEND);

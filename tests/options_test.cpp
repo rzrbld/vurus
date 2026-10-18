@@ -23,7 +23,7 @@ int main() {
     const std::filesystem::path root=directory,path=root/"settings.cfg";
     std::string error="old error";
     GameOptions original;assert(validateOptions(original,error)&&error.empty());
-    assert(!original.smaa&&!original.fxaa);
+    assert(!original.smaa&&!original.fxaa&&original.crosshair);
     GameOptions conflict=original;conflict.smaa=conflict.fxaa=true;assert(!validateOptions(conflict,error));
     GameOptions options=original;options.gamma=73;
     // A first launch keeps caller defaults, including explicit command-line policy.
@@ -32,7 +32,7 @@ int main() {
     options.fxaa=options.bloom=options.sharpen=true;options.crt=true;options.crtRetro=true;options.crtBright=true;options.vignette=false;options.shadows=false;options.reactorFx=false;options.soundFx=false;options.music=false;options.menuSounds=false;
     options.effectsVolume=.375f;options.voicesVolume=.125f;options.musicVolume=.875f;
     options.audioBits=8;options.audioRate=11025;options.audioChannels=1;
-    options.playerName="Pilot \"One\" \\ = #";options.difficulty=3;
+    options.crosshair=false;options.aimAssist=4;options.playerName="Pilot \"One\" \\ = #";options.difficulty=3;
     options.keyBindings[0]=82;options.controllerBindings[0]=7;
     options.fireButton=2;options.thrustButton=0;
     options.joystickMoveSensitivity=65;options.joystickAimSensitivity=40;options.joystickDeadzone=30;options.aimAssist=3;
@@ -50,7 +50,7 @@ int main() {
     assert(entries==1);
     // Invalid complete files are rejected without partially applying earlier fields.
     for(const std::string bad:{
-        "controller.aim_assist=4\n", "controller.aim_assist=-1\n", "video.width=800\nvideo.gamma=101\n", "video.window_mode=-1\n", "video.window_mode=4\n", "video.window_mode=1.5\n", "video.window_mode=0\nvideo.window_mode=1\n", "video.fxaa=2\n", "video.bloom=true\n", "video.sharpen=1\nvideo.sharpen=0\n", "video.crt_retro=2\n", "video.crt_bright=2\n", "video.crt=2\n", "video.crt=true\n", "video.crt=1\nvideo.crt=0\n", "video.vignette=2\n", "video.vignette=true\n", "video.vignette=0\nvideo.vignette=1\n", "video.sprite_filtering=-1\n", "video.sprite_filtering=3\n",
+        "controls.crosshair=2\n", "controller.aim_assist=-1\n", "video.width=800\nvideo.gamma=101\n", "video.window_mode=-1\n", "video.window_mode=4\n", "video.window_mode=1.5\n", "video.window_mode=0\nvideo.window_mode=1\n", "video.fxaa=2\n", "video.bloom=true\n", "video.sharpen=1\nvideo.sharpen=0\n", "video.crt_retro=2\n", "video.crt_bright=2\n", "video.crt=2\n", "video.crt=true\n", "video.crt=1\nvideo.crt=0\n", "video.vignette=2\n", "video.vignette=true\n", "video.vignette=0\nvideo.vignette=1\n", "video.sprite_filtering=-1\n", "video.sprite_filtering=3\n",
         "hud.language=0\n", "hud.language=3\n", "hud.language=1.5\n",
         "video.hud_aspect=-1\n", "video.hud_aspect=12\n", "video.hud_aspect=1.5\n", "video.hud_aspect=1\nvideo.hud_aspect=2\n",
         "audio.effects_volume=nan\n", "audio.effects_volume=inf\n", "audio.effects_volume=1.1\n",
@@ -64,7 +64,7 @@ int main() {
         "controller.fire=21\n", "controller.fire=3\n", "mouse.fire=3\n",
         "mouse.fire=6\n", "controller.move_sensitivity=9\n", "controller.move_sensitivity=101\n",
         "controller.aim_sensitivity=9\n", "controller.aim_sensitivity=101\n",
-        "controller.deadzone=-1\n", "controller.deadzone=51\n", "controller.deadzone=22.5\n",
+        "controller.aim_assist=5\n", "controller.deadzone=-1\n", "controller.deadzone=51\n", "controller.deadzone=22.5\n",
         "bad line\n", "=bad\n"}) {
         write(path,bad);loaded=original;
         assert(!loadOptions(path.string(),loaded,error)&&loaded==original&&!error.empty());
@@ -75,7 +75,14 @@ int main() {
         assert(!loadOptions(path.string(),loaded,error)&&loaded==original);
     }
     write(path,"version=1\naudio.effects=1\n");loaded=original;
-    assert(loadOptions(path.string(),loaded,error)&&loaded.menuSounds&&loaded.hudAspect==0&&loaded.windowMode==0);
+    assert(loadOptions(path.string(),loaded,error)&&loaded.crosshair&&loaded.menuSounds&&loaded.hudAspect==0&&loaded.windowMode==0);
+    // Legacy configs keep their existing folder; display renames retain it.
+    write(path,"session.name=\"Old Pilot\"\n");loaded=original;
+    assert(loadOptions(path.string(),loaded,error)&&loaded.storageProfile()=="Old Pilot");
+    loaded.saveProfile=loaded.storageProfile();loaded.playerName="New Pilot";
+    assert(saveOptions(path.string(),loaded,error));
+    GameOptions renamed;assert(loadOptions(path.string(),renamed,error));
+    assert(renamed.playerName=="New Pilot"&&renamed.storageProfile()=="Old Pilot");
     // Unknown keys are ignored, including future duplicates; known keys remain strict.
     write(path,"# comment\r\nversion=1\r\n future.option = arbitrary data\nfuture.option=other\nvideo.gamma = 100\n");
     loaded=original;assert(loadOptions(path.string(),loaded,error)&&loaded.gamma==100&&error.empty());

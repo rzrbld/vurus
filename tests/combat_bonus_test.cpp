@@ -29,6 +29,18 @@ struct Run{SceneContent scene;Level level;GameWorld world;std::string error;
  void kill(size_t id,bool radial=true,std::optional<size_t> source=0){world.damage(id,100,source,radial);}
 };
 int main(){try{
+ // Retaliation is transient controller context, driven by real projectile damage.
+ {Run r;need(r.world.retaliationTarget()==SIZE_MAX,"no attacker before hit");
+  const auto hit=[&](size_t owner,bool protectedPlayer=false){auto state=r.world.snapshot();Projectile shot;shot.classId={3};shot.owner=owner;
+   shot.position=state.objects[state.player].position;shot.damage=10;shot.damageRadius=20;shot.fuseMs=1;shot.phaseInitialized=true;shot.damageRemainingMs=0;
+   vyruz_test::appendProjectile(state,r.scene,shot);need(r.world.restoreSnapshot(state,r.error),r.error);r.world.setDebugEnemyAI(false);r.world.setDebugGodMode(protectedPlayer);r.ticks(1);};
+  hit(1);need(r.world.retaliationTarget()==1,"projectile credits enemy shooter");
+  hit(2);need(r.world.retaliationTarget()==2,"new attacker replaces prior shooter");
+  r.kill(2);need(r.world.retaliationTarget()==SIZE_MAX,"dead shooter cannot remain targeted");
+  hit(1,true);need(r.world.retaliationTarget()==SIZE_MAX,"protected no-damage hit does not acquire");
+  hit(1);need(r.world.retaliationTarget()==1,"damage reacquires shooter");
+  const auto saved=r.world.snapshot();need(r.world.restoreSnapshot(saved,r.error),r.error);
+  need(r.world.retaliationTarget()==SIZE_MAX,"restore clears transient target");}
  // Profile context, never the vehicle Name. Pending rewards use the current
  // name at delivery, and checkpoint rollback cannot overwrite that setting.
  {Run r(2);r.world.setPlayerName("First Pilot");r.kill(1);

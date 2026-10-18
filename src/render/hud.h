@@ -34,6 +34,7 @@ public:
     void drawControlsHelp(Gfx&,const std::vector<std::pair<std::string,int>>&,int first);
     unsigned advanceMenu(MenuPage page,uint32_t elapsedMs,int refreshHz,bool pointerVisible=false);
     void drawMenuScanline(Gfx&);
+    void drawNameCaret(std::string_view label,float x,float y);
     void drawMenuCursor(Gfx&,float x,float y);
     float drawMenuText(Gfx&,std::string_view,float x,float y,unsigned font=4,float width=640,bool wrap=false);
     void drawHighScores(Gfx&,const HighScores&);

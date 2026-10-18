@@ -118,6 +118,7 @@ struct App {
     int optionsPage=0, bindingCapture=0;
     vyruz::MenuAdjustmentHold menuHold;
     std::string nameEdit;
+    Uint64 nameEditBlinkStart=0;
     std::vector<std::pair<int,int>> resolutions;
     vyruz::Presentation presentation;
     vyruz::IntroVideo intro;
@@ -462,7 +463,7 @@ bool loadLevelData(App& a, const std::string& path,const vyruz::SavedLevel* save
     showLoadingProgress(a,.9f,.99f);
     if(!saved) {
         a.restartLevel=vyruz::SavedLevel{a.world.snapshot(),a.sceneRenderer.capture()};
-        a.restartPath=levelKey(a.content.mapPath);a.restartProfile=a.options.playerName;a.retryDiskPath.clear();
+        a.restartPath=levelKey(a.content.mapPath);a.restartProfile=a.options.storageProfile();a.retryDiskPath.clear();
     }
     if(a.audio.device().available()) {
         std::string audioError;
@@ -494,7 +495,7 @@ bool saveSession(App& a,int64_t cost,std::string& error) {
     if(ec){error="Cannot create save directory: "+ec.message();return false;}
     bool ok=false;
     if(a.saveHistory) {
-        if(const auto path=vyruz::writeHistorySave(a.savePath,a.options.playerName,save,error)) {
+        if(const auto path=vyruz::writeHistorySave(a.savePath,a.options.storageProfile(),save,error)) {
             ok=true;a.lastSavedPath=path->string();captureSavePreview(a,*path);
         }
     } else {ok=vyruz::writeSaveFile(a.savePath,save,error);if(ok)a.lastSavedPath=a.savePath;}
@@ -525,16 +526,16 @@ bool loadSession(App& a,const std::string& selectedPath={}) {
     a.restartLevel=save.restartLevel;
     if(!a.restartLevel && a.world.player().alive)a.restartLevel=current->second;
     const auto currentPath=current->first;
-    a.restartPath=currentPath;a.restartProfile=a.options.playerName;a.retryDiskPath.clear();
+    a.restartPath=currentPath;a.restartProfile=a.options.storageProfile();a.retryDiskPath.clear();
     a.visited=std::move(save.levels);a.visited.erase(currentPath);
     a.sessionStarted=true;a.scoreRecorded=false;a.suppressFireUntilRelease=true;
     std::printf("loaded save: %s\n",source.c_str());return true;
 }
 void refreshSaveCatalog(App& a,bool force=false) {
-    if(!force && !a.saveCatalogDirty && a.saveCatalogProfile==a.options.playerName)return;
-    a.saveCatalog=vyruz::listSaveCatalog(a.savePath,a.options.playerName);
+    if(!force && !a.saveCatalogDirty && a.saveCatalogProfile==a.options.storageProfile())return;
+    a.saveCatalog=vyruz::listSaveCatalog(a.savePath,a.options.storageProfile());
     a.gfx.deleteTexture(a.savePreviewTexture);a.savePreviewTexture=0;a.savePreviewPath.clear();
-    a.saveCatalogProfile=a.options.playerName;a.saveCatalogDirty=false;
+    a.saveCatalogProfile=a.options.storageProfile();a.saveCatalogDirty=false;
     a.menu.savedSessions=int(a.saveCatalog.size());a.menu.saveLabels.clear();a.menu.saveHelp.clear();
     static const char* difficulty[]={"Easy","Normal","Hard","Insane"};
     std::map<std::string,std::string> names;
@@ -604,7 +605,7 @@ bool changeLevel(App& a,const vyruz::TransitionRequest& request) {
     a.visited[source]=std::move(departing);a.visited.erase(destination);
     a.world.setDebugEnemyAI(debugAI);a.world.setDebugGodMode(debugGod);
     a.restartLevel=vyruz::SavedLevel{a.world.snapshot(),a.sceneRenderer.capture()};
-    a.restartPath=levelKey(a.content.mapPath);a.restartProfile=a.options.playerName;
+    a.restartPath=levelKey(a.content.mapPath);a.restartProfile=a.options.storageProfile();
     persistRetrySession(a);
     return true;
 }
@@ -743,7 +744,7 @@ void scrollControlsHelp(App& a,int delta,Uint64 now,bool tap=false){
 void applyControllerAimAssist(App& a,vyruz::MovementCommand& command,bool stickActive) {
     const auto view=a.gfx.viewport();
     a.assistedAim={};
-    if(!a.mouseUsed && a.controller.connected() && !a.controllerBlockedUntilNeutral && a.options.aimAssist && command.aimActive){
+    if(!a.mouseUsed && a.controller.connected() && !a.controllerBlockedUntilNeutral && a.options.aimAssist && (command.aimActive||a.options.aimAssist==4)){
         std::vector<vyruz::AimCandidate> targets;
         const auto origin=a.world.playerPosition();
         const auto& actors=a.world.actors();
@@ -753,11 +754,16 @@ void applyControllerAimAssist(App& a,vyruz::MovementCommand& command,bool stickA
             if(object.flags.invisible.value_or(false)&&!actor.enemyRevealed)continue;
             const float x=object.position.x-origin.x,y=object.position.y-origin.y;
             if(std::abs(x)>view.width/2-24 || std::abs(y)>view.height/2-24)continue;
+            // Visibility for this controller aid only; do not alter native AI
+            // scanners or projectile collision. Water shores are not walls.
+            if(!vyruz::terrainMoveAllowed(a.level,origin.x,origin.y,
+                                         object.position.x,object.position.y,.01f,true))continue;
             targets.push_back({i,x,y});
         }
         a.assistedAim=vyruz::assistAim(a.options.aimAssist,command.aimX,command.aimY,
-                                     stickActive,a.aimAssistTarget,targets);
+                                     stickActive,a.options.aimAssist==4?a.world.retaliationTarget():a.aimAssistTarget,targets);
         a.aimAssistTarget=a.assistedAim.target;
+        if(a.assistedAim.target!=SIZE_MAX)command.aimActive=true;
         command.aimX=a.assistedAim.x;command.aimY=a.assistedAim.y;
     }else a.aimAssistTarget=SIZE_MAX;
 }
@@ -1072,7 +1078,7 @@ void presentApplication(App& a) {
 // Presentation only: stick aim remains the unchanged direction vector passed
 // to World. A fixed logical radius keeps the crosshair readable at any aspect.
 bool gameplayCrosshair(App& a,SDL_FPoint& point) {
-    if(a.presentation.open() || !a.haveLevel || a.world.mapOpen() ||
+    if(!a.options.crosshair || a.presentation.open() || !a.haveLevel || a.world.mapOpen() ||
        a.inventory.open || a.menu.open())return false;
     if(a.mouseUsed){point={a.mouseX,a.mouseY};return true;}
     if(!a.controller.connected() || a.controllerBlockedUntilNeutral)return false;
@@ -1096,7 +1102,8 @@ bool gameplayCrosshair(App& a,SDL_FPoint& point) {
 void render(App& a,float alpha=1) {
     SDL_FPoint crosshair{};
     const bool gameCursor=gameplayCrosshair(a,crosshair);
-    SDL_ShowCursor((gameCursor||a.menu.open()||a.presentation.open())?SDL_DISABLE:SDL_ENABLE);
+    const bool hiddenGameplayCursor=!a.options.crosshair&&a.haveLevel&&!a.world.mapOpen()&&!a.inventory.open;
+    SDL_ShowCursor((gameCursor||hiddenGameplayCursor||a.menu.open()||a.presentation.open())?SDL_DISABLE:SDL_ENABLE);
     a.sceneRenderer.reactorFx=a.options.reactorFx;a.sceneRenderer.groundDetails=a.options.groundDetails;a.sceneRenderer.shadows=a.options.shadows;
     a.gfx.beginFrame(kVirtualW, kVirtualH);
     a.gfx.clear(0.03f, 0.03f, 0.05f);
@@ -1140,11 +1147,16 @@ void render(App& a,float alpha=1) {
     }
     if(a.menu.open()){
         if(a.menu.page==vyruz::MenuPage::Options && (a.optionsPage==1||a.optionsPage==8))refreshOptions(a);
+        if(a.menu.page==vyruz::MenuPage::Options && a.bindingCapture==5)
+            a.menu.optionLabels[0]="Player: "+a.nameEdit;
         glTranslatef(view.uiX(),view.uiY(),0);
         refreshMenuContext(a);
         a.menu.debugAI=a.world.debugEnemyAI();a.menu.debugGod=a.world.debugGodMode();
         const bool controlsHelp=a.presentation.page==vyruz::PresentationPage::ControlsHelp;
         a.hud.drawMenu(a.gfx,a.menu,controlsHelp);
+        if(a.menu.page==vyruz::MenuPage::Options && a.bindingCapture==5 &&
+           ((SDL_GetTicks64()-a.nameEditBlinkStart)/500)%2==0)
+            a.hud.drawNameCaret(a.menu.optionLabels[0],a.menu.rowLeft(),a.menu.rowTop());
         if(controlsHelp)a.hud.drawControlsHelp(a.gfx,a.helpRows,a.helpFirst);
         else {drawSavePreview(a);a.hud.drawMenuScanline(a.gfx);}
         if(a.menuPointerVisible) {
@@ -1274,7 +1286,7 @@ void render(App& a,float alpha=1) {
 
     // Crosshair.
     if (gameCursor) {
-        a.hud.drawCursor(a.gfx,a.mouseX,a.mouseY);
+        a.hud.drawCursor(a.gfx,crosshair.x,crosshair.y);
     }
 
     if(endingRemaining>0) {

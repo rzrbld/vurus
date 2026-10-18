@@ -25,6 +25,7 @@ bool applyOptionsRuntime(App& a,const vyruz::GameOptions& o,std::string& error,b
 }
 bool commitOptions(App& a,vyruz::GameOptions next) {
     std::string error;
+    next.saveProfile=a.options.storageProfile();
     if(!vyruz::validateOptions(next,error)){a.menu.error=error;return false;}
     const bool resizeWindow=next.width!=a.options.width||next.height!=a.options.height;
     int oldWidth,oldHeight;SDL_GetWindowSize(a.window,&oldWidth,&oldHeight);
@@ -93,7 +94,8 @@ void refreshOptions(App& a) {
         m.optionLabels={"Enabled: "+std::string(on(enabled)),"Volume: "+optionPercent(volume),"Back"};
         m.optionHelp={enabled?"Select to disable this audio source.":"Select to enable this audio source.",enabled?"":"This audio source is disabled.",""};break;
     }
-    case 3:m.optionTitle="Control";m.optionLabels={"Keyboard","Mouse","Joystick / controller","Move sensitivity: "+std::to_string(o.joystickMoveSensitivity),"Aim sensitivity: "+std::to_string(o.joystickAimSensitivity),"Stick deadzone: "+std::to_string(o.joystickDeadzone),"Restore default controls",std::string("Aim assist: ")+std::array{"Off","Slight","Medium","Full"}[o.aimAssist],"Back"};m.optionHelp={"","","","","","","","Controller only: Slight/Medium help near enemies; Full selects with stick.",""};break;
+    case 3:m.optionTitle="Control";m.optionLabels={"Keyboard","Mouse","Joystick / controller","Sensitivity",std::string("Aim assist: ")+std::array{"Off","Slight","Medium","Full","Retaliate"}[o.aimAssist],"Crosshair: "+std::string(on(o.crosshair)),"Restore default controls","Back"};m.optionHelp={"","","","Controller movement, aiming and stick deadzone.","Controller only: Slight/Medium help near enemies; Full selects with stick; Retaliate targets the last enemy to hurt you with a projectile.","Show the gameplay crosshair for mouse and controller.","",""};break;
+    case 15:m.optionTitle="Sensitivity";m.optionLabels={"Move sensitivity: "+std::to_string(o.joystickMoveSensitivity),"Aim sensitivity: "+std::to_string(o.joystickAimSensitivity),"Stick deadzone: "+std::to_string(o.joystickDeadzone),"Back"};m.optionHelp={"Controller movement sensitivity.","Controller aiming sensitivity.","Ignore small stick movements near the center.",""};break;
     case 4: {
         static const char* levels[]={"Easy","Normal","Hard","Insane"};
         m.optionTitle="Session";m.optionLabels={"Player: "+o.playerName,"Difficulty: "+std::string(levels[o.difficulty]),std::string("HUD language: ")+(o.hudLanguage==2?"French":"English"),"Back"};
@@ -122,7 +124,7 @@ void refreshMenuContext(App& a) {
     const auto difficulty=[&](int value){return difficulties[std::clamp(value,0,3)];};
     refreshSaveCatalog(a);
     if(a.menu.page==vyruz::MenuPage::Main && !a.sessionStarted) {
-        recoverRetrySession(a);a.menu.retryAvailable=a.restartLevel.has_value() && a.restartProfile==a.options.playerName;
+        recoverRetrySession(a);a.menu.retryAvailable=a.restartLevel.has_value() && a.restartProfile==a.options.storageProfile();
     }
     a.menu.controlsHelp.clear();
     for(size_t i=0;i<vyruz::optionActionCount;++i)
@@ -148,7 +150,7 @@ void optionsBack(App& a) {
     a.menuHold.reset();
     if(a.bindingCapture){a.bindingCapture=0;SDL_StopTextInput();a.menu.error.clear();refreshOptions(a);return;}
     if(a.optionsPage==0)a.menu.back(a.paused);
-    else {a.optionsPage=(a.optionsPage==13||a.optionsPage==14)?8:a.optionsPage==8?1:a.optionsPage>=9?2:a.optionsPage>=5?3:0;a.menu.selected=0;refreshOptions(a);}
+    else {a.optionsPage=a.optionsPage==15?3:(a.optionsPage==13||a.optionsPage==14)?8:a.optionsPage==8?1:a.optionsPage>=9?2:a.optionsPage>=5?3:0;a.menu.selected=0;refreshOptions(a);}
     a.suppressFireUntilRelease=true;
 }
 template<size_t N> int nextOption(int current,const int (&values)[N],int step) {
@@ -206,9 +208,8 @@ void changeOption(App& a,int step=1) {
         if(row==4){optionsBack(a);return;}
         next.windowMode=row;
     } else if(a.optionsPage==2) {
-        if(row==8){optionsBack(a);return;}
-        if(row==7){next.aimAssist=(next.aimAssist+step+4)%4;}
-        else if(row<3){a.optionsPage=10+row;a.menu.selected=0;refreshOptions(a);return;}
+        if(row==7){optionsBack(a);return;}
+        if(row<3){a.optionsPage=10+row;a.menu.selected=0;refreshOptions(a);return;}
         if(row==6){a.optionsPage=9;a.menu.selected=0;refreshOptions(a);return;}
         if(row==3)next.audioBits=nextOption(next.audioBits,{8,16,32},step);
         if(row==4)next.audioRate=nextOption(next.audioRate,{11025,22050,48000},step);
@@ -223,21 +224,25 @@ void changeOption(App& a,int step=1) {
         float& volume=a.optionsPage==10?next.effectsVolume:a.optionsPage==11?next.voicesVolume:next.musicVolume;
         if(row==0)enabled=!enabled;else volume=std::clamp(std::round(volume*10+step)/10.f,0.f,1.f);
     } else if(a.optionsPage==3) {
-        if(row==8){optionsBack(a);return;}
-        if(row==7){next.aimAssist=(next.aimAssist+step+4)%4;}
+        if(row==7){optionsBack(a);return;}
+        if(row==4){next.aimAssist=(next.aimAssist+step+5)%5;}
+        else if(row==5)next.crosshair=!next.crosshair;
         else if(row<3){a.optionsPage=row==0?5:row==1?7:6;a.menu.selected=0;refreshOptions(a);return;}
-        else if(row==3)next.joystickMoveSensitivity=std::clamp(next.joystickMoveSensitivity+step*5,10,100);
-        else if(row==4)next.joystickAimSensitivity=std::clamp(next.joystickAimSensitivity+step*5,10,100);
-        else if(row==5)next.joystickDeadzone=std::clamp(next.joystickDeadzone+step*2,0,50);
+        else if(row==3){a.optionsPage=15;a.menu.selected=0;refreshOptions(a);return;}
         else {
             next.keyBindings=defaults.keyBindings;next.controllerBindings=defaults.controllerBindings;next.fireButton=defaults.fireButton;next.thrustButton=defaults.thrustButton;
-            next.joystickMoveSensitivity=defaults.joystickMoveSensitivity;next.joystickAimSensitivity=defaults.joystickAimSensitivity;next.joystickDeadzone=defaults.joystickDeadzone;next.aimAssist=defaults.aimAssist;
+            next.joystickMoveSensitivity=defaults.joystickMoveSensitivity;next.joystickAimSensitivity=defaults.joystickAimSensitivity;next.joystickDeadzone=defaults.joystickDeadzone;next.aimAssist=defaults.aimAssist;next.crosshair=defaults.crosshair;
         }
+    } else if(a.optionsPage==15) {
+        if(row==3){optionsBack(a);return;}
+        if(row==0)next.joystickMoveSensitivity=std::clamp(next.joystickMoveSensitivity+step*5,10,100);
+        else if(row==1)next.joystickAimSensitivity=std::clamp(next.joystickAimSensitivity+step*5,10,100);
+        else if(row==2)next.joystickDeadzone=std::clamp(next.joystickDeadzone+step*2,0,50);
     } else if(a.optionsPage==4) {
         if(row==3){optionsBack(a);return;}
         // Port editor adapter: match the proven 19-byte score name field.
         // Existing longer configuration names remain readable until edited.
-        if(row==0){a.bindingCapture=5;a.nameEdit=next.playerName.substr(0,19);SDL_StartTextInput();a.menu.error="Edit player name (19 characters)";a.menu.optionHelp[0]="Type, or use stick/D-pad to edit. Enter/A saves; Esc/B cancels.";return;}
+        if(row==0){a.bindingCapture=5;a.nameEdit=next.playerName.substr(0,19);a.nameEditBlinkStart=SDL_GetTicks64();a.menu.optionLabels[0]="Player: "+a.nameEdit;SDL_StartTextInput();a.menu.error="Edit player name (19 characters)";a.menu.optionHelp[0]="Type, or use stick/D-pad to edit. Enter/A saves; Esc/B cancels.";return;}
         if(row==1)next.difficulty=(next.difficulty+step+4)%4;
         else next.hudLanguage=3-next.hudLanguage;
     } else if(a.optionsPage==5||a.optionsPage==6) {
@@ -255,7 +260,7 @@ void changeOption(App& a,int step=1) {
 bool repeatableOption(const App& a){
     const int row=a.menu.selected;
     return (a.optionsPage==1&&row==1)||(a.optionsPage>=10&&a.optionsPage<=12&&row==1)||
-        (a.optionsPage==3&&row>=3&&row<=5);
+        (a.optionsPage==15&&row>=0&&row<=2);
 }
 void serviceOptionsHold(App& a,uint64_t now){
     if(!a.inputFocused||a.menu.page!=vyruz::MenuPage::Options||a.bindingCapture||!repeatableOption(a)){a.menuHold.reset();return;}
@@ -279,6 +284,7 @@ bool optionsEvent(App& a,SDL_Event event) {
         if((a.bindingCapture==1||a.bindingCapture==2)&&event.type==SDL_MOUSEBUTTONDOWN&&event.button.button==SDL_BUTTON_RIGHT){optionsBack(a);return true;}
         auto next=a.options;bool accept=false;
         if(a.bindingCapture==5) {
+            const auto previousName=a.nameEdit;
             if(event.type==SDL_CONTROLLERBUTTONDOWN)a.menu.optionHelp[0]="Up/Down: letter\nRight: add; Left: erase\nA: save; B: cancel";
             if(event.type==SDL_MOUSEWHEEL||event.type==SDL_MOUSEBUTTONDOWN)a.menu.optionHelp[0]="Wheel: letter\nMiddle: add; Right: erase\nLeft: save";
             if(event.type==SDL_TEXTINPUT)for(unsigned char c:std::string(event.text.text))if(c>=32&&c<127&&a.nameEdit.size()<19)a.nameEdit+=char(c);
@@ -309,7 +315,8 @@ bool optionsEvent(App& a,SDL_Event event) {
                 const int index=found==std::string::npos?0:int(found),n=int(alphabet.size());
                 a.nameEdit.back()=alphabet[((index+letter)%n+n)%n];
             }
-            a.menu.optionLabels[0]="Player: "+a.nameEdit+"_";
+            if(a.nameEdit!=previousName)a.nameEditBlinkStart=SDL_GetTicks64();
+            a.menu.optionLabels[0]="Player: "+a.nameEdit;
         } else if(event.type==SDL_KEYDOWN && event.key.keysym.sym==SDLK_DELETE) {
             if(a.bindingCapture==1)next.keyBindings[a.menu.selected]=0;
             if(a.bindingCapture==2)next.controllerBindings[a.menu.selected]=-1;

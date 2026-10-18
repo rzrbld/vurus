@@ -5,13 +5,13 @@ void persistRetrySession(App& a) {
     vyruz::SaveGame save;save.currentLevel=a.restartPath;save.levels=a.visited;
     save.levels[save.currentLevel]=*a.restartLevel;
     std::string error;
-    if(!vyruz::writeDefaultRetry(a.savePath,a.options.playerName,save,error))
+    if(!vyruz::writeDefaultRetry(a.savePath,a.options.storageProfile(),save,error))
         std::fprintf(stderr,"Could not store default retry session: %s (in-memory retry retained)\n",error.c_str());
-    a.retryDiskPath.clear();a.retryCheckedProfile=a.options.playerName;
+    a.retryDiskPath.clear();a.retryCheckedProfile=a.options.storageProfile();
 }
 void recoverRetrySession(App& a) {
     if(a.savePath.empty())return;
-    const auto& profile=a.options.playerName;
+    const auto& profile=a.options.storageProfile();
     if(a.restartLevel && a.restartProfile==profile){a.retryCheckedProfile=profile;return;}
     if(a.retryCheckedProfile==profile)return;
     a.retryCheckedProfile=profile;a.restartLevel.reset();a.restartPath.clear();a.restartProfile.clear();a.retryDiskPath.clear();

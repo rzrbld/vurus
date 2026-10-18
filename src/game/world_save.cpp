@@ -460,6 +460,7 @@ bool GameWorld::restoreSnapshot(const WorldSnapshot& saved,std::string& error) {
     for(size_t i=0;i<actors_.size();++i)registerSavingPrice(i);
     if(!restoreNativePool(saved.nativePool,error))return false;
     rebuildNativeHeldOriginals();
+    retaliationTarget_=SIZE_MAX;retaliationGeneration_=0;
     applyingDamage_=false;map_.close();error.clear();return true;
 }
 void GameWorld::registerSavingPrice(size_t id) {

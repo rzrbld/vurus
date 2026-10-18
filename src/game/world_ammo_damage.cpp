@@ -216,6 +216,22 @@ void GameWorld::applyNativeAmmoDamage(size_t id,float amount,Projectile& source,
     //43d658 skips only health on Direct-fire-only rejection; the later owner
     //statistics still examine the target's existing Energy/counting state.
     if(!target.directFireOnly || playerOwned)result=nativeHealthDamage(input,amount);
+    // Controller-only presentation context: remember the hostile shooter after
+    // actual projectile health/shield damage, following validated creator IDs.
+    if(id==player_ && sourceIsAmmo && (result.energy<input.energy || result.shield<input.shield)) {
+        auto owner=nativeAmmoOwner(source);
+        for(size_t depth=0;owner && depth<actors_.size();++depth) {
+            const auto shooter=*owner;
+            if(shooter==player_)break;
+            if(actors_[shooter].enemy && actors_[shooter].alive) {
+                retaliationTarget_=shooter;retaliationGeneration_=actors_[shooter].nativeGeneration;break;
+            }
+            const auto parent=scene_->objects[shooter].owner;
+            if(!parent || parent->value>=actors_.size() ||
+               actors_[parent->value].nativeGeneration!=actors_[shooter].nativeCreatorGeneration)break;
+            owner=parent->value;
+        }
+    }
     if(result.awakeRequested)wakeNativeActor(id); //43ca7f precedes protection rejection.
     target.vitals.energy=result.energy;target.vitals.shield=result.shield;
     if(result.energyUpdated)target.nativeDamagePending=result.energy<=0;

@@ -287,6 +287,11 @@ class GameWorld {
 public:
     // Original context+2754 profile, separate from the vehicle's class Name.
     // Settings own this value; level/checkpoint restoration must not replace it.
+    size_t retaliationTarget() const {
+        return retaliationTarget_<actors_.size() && actors_[retaliationTarget_].alive &&
+            actors_[retaliationTarget_].nativeGeneration==retaliationGeneration_
+            ? retaliationTarget_ : SIZE_MAX;
+    }
     void setPlayerName(const std::string& name) { playerName_=name; }
     // Application view/mode context, deliberately outside gameplay saves.
     // Headless callers may leave it unset for camera-independent mechanics.
@@ -453,6 +458,8 @@ private:
     void selectLoadedPlayerWeapon();
     Displacement surpriseMovement(const MovementCommand&,float seconds);
     SurpriseState surprise_;
+    size_t retaliationTarget_=SIZE_MAX;
+    uint32_t retaliationGeneration_=0;
     std::string playerName_="Vyruz";
     std::vector<size_t> touchVictims_;
     void collect();

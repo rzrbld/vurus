@@ -117,7 +117,8 @@ explode after2.5 seconds. Failed launch locks remain unguided.
 
 Load Game opens Saved sessions. Select a checkpoint to see its energy, shield
 and difficulty, then load it. Normal paid saves keep the latest seven sessions
-for the player name in Options. Existing slot1.vzs remains available separately.
+in the same save history even when you change your name in Options. Existing
+slot1.vzs remains available separately.
 
 Command-line reference
 ======================
