@@ -16,6 +16,7 @@ engineering. You must supply your own original game data.
 
 Download the package for your platform from **[GitHub Releases](https://github.com/rzrbld/vurus/releases/latest)**.
 Releases contain the validated Linux, Windows and macOS builds plus SHA-256 checksums.
+Use the included `SHA256SUMS.txt` to verify your downloaded package.
 Optional development/testing builds are available as artifacts under
 [Actions → Desktop builds](https://github.com/rzrbld/vurus/actions/workflows/build-desktop.yml);
 these are temporary CI artifacts, not the main release downloads.
