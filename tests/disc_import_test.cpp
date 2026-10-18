@@ -13,6 +13,7 @@
 #include <string>
 #include <thread>
 #include <array>
+#include <iostream>
 namespace fs=std::filesystem;
 using Bytes=std::vector<unsigned char>;
 void put(Bytes& b,size_t off,uint32_t n,int size=4){for(int i=0;i<size;++i)b[off+i]=n>>(i*8);}
@@ -96,7 +97,7 @@ void chunkedImportChecks(const fs::path& root){
   for(const auto&e:fs::directory_iterator(canceled))assert(!e.path().filename().string().starts_with(".import-"));
  }
 }
-int main(){
+int main(){try{
  const auto root=fs::temp_directory_path()/("vyruz-import-test-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));fs::create_directories(root/"game");
  archiveHandleChecks(root);
  chunkedImportChecks(root);
@@ -217,6 +218,9 @@ int main(){
  // Reject corrupt ISO directory records without publishing a receipt.
  auto corrupt=iso();corrupt[20*2048]=2;write(root/"invalid/second.iso",corrupt);fs::remove(root/"invalid/disc.iso");assert(!vyruz::prepareData((root/"invalid").string(),cache.string(),location,error));
  for(const auto& e:fs::directory_iterator(cache))assert(e.path().filename().string().rfind(".import-",0)!=0);
+ // Retained archive streams must close before deleting their fixture files.
+ vfs={};archive={};
  fs::remove_all(root);
  return 0;
+}catch(const std::exception& error){std::cerr<<"Disc import test: "<<error.what()<<'\n';return 1;}
 }

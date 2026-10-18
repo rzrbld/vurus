@@ -1,4 +1,5 @@
 #include "audio/game_audio.h"
+#include "host_temp.h"
 #include "game/world.h"
 #include "render/scene.h"
 #include <cstdlib>
@@ -15,7 +16,9 @@ static std::vector<uint8_t> wave(){
     auto n=[&](size_t p,unsigned v){for(int i=0;i<4;++i)b[p+i]=v>>(8*i);};
     n(4,38);n(16,16);b[20]=1;b[22]=1;n(24,48000);n(28,48000);b[32]=1;b[34]=8;n(40,2);b[44]=128;b[45]=192;return b;
 }
-int main(){
+int main(){try{
+    const auto musicDir=hostTempDirectory("vyruz-music-playlist-");
+    {
     SDL_setenv("SDL_AUDIODRIVER","dummy",1);
     GameAudio audio;std::string error;check(audio.device().open(error));
     SceneContent scene;size_t reads=0;std::set<std::string> paths;
@@ -33,7 +36,6 @@ int main(){
     check(!audio.musicFile("/tmp/vyruz-no-such-track-128731.wav",error));check(!error.empty());
     // Tiny CD fixtures exercise asynchronous queue handoff and repeat, without
     // loading disc-sized PCM or depending on a particular randomized first track.
-    const auto musicDir=std::filesystem::temp_directory_path()/"vyruz-music-playlist-test";
     std::filesystem::create_directories(musicDir);
     for(const char* name:{"track02.wav","track03.wav"}){
         const auto bytes=wave();std::ofstream output(musicDir/name,std::ios::binary);
@@ -50,7 +52,9 @@ int main(){
     check(!audio.musicDirectory((musicDir/"missing").string(),error));
     audio.setMusicEnabled(false);audio.updateMusic();audio.reset();
     check(!audio.device().musicState().playing);
-    std::filesystem::remove_all(musicDir);
     audio.device().close();audio.cue("V-KEY.WAV",true);audio.consume(empty,scene,{});
+    } // Destroy fixed-source stream and join workers before fixture cleanup.
+    std::filesystem::remove_all(musicDir);
     std::cout<<"Game audio cache and device lifecycle passed\n";
+}catch(const std::exception& error){std::cerr<<"Game audio test: "<<error.what()<<'\n';return 1;}
 }
