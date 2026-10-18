@@ -1,0 +1,79 @@
+name: Publish validated v0.1.2
+on:
+  workflow_dispatch:
+  push:
+    branches: [publish-v0.1.2]
+    paths: [".github/workflows/publish-v0.1.2.yml"]
+permissions:
+  actions: read
+  contents: write
+concurrency:
+  group: publish-v0.1.2
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_RUN: "39123646633"
+      BUILD_SHA: "9be1a77d1d4b88043d21c029d2e5a462eb8cbb0d"
+    steps:
+      - name: Verify successful source build
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" > run.json
+          jq -e --arg sha "$BUILD_SHA" '.status == "completed" and .conclusion == "success" and .head_sha == $sha' run.json
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN/jobs" > jobs.json
+          jq -e '[.jobs[] | select(.name | startswith("build ("))] | length == 4 and all(.conclusion == "success")' jobs.json
+      - name: Download validated packages and prepare checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run download "$BUILD_RUN" --pattern 'vurus-*' --dir artifacts
+          mkdir packages
+          for name in vurus-linux.tar.gz vurus-windows-amd64.zip vurus-darwin-arm64.zip vurus-darwin-x86_64.zip; do
+            mapfile -d '' matches < <(find artifacts -type f -name "$name" -print0)
+            test "${#matches[@]}" -eq 1
+            test -s "${matches[0]}"
+            cp "${matches[0]}" "packages/$name"
+          done
+          cd packages
+          sha256sum vurus-* > SHA256SUMS.txt
+      - name: Publish release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > notes.md <<'NOTES'
+          Background saving and smaller checkpoints for Vurus.
+
+          - Encode, compress and write checkpoints in the background so gameplay remains responsive.
+          - Avoid rereading the entire save catalog during gameplay after saving.
+          - Use fast lossless zlib compression: tested examples were about 92% smaller (7.56 MB to 0.63 MB for a single-level checkpoint; 196.6 MB to 16.3 MB for a synthetic large checkpoint).
+          - Preserve atomic writes, save fees, failure recovery and all saved game state.
+          - Link zlib statically in the desktop builds; no extra zlib DLL is required.
+
+          **Save compatibility:** existing uncompressed saves still load. Older Vurus builds cannot read newly compressed saves. Existing files are not automatically converted; keep a backup if you plan to downgrade.
+
+          Size and responsiveness measurements are local desktop tests, not Steam Deck performance guarantees.
+
+          **Your original game data is required.** No original game assets are included. Put your ISO/CUE-BIN beside the engine or supply it with `--data`. See the included README for import and launch instructions.
+
+          Downloads:
+          - `vurus-linux.tar.gz`: Linux x64 / Steam Deck.
+          - `vurus-windows-amd64.zip`: Windows x64, with SDL linked statically and the MSVC runtime bundled.
+          - `vurus-darwin-arm64.zip`: Apple Silicon, macOS 15 or later.
+          - `vurus-darwin-x86_64.zip`: Intel Mac, macOS 15 or later.
+
+          Mac builds are unsigned terminal executables, not notarized app bundles. SMAA is unavailable on macOS; FXAA remains available. Physical graphics, audio and controller testing remains separate from CI validation.
+
+          These are the exact packages from successful [CI run 39123646633](https://github.com/rzrbld/vurus/actions/runs/39123646633), commit `9be1a77d1d4b88043d21c029d2e5a462eb8cbb0d`. Linux passed 148 tests; Windows and each Mac architecture passed 144 applicable tests. SHA-256 checksums are included.
+
+          Developed with OpenAI Codex; the source commit includes Codex co-author attribution.
+
+          Engine and third-party licenses are included in the packages and repository. Original game names, logos and assets remain the property of their respective owners; this project is not affiliated with or endorsed by them.
+          NOTES
+          gh release create v0.1.2 packages/* --target "$BUILD_SHA" --draft --title 'Vurus v0.1.2' --notes-file notes.md
+          gh release edit v0.1.2 --draft=false --latest
