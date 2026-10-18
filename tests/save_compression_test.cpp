@@ -6,7 +6,7 @@
 #include <zlib.h>
 using namespace vyruz;
 static void check(bool value,const char* why){if(!value){std::cerr<<why<<'\n';std::exit(1);}}
-int main(){
+int main(){try{
  SaveGame source;source.currentLevel="CAVE/T1C1.3DG";
  auto& world=source.levels[source.currentLevel].world;
  world.actors.emplace_back();world.objects.emplace_back();world.actors[0].vitals.money=123456;
@@ -35,7 +35,9 @@ int main(){
  const auto root=hostTempDirectory("vurus-compression-");const auto path=root/"save.vzs";
  check(writeSaveFile(path.string(),source,error),error.c_str());
  std::ifstream file(path,std::ios::binary);std::vector<uint8_t> disk((std::istreambuf_iterator<char>(file)),{});
+ file.close(); // Windows cannot delete the fixture while its reader is open.
  check(disk==packed,"file writer uses packed encoding");check(readSaveFile(path.string(),decoded,error),error.c_str());
  std::filesystem::remove_all(root);
  std::cout<<"save compression passed: "<<raw.size()<<" -> "<<packed.size()<<" bytes\n";
+}catch(const std::exception& e){std::cerr<<"save compression test: "<<e.what()<<'\n';return 1;}
 }
