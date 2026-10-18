@@ -253,11 +253,28 @@ public:
     void extract(Entry e,const fs::path& path,const ImportProgressCallback& progress={},const std::string& displayName={}){
         require(!e.directory&&e.size<=256*1024*1024,"Invalid game resource extent");
         std::ofstream out(path,std::ios::binary);require(bool(out),"Cannot create imported resource: "+path.string());
-        std::array<unsigned char,2048> data{};
+        // Keep the original64KiB progress/cancellation cadence, but read a
+        // contiguous run of sectors instead of seeking for every logical block.
+        // Raw BIN headers/trailers are stripped in-place before the single write.
+        constexpr size_t chunkSectors=32;
+        std::array<unsigned char,chunkSectors*2352> data;
         const auto label=displayName.empty()?path.filename().string():displayName;
         report(progress,ImportStage::Resources,label,0,e.size);
-        for(uint64_t done=0;done<e.size;done+=2048){require(sector(e.block+done/2048,data.data()),"Truncated disc resource");out.write(reinterpret_cast<char*>(data.data()),std::min<uint64_t>(2048,e.size-done));require(bool(out),outputError("Cannot write imported resource",path));
-            if((done+2048)%65536==0)report(progress,ImportStage::Resources,label,std::min<uint64_t>(done+2048,e.size),e.size);
+        const uint64_t pos=base_+uint64_t(e.block)*stride_;
+        const uint64_t sectors=(uint64_t(e.size)+2047)/2048;
+        require(pos<=bytes_&&sectors*stride_<=bytes_-pos,"Truncated disc resource");
+        file_.clear();file_.seekg(static_cast<std::streamoff>(pos));
+        require(bool(file_),"Cannot seek disc resource");
+        for(uint64_t done=0;done<e.size;){
+            const auto count=std::min<uint64_t>(chunkSectors,(e.size-done+2047)/2048);
+            require(bool(file_.read(reinterpret_cast<char*>(data.data()),count*stride_)),"Truncated disc resource");
+            if(stride_!=2048 || offset_)for(size_t sector=0;sector<count;++sector)
+                std::memmove(data.data()+sector*2048,data.data()+sector*stride_+offset_,2048);
+            const auto size=std::min<uint64_t>(count*2048,e.size-done);
+            out.write(reinterpret_cast<char*>(data.data()),size);
+            require(bool(out),outputError("Cannot write imported resource",path));
+            done+=size;
+            if(count==chunkSectors)report(progress,ImportStage::Resources,label,done,e.size);
         }
         report(progress,ImportStage::Resources,label,e.size,e.size);
         out.close();require(bool(out),outputError("Cannot finish imported resource",path));

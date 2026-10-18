@@ -76,6 +76,9 @@ int main(){
     check(writeDefaultRetry(base,"Retry",save,error)&&readDefaultRetry(base,"Retry",retry,error),"independent atomic default retry round trip");
     check(retry.currentLevel==save.currentLevel&&retry.levels.at(save.currentLevel).world.elapsedMs==123456,"retry entry metadata retained");
     check(listSaveCatalog(base,"Retry").size()==1,"default retry is absent from numbered save browser");
+    auto ownedRetry=save;
+    check(writeDefaultRetry(base,"RetryMove",std::move(ownedRetry),error)&&readDefaultRetry(base,"RetryMove",retry,error),"owned retry snapshot round trip");
+    check(retry.levels.at(save.currentLevel).world.actors[0].vitals.money==3456,"owned retry preserves gameplay data");
     auto retryInvalid=save;retryInvalid.currentLevel="bad";check(!writeDefaultRetry(base,"Retry",retryInvalid,error),"invalid retry cannot replace existing record");
     check(readDefaultRetry(base,"Retry",retry,error)&&retry.currentLevel==save.currentLevel,"failed replacement preserves default");
     check(!readDefaultRetry(base,"OtherMissing",retry,error),"retry profile isolation");

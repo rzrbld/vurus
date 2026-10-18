@@ -5,7 +5,7 @@
 
 namespace vyruz {
 
-// Reverse-engineered Vyruz GAF chunk tree (reverse-engineered format).
+// Reverse-engineered Vyruz GAF chunk tree (clean-room documented format).
 //
 // Chunk header (16 bytes, little-endian):
 //   char tag[4]; u32 size; u32 version; u32 count

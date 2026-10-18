@@ -5,7 +5,7 @@
 #include "game/native_navigation_filter.h"
 #include "snapshot_fixture.h"
 namespace {
-void replace(std::vector<TextNode>& p,const std::string& key,const std::string& text){for(auto& n:p)if(n.key==key){n.values={text};return;}p.push_back(value(key,text));}
+void replace(auto& p,const std::string& key,const std::string& text){for(auto& n:p)if(n.key==key){n.values={text};return;}p.push_back(value(key,text));}
 SceneContent familyFixture(std::string family,std::string base="Fixed",std::string action="Seeker",bool guardian=false){
  auto s=fixture(base);auto& c=s.classes[1];c.name=family;c.behaviours={base,action};if(guardian)c.behaviours.push_back("Guardian");replace(c.properties,"Sub-type",family);replace(c.properties,"Move-during-path-search","0");replace(c.properties,"Bounding-box-size","25");replace(c.properties,"Speed-max","0");replace(c.properties,"Speed-min","0");
  for(auto& n:c.properties)if(n.kind==TextKind::Block&&n.key=="TYPE"&&!n.arguments.empty()&&n.arguments[0]=="Seeker"){

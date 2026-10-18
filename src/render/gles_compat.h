@@ -1,0 +1,66 @@
+#pragma once
+#include <string>
+using GLdouble = double;
+#define GL_QUADS 0x0007
+#define GL_MODELVIEW 0x1700
+#define GL_PROJECTION 0x1701
+#define GL_ALPHA_TEST 0x0BC0
+#define GL_CLIP_PLANE0 0x3000
+#define GL_CLIP_PLANE1 0x3001
+#define GL_SMOOTH 0x1D01
+#define GL_TEXTURE_ENV 0x2300
+#define GL_TEXTURE_ENV_MODE 0x2200
+#define GL_TEXTURE_ENV_COLOR 0x2201
+#define GL_MODULATE 0x2100
+#define GL_COMBINE 0x8570
+#define GL_COMBINE_RGB 0x8571
+#define GL_COMBINE_ALPHA 0x8572
+#define GL_SOURCE0_RGB 0x8580
+#define GL_SOURCE1_RGB 0x8581
+#define GL_SOURCE0_ALPHA 0x8588
+#define GL_OPERAND0_RGB 0x8590
+#define GL_OPERAND1_RGB 0x8591
+#define GL_OPERAND0_ALPHA 0x8598
+#define GL_PRIMARY_COLOR 0x8577
+#define GL_CONSTANT 0x8576
+#define GL_ADD 0x0104
+#define GL_ENABLE_BIT 0x00002000
+#define GL_CURRENT_BIT 0x00000001
+namespace vyruz::gles {
+bool initialize(std::string& error);
+void shutdown();
+void begin(GLenum);void end();
+void vertex(float,float);void texCoord(float,float);void color(float,float,float,float);
+void enable(GLenum);void disable(GLenum);
+void matrixMode(GLenum);void loadIdentity();void pushMatrix();void popMatrix();
+void ortho(double,double,double,double,double,double);
+void translate(float,float,float);void scale(float,float,float);void rotate(float,float,float,float);
+void alphaFunc(GLenum,float);void clipPlane(GLenum,const double*);
+void texEnvi(GLenum,GLenum,GLint);void texEnvfv(GLenum,GLenum,const float*);
+void pushAttrib(GLbitfield);void popAttrib();
+void readTexture(int width,int height,void* pixels);
+}
+#define glBegin vyruz::gles::begin
+#define glEnd vyruz::gles::end
+#define glVertex2f vyruz::gles::vertex
+#define glVertex2i vyruz::gles::vertex
+#define glTexCoord2f vyruz::gles::texCoord
+#define glColor4f vyruz::gles::color
+#define glColor3ub(r,g,b) vyruz::gles::color((r)/255.f,(g)/255.f,(b)/255.f,1.f)
+#define glEnable vyruz::gles::enable
+#define glDisable vyruz::gles::disable
+#define glMatrixMode vyruz::gles::matrixMode
+#define glLoadIdentity vyruz::gles::loadIdentity
+#define glPushMatrix vyruz::gles::pushMatrix
+#define glPopMatrix vyruz::gles::popMatrix
+#define glOrtho vyruz::gles::ortho
+#define glTranslatef vyruz::gles::translate
+#define glScalef vyruz::gles::scale
+#define glRotatef vyruz::gles::rotate
+#define glAlphaFunc vyruz::gles::alphaFunc
+#define glClipPlane vyruz::gles::clipPlane
+#define glTexEnvi vyruz::gles::texEnvi
+#define glTexEnvfv vyruz::gles::texEnvfv
+#define glPushAttrib vyruz::gles::pushAttrib
+#define glPopAttrib vyruz::gles::popAttrib
+#define glShadeModel(mode) ((void)0)

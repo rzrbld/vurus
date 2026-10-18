@@ -414,6 +414,8 @@ bool GameWorld::restoreSnapshot(const WorldSnapshot& saved,std::string& error) {
     }
     // Older checkpoints saved visible terminals as nonsolid sensors. Derive
     // these two authored roles again without changing the checkpoint layout.
+    freeTransientRecords_.clear();nextRecordOrder_=actors_.size();
+    for(size_t i=0;i<actors_.size();++i)nextRecordOrder_=std::max(nextRecordOrder_,actorRecordOrder(actors_[i],i)+1);
     freeTrailSlots_.clear();
     contactMines_.clear();
     for(size_t i=0;i<actors_.size();++i) {
@@ -487,9 +489,13 @@ void GameWorld::updateSaving(float milliseconds) {
         const auto p=playerPosition();
         for(size_t area=0;area<actors_.size()&&!plot;++area) {
             const auto& object=scene_->objects[area];
-            if(!actors_[area].alive || !propertyBool(object.properties,"Saving-zone"))continue;
+            if(!actors_[area].alive)continue;
             const double radius=actors_[area].radius+player().radius;
             if(nativeDistanceSquared(p.x-object.position.x,p.y-object.position.y)>radius*radius)continue;
+            // These predicates are independent. Reject distant actors before
+            // searching their text properties; retain the exact sensor metric,
+            // actor order and first matching colocated terminal.
+            if(!propertyBool(object.properties,"Saving-zone"))continue;
             for(size_t i=0;i<actors_.size();++i)if(actors_[i].alive && propertyBool(scene_->objects[i].properties,"Saving-plot") &&
                 scene_->objects[i].position.x==object.position.x && scene_->objects[i].position.y==object.position.y){plot=i;break;}
         }

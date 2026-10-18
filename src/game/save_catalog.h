@@ -17,7 +17,7 @@ struct SaveCatalogEntry {
 std::filesystem::path saveHistoryDirectory(const std::filesystem::path& baseSlot,const std::string& profile);
 //Separate native default/retry record; excluded from numbered Load Game rows.
 std::filesystem::path defaultRetryPath(const std::filesystem::path& baseSlot,const std::string& profile);
-bool writeDefaultRetry(const std::filesystem::path& baseSlot,const std::string& profile,const SaveGame&,std::string& error);
+bool writeDefaultRetry(const std::filesystem::path& baseSlot,const std::string& profile,SaveGame,std::string& error);
 bool readDefaultRetry(const std::filesystem::path& baseSlot,const std::string& profile,SaveGame&,std::string& error);
 // Snapshot once when opening the browser; no retained handles or per-frame I/O.
 std::vector<SaveCatalogEntry> listSaveCatalog(const std::filesystem::path& baseSlot,const std::string& profile);

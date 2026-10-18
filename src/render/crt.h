@@ -1,6 +1,6 @@
 #pragma once
 #include <SDL.h>
-#include <SDL_opengl.h>
+#include "render/gl_api.h"
 #include <string>
 namespace vyruz {
 // Shared optional GLSL1.20 capture/pass runner for CRT or scene filters.
@@ -24,6 +24,7 @@ private:
     bool initialize(std::string&);
     GLuint program_=0,texture_=0;int width_=0,height_=0;bool enabled_=false;
     GLint textureLocation_=-1,sizeLocation_=-1,powSizeLocation_=-1,aspectLocation_=-1;
+#if !VYRUZ_GLES
     PFNGLCREATESHADERPROC createShader_=nullptr;PFNGLSHADERSOURCEPROC shaderSource_=nullptr;
     PFNGLCOMPILESHADERPROC compileShader_=nullptr;PFNGLGETSHADERIVPROC getShaderiv_=nullptr;
     PFNGLGETSHADERINFOLOGPROC getShaderInfoLog_=nullptr;PFNGLDELETESHADERPROC deleteShader_=nullptr;
@@ -32,5 +33,6 @@ private:
     PFNGLGETPROGRAMINFOLOGPROC getProgramInfoLog_=nullptr;PFNGLDELETEPROGRAMPROC deleteProgram_=nullptr;
     PFNGLUSEPROGRAMPROC useProgram_=nullptr;PFNGLGETUNIFORMLOCATIONPROC getUniformLocation_=nullptr;
     PFNGLUNIFORM1IPROC uniform1i_=nullptr;PFNGLUNIFORM2FPROC uniform2f_=nullptr;
+#endif
 };
 }

@@ -8,7 +8,7 @@ bool LoadingScreen::load(const ContentReader& read,std::string& error) {
     std::vector<uint8_t> bytes;
     GafAnimation decoded;
     if(!read("COMMON/DATA/MENU/LOADSCREEN.GAF",bytes) ||
-       !decodeGafAnimation(bytes,decoded) || decoded.sequences.size()!=5) {
+       !decodeGafAnimation(bytes,decoded,GafDecodeMode::SequenceFirstPoses) || decoded.sequences.size()!=5) {
         error="missing or invalid loading resource: COMMON/DATA/MENU/LOADSCREEN.GAF";
         return false;
     }
@@ -32,7 +32,7 @@ void LoadingScreen::draw(Gfx& gfx,size_t sequence,float fraction) {
     const float width=std::floor(image.width*fraction),height=image.height;
     if(width<=0 || height<=0)return;
     auto& texture=textures_[pose.frameIndex];
-    if(!texture)texture=gfx.uploadTexture(image.rgba.data(),image.width,image.height);
+    if(!texture)texture=gfx.uploadTexture(image);
     // Pictures are direct centered bitmap copies; the final sequence uses its
     // authored origin, just like native 404760 + 45eab0.
     const float x=sequence<4 ? (640-image.width)/2.f : frame.originX+pose.offsetX;

@@ -1,15 +1,16 @@
 // Original Extras resources and modal navigation. Included after the level loader.
 bool loadExtraTexture(App& a,const std::string& path,bool gaf) {
-    std::vector<uint8_t> bytes;vyruz::Image image;
+    std::vector<uint8_t> bytes;vyruz::Image image;GLuint texture=0;
     if(!a.vfs.read(path,bytes))return false;
     if(gaf) {
         vyruz::GafAnimation bank;
-        if(!vyruz::decodeGafAnimation(bytes,bank)||bank.sequences.empty()||bank.sequences[0].subframes.empty())return false;
+        if(!vyruz::decodeGafAnimation(bytes,bank,vyruz::GafDecodeMode::FirstSequencePose)||bank.sequences.empty()||bank.sequences[0].subframes.empty())return false;
         const auto frame=bank.sequences[0].subframes[0].frameIndex;
         if(frame>=bank.frames.size())return false;
-        image=std::move(bank.frames[frame].image);
+        const auto& bitmap=bank.frames[frame].image;
+        image.width=bitmap.width;image.height=bitmap.height;texture=a.gfx.uploadTexture(bitmap);
     } else if(!vyruz::loadTga(bytes,image))return false;
-    const auto texture=a.gfx.uploadTexture(image.rgba.data(),image.width,image.height);
+    if(!gaf)texture=a.gfx.uploadTexture(image.rgba.data(),image.width,image.height);
     if(!texture)return false;
     a.gfx.deleteTexture(a.extraTex);a.extraTex=texture;a.extraWidth=image.width;a.extraHeight=image.height;return true;
 }

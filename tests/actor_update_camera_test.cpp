@@ -48,7 +48,7 @@ int main(){try {
  }
  for(const std::string logicalType:{"Ammo","FX","Item","Lift","Gate"}) {
   auto s=fixture();auto& properties=s.classes[1].properties;
-  std::erase_if(properties,[](const auto& p){return contentNameIs(p.key,"sub-type");});
+  std::erase_if(properties.write(),[](const auto& p){return contentNameIs(p.key,"sub-type");});
   properties.push_back(block("TYPE",{},logicalType));s.objects[1].properties=properties;
   GameWorld w;need(w.load(s,terrain,error),error.c_str());w.setEffectCamera(outside());w.tick(.1f,{});
   if(w.actors()[1].nativeCameraGated)std::cerr<<"failed logical type "<<logicalType<<" subtype "<<objectSubtype(s.objects[1])<<"\n";

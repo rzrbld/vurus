@@ -35,25 +35,40 @@ files are downloaded or included. See [the player guide](packaging/README.txt)
 for controls, storage and command-line options. The v0.1.0 release passed native
 builds and tests on all four platforms; physical hardware testing remains ongoing.
 
+## PortMaster Alpha Preview
+
+ARM64 handheld builds use OpenGL ES 3.0 and a separate
+[PortMaster CI workflow](https://github.com/rzrbld/vurus/actions/workflows/build-portmaster.yml).
+Testing packages are CI artifacts; published handheld previews, when available,
+appear separately on [Releases](https://github.com/rzrbld/vurus/releases).
+Desktop and handheld releases do not need to happen together.
+See [installation and limitations](packaging/portmaster/README.txt).
+
+On an Anbernic RG40XX H running muOS, the user reports roughly 30–40 FPS
+with FX and terrain effects disabled, with low-20s dips in heavy battles.
+These are observations, not guarantees; long-session testing continues.
+This is an optimized Release build labeled Alpha Preview, not an official
+PortMaster catalog release. Original game data is required.
+
 ## Modern display and usability features
 
 - **Widescreen and ultrawide support:** aspect ratios from 1:1 through 32:9,
-  including 4:3, 16:10, 16:9 and 21:9.
-- **Resolution choices:** presets from 640×480 through 4K and 8K, including
-  1280×800, 1920×1080, 3440×1440 and 5120×1440; custom window sizes are supported.
+  with resolution presets from 640×480 through 4K and 8K and custom window sizes,
+  including 1280×800, 3440×1440 and 5120×1440.
   Available fullscreen modes depend on your display and driver.
-- **Responsive HUD:** Auto follows the actual window aspect ratio, with an
-  independent manual HUD aspect option. Changing the HUD does not change the
-  game camera or stretch the backgrounds.
-- **Windowed, fullscreen and borderless modes**, plus optional sprite filtering,
-  anti-aliasing, CRT/Retro/Bright shaders, bloom, sharpening and vignette.
-- **Keyboard, mouse and controller support:** remappable controls, stick/D-pad
-  menu navigation and optional enemy-only controller aim assistance.
-  Aim assist offers Off, Slight, Medium, Full and Retaliate (the last enemy
-  whose projectile damaged you), with terrain visibility checks.
-  Control → Sensitivity groups move/aim sensitivity and stick deadzone;
+- **Independent HUD layout:** Auto follows the window aspect ratio; manual HUD
+  aspect settings leave the camera and backgrounds unchanged.
+- **Windowed, fullscreen and borderless modes**, sprite filtering and optional
+  FXAA/SMAA, CRT/Retro/Bright shaders, bloom, sharpening and vignette. Availability
+  depends on platform; FXAA and SMAA cannot be enabled together.
+- **Keyboard, mouse and controller controls:** remapping, stick/D-pad menu
+  navigation. Control → Sensitivity groups move/aim sensitivity and stick deadzone;
   the Crosshair switch follows Aim assist and defaults to On.
-- Changing your player name keeps your existing save history.
+- **Enemy-only controller aim assistance:** Off, Slight, Medium, Full and
+  Retaliate (the last enemy whose projectile damaged you), with terrain visibility
+  checks. Destructible scenery is excluded.
+- **Debug tools:** `--debug` enables the testing menu, FPS/frame-time display
+  and Linux memory breakdown; normal launches keep testing controls hidden.
 
 ## Saving improvements in v0.1.2
 
@@ -69,24 +84,27 @@ save fees and failure protection are retained.
 
 ## Performance notes
 
-The engine uses compact projectile storage and spatial queries, caches repeated
-actor lookups, and prepares sprite data during loading to reduce gameplay spikes.
-These optimizations preserve simulation and animation behavior.
+The next-release candidate reduces retained world/snapshot data, streams music
+and intro video, recycles released transient effects and stores decoded sprites
+in compact 16-bit form. Gameplay, animation and filtering regression checks accompany
+these changes; native-resolution rendering remains unchanged.
 
-At an earlier Linux optimization checkpoint, a controlled final-level workload
-with 35 generators and 3,600 simulation steps measured:
+The user reports ordinary gameplay RSS of approximately **170–250 MB**, compared
+with **500–700 MB** before this series. This is an observation across sessions,
+not a matched benchmark or minimum RAM requirement. These candidate changes have
+not yet been published in new release binaries.
 
-| Workload | Median simulation CPU time per step | Peak process memory (RSS) |
-|---|---:|---:|
-| Crowded combat | 0.24 ms | About 350 MiB |
-| Heavy Circular Fire stress | 1.22 ms | About 1.09 GiB |
+Controlled examples include fresh snapshot allocations falling from **12–16 MiB
+to 2.5–3.5 MiB**, and the decoded sprite corpus from **57.15 to 28.58 MiB**. Neither
+figure represents total process memory. In a matched final-level CPU workload,
+World median/p95 time changed from **0.186/0.366 ms to 0.175/0.351 ms** per step;
+this excludes rendering/audio and is not a hardware FPS claim.
 
-These are workload-specific development measurements, not minimum system
-requirements or benchmarks of every release/platform. CPU time above covers World
-simulation, not rendering, audio or total CPU utilization. Extreme effects increase
-memory use; resolution and optional shaders also affect GPU cost. Hardware FPS and
-CPU percentages depend on the device, frame cap and scene. Launch with `--debug`
-for the FPS/frame-time display, or use `--profile-frames 1200` for a frame-timing report.
+See the [performance and memory report](docs/performance_update_2026-10-19.md)
+for workload details, percentile timings, limitations and validation. Resolution,
+optional shaders and driver allocations still affect memory and GPU cost.
+Use `--debug` for FPS/frame-time and Linux RSS/PSS, or `--profile-frames 1200`
+for a frame-timing report. Device testing remains separate from host benchmarks.
 
 ## Screenshots
 

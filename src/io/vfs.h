@@ -19,6 +19,11 @@ public:
     // "..\\Common\\Data\\Extra\\story.tga"). Returns false if not found.
     bool read(const std::string& gamePath, std::vector<uint8_t>& out) const;
 
+    // Original/imported Intro.avi is a loose media file; expose its resolved
+    // case-insensitive path for bounded seeking instead of whole-file read().
+    std::string loosePath(const std::string& gamePath)const {
+        const auto found=loose_.find(normalize(gamePath));return found==loose_.end()?std::string{}:found->second;
+    }
     const std::string& error() const {return error_;}
     bool hasRsc() const { return data_.entryCount() > 0 || slides_.entryCount() > 0; }
 

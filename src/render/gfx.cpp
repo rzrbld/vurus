@@ -28,6 +28,10 @@ bool Gfx::init(SDL_Window* window) {
     std::printf("frame pacing: %s\n",vsync_?"VSync":"software deadline pacing (VSync unavailable)");
     SDL_GetWindowSize(window_, &winW_, &winH_);
 
+#if VYRUZ_GLES
+    std::string error;
+    if(!gles::initialize(error)){std::fprintf(stderr,"GLES renderer: %s\n",error.c_str());shutdown();return false;}
+#endif
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     glEnable(GL_TEXTURE_2D);
@@ -46,11 +50,20 @@ bool Gfx::init(SDL_Window* window) {
 }
 
 void Gfx::shutdown() {
+    std::vector<uint8_t>().swap(bitmapScratch_);
     crt_.shutdown();sceneEffects_.shutdown();smaa_.shutdown();
     for(const auto& [id,sprite]:spriteTextures_)if(sprite.texture)glDeleteTextures(1,&sprite.texture);
     spriteTextures_.clear();
     deleteTexture(distortion_);distortion_=0;distortionW_=distortionH_=0;
     deleteTexture(brightness_);brightness_=0;brightnessW_=brightnessH_=0;
+#if VYRUZ_GLES
+    if(ctx_){
+        if(previewFramebuffer_)glDeleteFramebuffers(1,&previewFramebuffer_);
+        if(previewTexture_)glDeleteTextures(1,&previewTexture_);
+        previewFramebuffer_=previewTexture_=0;previewValid_=false;
+        gles::shutdown();
+    }
+#endif
     if (ctx_) {
         SDL_GL_DeleteContext(ctx_);
         ctx_ = nullptr;
@@ -88,8 +101,26 @@ GLuint Gfx::uploadTexture(const uint8_t* rgba, int w, int h,bool sprite) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
-    if(sprite)spriteTextures_[tex]={w,h};
+    if(sprite)spriteTextures_[tex]={w,h,0,0,false,size_t(w)*h*4};
     return tex;
+}
+
+GLuint Gfx::uploadTexture(const GafBitmap& bitmap,bool sprite) {
+    if(!bitmap.valid())return 0;
+    constexpr size_t retainedLimit=1024*1024;
+    std::vector<uint8_t> temporary;
+    auto& rgba=bitmap.rgb555.size()<=retainedLimit/4?bitmapScratch_:temporary;
+    // reserve exact high-water sizes rather than allowing vector growth to
+    // retain more than the stated scratch budget.
+    const auto bytes=bitmap.rgb555.size()*4;
+    if(&rgba==&bitmapScratch_ && rgba.capacity()<bytes){std::vector<uint8_t> next(bytes);rgba.swap(next);}
+    bitmap.expand(rgba);
+    return uploadTexture(rgba.data(),bitmap.width,bitmap.height,sprite);
+}
+
+size_t Gfx::spriteTextureBytes(GLuint tex) const {
+    const auto found=spriteTextures_.find(tex);
+    return found==spriteTextures_.end()?0:found->second.bytes;
 }
 
 void Gfx::deleteTexture(GLuint tex) {
@@ -101,26 +132,44 @@ void Gfx::deleteTexture(GLuint tex) {
     if (current_ == tex) current_ = 0;
 }
 
-GLuint Gfx::filteredTexture(GLuint original) {
+GLuint Gfx::filteredTexture(GLuint original,const GafBitmap* source) {
     const auto found=spriteTextures_.find(original);
     if(found==spriteTextures_.end())return original;
     auto& sprite=found->second;
-    if(!sprite.texture) {
-        // Created only on demand with filtering enabled; Off retains the exact
-        // original texture and avoids mipmap allocation or image processing.
-        glBindTexture(GL_TEXTURE_2D,original);
-        std::vector<uint8_t> pixels(size_t(sprite.width)*sprite.height*4);
-        glPixelStorei(GL_PACK_ALIGNMENT,1);
-        glGetTexImage(GL_TEXTURE_2D,0,GL_RGBA,GL_UNSIGNED_BYTE,pixels.data());
-        const auto levels=filteredSpriteMips(pixels.data(),sprite.width,sprite.height);
-        glGenTextures(1,&sprite.texture);glBindTexture(GL_TEXTURE_2D,sprite.texture);
+    const bool needMips=spriteFiltering_==2;
+    if(!sprite.texture || (needMips && !sprite.mipmaps)) {
+        SpriteMip base{sprite.width,sprite.height,{}};
+        if(source && source->valid() && source->width==sprite.width && source->height==sprite.height){
+            // Production scene draws supply their live compact bitmap. No
+            // GPU synchronization/readback and no second RGBA base copy.
+            source->expand(base.rgba);
+        }else{
+            // Compatibility path for raw-RGBA texture clients without CPU art.
+            glBindTexture(GL_TEXTURE_2D,original);
+            base.rgba.resize(size_t(sprite.width)*sprite.height*4);
+            glPixelStorei(GL_PACK_ALIGNMENT,1);
+#if VYRUZ_GLES
+            gles::readTexture(sprite.width,sprite.height,base.rgba.data());
+#else
+            glGetTexImage(GL_TEXTURE_2D,0,GL_RGBA,GL_UNSIGNED_BYTE,base.rgba.data());
+#endif
+        }
+        const bool fresh=!sprite.texture;
+        if(fresh)glGenTextures(1,&sprite.texture);
+        glBindTexture(GL_TEXTURE_2D,sprite.texture);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
-        for(size_t level=0;level<levels.size();++level) {
-            const auto& mip=levels[level];
-            glTexImage2D(GL_TEXTURE_2D,GLint(level),GL_RGBA,mip.width,mip.height,0,GL_RGBA,GL_UNSIGNED_BYTE,mip.rgba.data());
-        }
+        glPixelStorei(GL_UNPACK_ALIGNMENT,1);
+        visitFilteredSpriteMips(std::move(base),needMips,[&](size_t level,const SpriteMip& mip){
+            // Bilinear -> Trilinear upgrades the existing filtered texture;
+            // its identical level0 need not be uploaded again.
+            if(level || fresh) {
+                glTexImage2D(GL_TEXTURE_2D,GLint(level),GL_RGBA,mip.width,mip.height,0,GL_RGBA,GL_UNSIGNED_BYTE,mip.rgba.data());
+                sprite.bytes+=size_t(mip.width)*mip.height*4;
+            }
+        });
+        sprite.mipmaps=needMips;
         current_=sprite.texture;
     }
     if(sprite.mode!=spriteFiltering_) {
@@ -130,8 +179,8 @@ GLuint Gfx::filteredTexture(GLuint original) {
     }
     return sprite.texture;
 }
-void Gfx::beginQuads(GLuint tex,bool filterSprite) {
-    if(filterSprite && spriteFiltering_!=0)tex=filteredTexture(tex);
+void Gfx::beginQuads(GLuint tex,bool filterSprite,const GafBitmap* filterSource) {
+    if(filterSprite && spriteFiltering_!=0)tex=filteredTexture(tex,filterSource);
     if (tex != current_) {
         glBindTexture(GL_TEXTURE_2D, tex);
         current_ = tex;
@@ -245,10 +294,44 @@ void Gfx::applyCRT(){
         std::fprintf(stderr,"CRT disabled for this run: %s\n",error.c_str());std::string ignored;crt_.enable(false,ignored);
     }
 }
+#if VYRUZ_GLES
+void Gfx::capturePreview(){
+    if(drawableW_<=0||drawableH_<=0)return;
+    GLint oldRead=0,oldDraw=0,bound=0;
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&oldRead);glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&oldDraw);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D,&bound);
+    if(!previewTexture_){
+        glGenTextures(1,&previewTexture_);glBindTexture(GL_TEXTURE_2D,previewTexture_);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,224,168,0,GL_RGBA,GL_UNSIGNED_BYTE,nullptr);
+        glGenFramebuffers(1,&previewFramebuffer_);glBindFramebuffer(GL_DRAW_FRAMEBUFFER,previewFramebuffer_);
+        glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,previewTexture_,0);
+        glBindTexture(GL_TEXTURE_2D,bound);
+    }
+    glBindFramebuffer(GL_READ_FRAMEBUFFER,0);glBindFramebuffer(GL_DRAW_FRAMEBUFFER,previewFramebuffer_);
+    const auto view=viewport();
+    const int cw=std::clamp(int(drawableW_*std::min(640.f,view.width)/view.width),1,drawableW_);
+    const int ch=std::clamp(int(drawableH_*std::min(480.f,view.height)/view.height),1,drawableH_);
+    glBlitFramebuffer(0,drawableH_-ch,cw,drawableH_,0,0,224,168,GL_COLOR_BUFFER_BIT,GL_NEAREST);
+    previewValid_=glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER)==GL_FRAMEBUFFER_COMPLETE;
+    glBindFramebuffer(GL_READ_FRAMEBUFFER,oldRead);glBindFramebuffer(GL_DRAW_FRAMEBUFFER,oldDraw);
+}
+std::vector<uint8_t> Gfx::presentedPreview() const{
+    if(!previewValid_)return {};
+    GLint oldRead=0,alignment=0;glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&oldRead);glGetIntegerv(GL_PACK_ALIGNMENT,&alignment);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER,previewFramebuffer_);glPixelStorei(GL_PACK_ALIGNMENT,1);
+    std::vector<uint8_t> result(224*168*4);glReadPixels(0,0,224,168,GL_RGBA,GL_UNSIGNED_BYTE,result.data());
+    glBindFramebuffer(GL_READ_FRAMEBUFFER,oldRead);glPixelStorei(GL_PACK_ALIGNMENT,alignment);
+    return result;
+}
+#endif
 void Gfx::present() {
     applyBrightness();
     applyCRT();
-    SDL_GL_SwapWindow(window_);
+#if VYRUZ_GLES
+    capturePreview();
+#endif
+    if(swapEnabled_)SDL_GL_SwapWindow(window_);
 }
 
 } // namespace vyruz

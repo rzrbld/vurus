@@ -31,7 +31,7 @@ Bytes streams(const std::array<Bytes, 4>& components) {
 }
 // A synthetic odd-width black-keyed bitmap, followed by a timed blank pose.
 Bytes fixture(uint32_t format = 0x40000322, uint32_t storedBytes = 8,
-              uint32_t secondBitmap = 0) {
+              uint32_t secondBitmap = 0, bool multi=false) {
     Bytes descriptor(44); put(descriptor, 0, 1); put(descriptor, 4, 3);
     put(descriptor, 8, 1); put(descriptor, 16, static_cast<uint32_t>(-2));
     put(descriptor, 20, 5);
@@ -51,7 +51,9 @@ Bytes fixture(uint32_t format = 0x40000322, uint32_t storedBytes = 8,
     Bytes poses(56); put(poses, 0, 1); put(poses, 4, static_cast<uint32_t>(-3));
     put(poses, 8, 4); put(poses, 12, 0x108); put(poses, 24, 8);
     put(poses, 28, secondBitmap); put(poses, 52, 110);
-    Bytes headG(36), headA(36); put(headG, 0, 1); put(headA, 0, 1);
+    if(multi){auto descriptor2=descriptor;put(descriptor2,16,17);append(descriptor,descriptor2);
+        auto bitmap2=bitmap;bitmap2[68]=0xe0;bitmap2[69]=0x03;append(bitmap,bitmap2);put(poses,0,2);put(poses,28,1);}
+    Bytes headG(36), headA(36); put(headG, 0, multi?2:1); put(headA, 0, 1);
     Bytes head; append(head, chunk("GOB_", headG)); append(head, chunk("ANM_", headA));
     Bytes data; append(data, chunk("GOB_", streams({descriptor, bitmap, {}, {}})));
     append(data, chunk("ANM_", streams({sequence, {}, poses, {}})));
@@ -61,16 +63,59 @@ Bytes fixture(uint32_t format = 0x40000322, uint32_t storedBytes = 8,
 }
 
 int main() {
+    using Mode=vyruz::GafDecodeMode;
+    for(auto mode:{Mode::Metadata,Mode::FirstBitmap,Mode::FirstSequencePose,Mode::SequenceFirstPoses}){
+        vyruz::GafAnimation full,selected;
+        check(vyruz::decodeGafAnimation(fixture(),full),"reference decode");
+        check(vyruz::decodeGafAnimation(fixture(),selected,mode),"selective decode");
+        check(selected.sequences[0].subframes[0].offsetX==full.sequences[0].subframes[0].offsetX &&
+              selected.sequences[0].subframes[1].frameIndex==vyruz::GafSubframe::Blank &&
+              selected.frames[0].flippedOriginX==full.frames[0].flippedOriginX,"selective metadata changed");
+        check(mode==Mode::Metadata?selected.frames[0].image.rgb555.empty():
+              selected.frames[0].image.rgb555==full.frames[0].image.rgb555,"selective pixels differ");
+        check(!vyruz::decodeGafAnimation(fixture(0x40000322,8,2),selected,mode),"selective invalid frame index accepted");
+        auto truncated=fixture();truncated.pop_back();
+        check(!vyruz::decodeGafAnimation(truncated,selected,mode),"selective truncated input accepted");
+    }
+
+    {
+        vyruz::GafAnimation full,selected;const auto data=fixture(0x40000322,8,0,true);
+        check(vyruz::decodeGafAnimation(data,full),"two bitmap fixture");
+        check(vyruz::decodeGafAnimation(data,selected,Mode::FirstSequencePose),"sequence selection");
+        check(selected.frames[0].image.rgb555.empty() && selected.frames[1].image.rgb555==full.frames[1].image.rgb555 &&
+              selected.frames[1].originX==17 && selected.sequences[0].subframes[1].frameIndex==0,"selected wrong bitmap or lost indices");
+        vyruz::Image first;check(vyruz::decodeGafSprite(data,first)&&first.rgba==full.frames[0].image.rgbaImage().rgba,"first bitmap differs from first pose");
+    }
+    {
+        const auto data=fixture(0x40000322,8,0,true);
+        vyruz::GafAnimation full,selected;
+        check(vyruz::decodeGafAnimation(data,full),"sequence-mask reference");
+        for(bool enabled:{false,true}) {
+            check(vyruz::decodeGafAnimation(data,selected,Mode::SelectedSequences,
+                [=](const auto& a){return std::vector<bool>(a.sequences.size(),enabled);}),"sequence-mask decode");
+            for(size_t i=0;i<full.frames.size();++i) {
+                check(selected.frames[i].image.width==full.frames[i].image.width,"omitted dimensions lost");
+                check(enabled?selected.frames[i].image.rgb555==full.frames[i].image.rgb555:
+                    selected.frames[i].image.rgb555.empty(),"sequence must include every pose, not only first");
+            }
+        }
+        check(!vyruz::decodeGafAnimation(fixture(0x12345678),selected,Mode::SelectedSequences,
+            [](const auto& a){return std::vector<bool>(a.sequences.size(),false);}),"omitted corrupt bitmap accepted");
+        check(!vyruz::decodeGafAnimation(data,selected,Mode::SelectedSequences),"missing mask accepted");
+        check(!vyruz::decodeGafAnimation(data,selected,Mode::SelectedSequences,
+            [](const auto&){return std::vector<bool>{};}),"invalid mask accepted");
+        check(selected.frames[1].image.rgb555==full.frames[1].image.rgb555,"failed mask decode mutated output");
+    }
     vyruz::GafAnimation out;
     check(vyruz::decodeGafAnimation(fixture(), out), "synthetic animation rejected");
     check(out.frames.size() == 1 && out.sequences.size() == 1, "wrong table counts");
     const auto& f = out.frames.front();
     check(f.originX == -2 && f.originY == 5, "signed origin lost");
     check(f.flippedOriginX == -7 && f.flippedOriginY == 9, "authored flipped origin lost");
-    check(f.image.width == 3 && f.image.height == 1 && f.image.rgba.size() == 12,
+    check(f.image.width == 3 && f.image.height == 1 && f.image.rgbaImage().rgba.size() == 12,
           "bitmap padding treated as pixels");
-    check(f.image.rgba[0] == 255 && f.image.rgba[1] == 0 && f.image.rgba[2] == 0 &&
-          f.image.rgba[3] == 255 && f.image.rgba[7] == 0 && f.image.rgba[11] == 255,
+    check(f.image.rgbaImage().rgba[0] == 255 && f.image.rgbaImage().rgba[1] == 0 && f.image.rgbaImage().rgba[2] == 0 &&
+          f.image.rgbaImage().rgba[3] == 255 && f.image.rgbaImage().rgba[7] == 0 && f.image.rgbaImage().rgba[11] == 255,
           "RGB555 or authored black color key lost");
     check(f.colorKey == 0 && f.bitmapFlags == 0x40000322, "bitmap metadata lost");
     const auto& s = out.sequences.front();
@@ -90,11 +135,11 @@ int main() {
           "failed decode modified prior result");
     check(vyruz::decodeGafAnimation(fixture(0x40000122), out), "second observed pixel flag rejected");
     check(vyruz::decodeGafAnimation(fixture(0x311), out), "explosion bitmap variant rejected");
-    check(out.frames[0].bitmapFlags == 0x311 && out.frames[0].image.rgba[0] == 255 &&
-          out.frames[0].image.rgba[1] == 0 && out.frames[0].image.rgba[7] == 0,
+    check(out.frames[0].bitmapFlags == 0x311 && out.frames[0].image.rgbaImage().rgba[0] == 255 &&
+          out.frames[0].image.rgbaImage().rgba[1] == 0 && out.frames[0].image.rgbaImage().rgba[7] == 0,
           "explosion variant lost RGB555 or color key");
     std::cout << "gaf sprite tests passed\n";
     check(vyruz::decodeGafAnimation(fixture(0x111), out), "terrain groundlight bitmap variant rejected");
-    check(out.frames[0].bitmapFlags==0x111 && out.frames[0].image.rgba[0]==255 && out.frames[0].image.rgba[7]==0,
+    check(out.frames[0].bitmapFlags==0x111 && out.frames[0].image.rgbaImage().rgba[0]==255 && out.frames[0].image.rgbaImage().rgba[7]==0,
           "terrain variant lost RGB555 or color key");
 }

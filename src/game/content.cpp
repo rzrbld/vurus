@@ -201,7 +201,7 @@ bool buildClassCatalog(const std::vector<TextDocument>& documents,
                                  is(field,"override-random-objects")) && !c.parent)
                                 fail(field,"override directive requires derivation");
                             if (is(field, "name")) c.name = value(field);
-                            overlay(c.properties, field);
+                            overlay(c.properties.write(), field);
                         }
                     }
                     if (c.name.empty()) fail(node, "class requires Name after derivation");
@@ -289,7 +289,7 @@ bool loadSceneContent(const ContentReader& read, const std::string& mapPath,
                     }
                 }
                 if (!merged) {
-                    overlay(object.properties,field);
+                    overlay(object.properties.write(),field);
                     if (field.kind == TextKind::Block && (is(field,"type") || is(field,"add")))
                         claimedAttributes.push_back(object.properties.size()-1);
                 }

@@ -96,7 +96,7 @@ static void unit(){
  // reuse once the prior actor has been removed. Test fuse at a fixed point.
  for(int mode=0;mode<4;++mode){s=fixture();s.classes[4].properties.push_back(value("Uniq-at-xy","1"));
   place(s,{4},{mode==1?500.001f:500,500});
-  if(mode==2)s.classes[4].properties.pop_back();
+  if(mode==2)s.classes[4].properties.write().pop_back();
   if(mode==3){s.objects.back().classId={3};s.objects.back().properties=s.classes[3].properties;}
   const auto r=run(s,{2},3,0);need(effects(r).size()==(mode==0?1:2),"exact class/position duplicate admission");
  }

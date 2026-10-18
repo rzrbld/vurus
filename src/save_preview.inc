@@ -3,6 +3,12 @@
 // successfully committed paid checkpoint into a reported save failure.
 std::vector<uint8_t> readSavePreview(App& a) {
     if(!a.window || a.menu.open())return {};
+#if VYRUZ_GLES
+    const auto pixels=a.gfx.presentedPreview();if(pixels.empty())return {};
+    std::vector<uint8_t> tga(18+224*168*3);tga[2]=2;tga[12]=224;tga[14]=168;tga[16]=24;
+    for(size_t i=0;i<224*168;++i){tga[18+i*3]=pixels[i*4+2];tga[19+i*3]=pixels[i*4+1];tga[20+i*3]=pixels[i*4];}
+    return tga;
+#else
     const int w=a.gfx.drawableWidth(),h=a.gfx.drawableHeight();if(w<=0||h<=0)return {};
     GLint readBuffer=0,alignment=0;glGetIntegerv(GL_READ_BUFFER,&readBuffer);glGetIntegerv(GL_PACK_ALIGNMENT,&alignment);
     glReadBuffer(GL_FRONT);glPixelStorei(GL_PACK_ALIGNMENT,1);
@@ -17,6 +23,7 @@ std::vector<uint8_t> readSavePreview(App& a) {
         tga[destination]=pixels[source+2];tga[destination+1]=pixels[source+1];tga[destination+2]=pixels[source];
     }
     return tga;
+#endif
 }
 void writeSavePreview(std::filesystem::path path,const std::vector<uint8_t>& tga) {
     if(tga.empty())return;

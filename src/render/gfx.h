@@ -1,10 +1,12 @@
 #pragma once
 #include "render/smaa.h"
+#include "assets/gaf_bitmap.h"
 #include <SDL.h>
-#include <SDL_opengl.h>
+#include "render/gl_api.h"
 
 #include <cstdint>
 #include <map>
+#include <vector>
 #include "render/viewport.h"
 #include "render/crt.h"
 #include "render/crt_geometry.h"
@@ -35,9 +37,15 @@ public:
     void clear(float r, float g, float b);
 
     GLuint uploadTexture(const uint8_t* rgba, int w, int h,bool sprite=false);
+    GLuint uploadTexture(const GafBitmap&,bool sprite=false);
     void deleteTexture(GLuint tex);
+    // Uploaded RGBA payload for a registered sprite and its retained filter copy.
+    // Excludes driver overhead; returns zero for unregistered/deleted textures.
+    size_t spriteTextureBytes(GLuint tex) const;
 
-    void beginQuads(GLuint tex,bool filterSprite=false);
+    // Optional compact source must match the uploaded pixels. It is borrowed
+    // only for this call, never retained.
+    void beginQuads(GLuint tex,bool filterSprite=false,const GafBitmap* filterSource=nullptr);
     void setSpriteFiltering(int mode) { spriteFiltering_=mode; }
     int spriteFiltering() const { return spriteFiltering_; }
     // Vertices in virtual screen space (top-left origin).
@@ -62,15 +70,28 @@ public:
     bool sceneEffectsEnabled()const{return sceneEffects_.enabled()||smaa_.enabled();}
     void applySceneEffects();
     void present();
+    // Diagnostic readback must occur before swapping a GLES backbuffer.
+    void setSwapEnabled(bool enabled) { swapEnabled_=enabled; }
+#if VYRUZ_GLES
+    // GLES cannot read the front buffer after swap. Keep a tiny GPU thumbnail.
+    std::vector<uint8_t> presentedPreview() const;
+#endif
     void setGamma(int value) { gamma_=value; }
 
 private:
+    std::vector<uint8_t> bitmapScratch_; // capped at1MiB; large uploads use temporary storage
+    bool swapEnabled_=true;
+#if VYRUZ_GLES
+    GLuint previewTexture_=0,previewFramebuffer_=0;
+    bool previewValid_=false;
+    void capturePreview();
+#endif
     SmaaPass smaa_;
     CrtPass crt_,sceneEffects_{true};
     std::string crtFailure_;
-    struct FilteredTexture {int width,height;GLuint texture=0;int mode=0;};
+    struct FilteredTexture {int width,height;GLuint texture=0;int mode=0;bool mipmaps=false;size_t bytes=0;};
     std::map<GLuint,FilteredTexture> spriteTextures_;
-    GLuint filteredTexture(GLuint original);
+    GLuint filteredTexture(GLuint original,const GafBitmap* source);
     int spriteFiltering_=0;
     SDL_Window* window_ = nullptr;
     SDL_GLContext ctx_ = nullptr;

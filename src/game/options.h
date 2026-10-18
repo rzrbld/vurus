@@ -13,12 +13,17 @@ const char* optionActionName(OptionAction action);
 // Port preferences, independent of a saved game. SDL scancodes are physical keys.
 // Defaults retain the accepted input behavior and existing output configuration.
 struct GameOptions {
+#if VYRUZ_PORTMASTER
+    int width = 640, height = 480;
+#else
     int width = 1280, height = 960;
+#endif
     int windowMode = 0; // Windowed, exclusive Fullscreen, Borderless fullscreen, Borderless window.
     int gamma = 50; // Bounded port brightness: 0..100, neutral50; legacy key retained.
     int spriteFiltering = 0; // Off, Bilinear, Trilinear (port presentation option).
     bool fxaa=false,bloom=false,sharpen=false; // Optional scene-only filters.
     bool smaa = false;
+    bool fpsCounter = false; // Optional presentation overlay; does not enable debug mode.
     bool crtBright = false; // Warm CRT with highlight glow.
     bool crtRetro = false; // Warm variant, used only while CRT is enabled.
     bool crt = false; // Optional adapted MAME-PSGS postprocess; unchanged path when Off.

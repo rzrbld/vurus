@@ -1,13 +1,16 @@
 #pragma once
 #include <algorithm>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace vyruz {
 struct SpriteMip { int width,height;std::vector<uint8_t> rgba; };
-inline std::vector<SpriteMip> filteredSpriteMips(const uint8_t* source,int width,int height) {
-    std::vector<SpriteMip> levels{{width,height,{source,source+size_t(width)*height*4}}};
-    auto& pixels=levels[0].rgba;
+inline void dilateSpriteEdges(std::vector<uint8_t>& pixels,int width,int height) {
+    // Homogeneous alpha needs no propagation. Keep partial-alpha RGB unchanged.
+    bool opaque=false,transparent=false;
+    for(size_t p=3;p<pixels.size();p+=4){opaque|=pixels[p]!=0;transparent|=pixels[p]==0;}
+    if(!opaque || !transparent)return;
     // Color-key pixels contain magenta/black, not meaningful edge colors.
     // Extend visible RGB into transparent pixels without changing their alpha.
     std::vector<int> queue;queue.reserve(size_t(width)*height);
@@ -21,24 +24,39 @@ inline std::vector<SpriteMip> filteredSpriteMips(const uint8_t* source,int width
             visited[n]=true;queue.push_back(n);
         }
     }
-    while(levels.back().width>1 || levels.back().height>1) {
-        const auto& previous=levels.back();
-        SpriteMip next{std::max(1,previous.width/2),std::max(1,previous.height/2),{}};
-        next.rgba.resize(size_t(next.width)*next.height*4);
-        for(int y=0;y<next.height;++y)for(int x=0;x<next.width;++x) {
-            unsigned alpha=0,count=0,weighted[3]{},plain[3]{};
-            for(int sy=y*previous.height/next.height;sy<(y+1)*previous.height/next.height;++sy)
-                for(int sx=x*previous.width/next.width;sx<(x+1)*previous.width/next.width;++sx) {
-                    const auto* p=&previous.rgba[(size_t(sy)*previous.width+sx)*4];
-                    alpha+=p[3];++count;
-                    for(int c=0;c<3;++c){weighted[c]+=unsigned(p[c])*p[3];plain[c]+=p[c];}
-                }
-            auto* p=&next.rgba[(size_t(y)*next.width+x)*4];
-            for(int c=0;c<3;++c)p[c]=alpha?weighted[c]/alpha:plain[c]/count;
-            p[3]=(alpha+count/2)/count;
-        }
-        levels.push_back(std::move(next));
+}
+inline SpriteMip nextSpriteMip(const SpriteMip& previous) {
+    SpriteMip next{std::max(1,previous.width/2),std::max(1,previous.height/2),{}};
+    next.rgba.resize(size_t(next.width)*next.height*4);
+    for(int y=0;y<next.height;++y)for(int x=0;x<next.width;++x) {
+        unsigned alpha=0,count=0,weighted[3]{},plain[3]{};
+        for(int sy=y*previous.height/next.height;sy<(y+1)*previous.height/next.height;++sy)
+            for(int sx=x*previous.width/next.width;sx<(x+1)*previous.width/next.width;++sx) {
+                const auto* p=&previous.rgba[(size_t(sy)*previous.width+sx)*4];
+                alpha+=p[3];++count;
+                for(int c=0;c<3;++c){weighted[c]+=unsigned(p[c])*p[3];plain[c]+=p[c];}
+            }
+        auto* p=&next.rgba[(size_t(y)*next.width+x)*4];
+        for(int c=0;c<3;++c)p[c]=alpha?weighted[c]/alpha:plain[c]/count;
+        p[3]=(alpha+count/2)/count;
     }
+    return next;
+}
+// Consumer uploads synchronously. Only previous+next images coexist; dilation
+// queue/mask have already been released before any lower mip is allocated.
+template<class Consumer>
+void visitFilteredSpriteMips(SpriteMip base,bool mipmaps,Consumer&& consume) {
+    dilateSpriteEdges(base.rgba,base.width,base.height);
+    consume(0,base);
+    for(size_t level=1;mipmaps && (base.width>1 || base.height>1);++level){
+        auto next=nextSpriteMip(base);consume(level,next);base=std::move(next);
+    }
+}
+// Convenience collector for resource tools/tests; production uses the visitor.
+inline std::vector<SpriteMip> filteredSpriteMips(const uint8_t* source,int width,int height) {
+    std::vector<SpriteMip> levels;
+    visitFilteredSpriteMips({width,height,{source,source+size_t(width)*height*4}},true,
+        [&](size_t,const SpriteMip& mip){levels.push_back(mip);});
     return levels;
 }
 }

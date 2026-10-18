@@ -1,15 +1,16 @@
 #pragma once
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 #include "assets/gaf.h"
-#include "assets/tga.h"
+#include "assets/gaf_bitmap.h"
 
 namespace vyruz {
 
 // One decoded sprite frame plus its hot-spot (origin) inside the image.
 struct GafFrame {
-    Image image;
+    GafBitmap image;
     int originX = 0;
     int originY = 0;
     uint32_t bitmapFlags = 0;
@@ -42,8 +43,16 @@ struct GafAnimation {
     std::vector<GafSequence> sequences;
 };
 
-// Decodes every sprite frame of a GAF animation file.
-bool decodeGafAnimation(const std::vector<uint8_t>& data, GafAnimation& out);
+// Selective modes preserve frame indices, origins and all sequence metadata.
+// Unselected images have no pixel storage. Metadata skips the bitmap stream.
+enum class GafDecodeMode { All, Metadata, FirstBitmap, FirstSequencePose, SequenceFirstPoses, SelectedSequences };
+
+// SelectedSequences takes a sequence mask after ANM parsing. All metadata and
+// bitmap headers remain validated; the shared pixel stream is inflated once.
+// Decodes every sprite frame by default; narrower modes avoid unused pixels.
+bool decodeGafAnimation(const std::vector<uint8_t>& data, GafAnimation& out,
+                        GafDecodeMode mode = GafDecodeMode::All,
+                        const std::function<std::vector<bool>(const GafAnimation&)>& selectSequences = {});
 
 // Decodes the first sprite frame of a GAF animation into a 32-bit RGBA image.
 bool decodeGafSprite(const std::vector<uint8_t>& data, Image& out);

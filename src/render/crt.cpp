@@ -1,3 +1,4 @@
+#if !VYRUZ_GLES
 #include "render/crt.h"
 #include "crt_shaders.h"
 #include <algorithm>
@@ -50,3 +51,12 @@ bool CrtPass::draw(int width,int height,float logicalWidth,float logicalHeight,s
     glPopMatrix();useProgram_(oldProgram);glPopAttrib();return true;
 }
 }
+
+#else
+#include "render/crt.h"
+namespace vyruz {
+bool CrtPass::enable(bool value,std::string& error){if(value){error="Post-processing is unavailable in this GLES build";return false;}enabled_=false;error.clear();return true;}
+void CrtPass::shutdown(){enabled_=false;}
+bool CrtPass::draw(int,int,float,float,std::string& error){error.clear();return true;}
+}
+#endif

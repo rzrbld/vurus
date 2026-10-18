@@ -18,6 +18,8 @@ struct Failure:std::runtime_error {using std::runtime_error::runtime_error;};
 template<class A,class T> void fields(A&,T&);
 template<class T> struct Optional:std::false_type{};
 template<class T> struct Optional<std::optional<T>>:std::true_type{};
+template<class T> struct Indirect:std::false_type{};
+template<class T> struct Indirect<IndirectOptional<T>>:std::true_type{};
 template<class T> struct Vector:std::false_type{};
 template<class T> struct Vector<std::vector<T>>:std::true_type{};
 template<class T> struct Map:std::false_type{};
@@ -47,7 +49,17 @@ struct Archive {
   else if constexpr(std::is_floating_point_v<T>){using U=std::conditional_t<sizeof(T)==4,uint32_t,uint64_t>;U n=std::bit_cast<U>(v);value(n);v=std::bit_cast<T>(n);if(!std::isfinite(v))throw Failure("Non-finite save number");}
   else if constexpr(std::is_enum_v<T>){uint32_t n=uint32_t(v);value(n);uint32_t limit=0;if constexpr(std::is_same_v<T,TextKind>)limit=2;else if constexpr(std::is_same_v<T,BrainBase>)limit=4;else if constexpr(std::is_same_v<T,RouteStatus>)limit=4;else if constexpr(std::is_same_v<T,MissileGuidancePhase>)limit=2;else static_assert(!sizeof(T),"Unrecognized enum");if(n>limit)throw Failure("Invalid save enum");v=T(n);}
   else if constexpr(std::is_same_v<T,std::string>){uint64_t n=v.size();value(n);if(n>MaxString)throw Failure("Save string limit exceeded");if(reading){allocate(size_t(n),1);if(n>input.size()-pos)throw Failure("Truncated save string");v.assign(reinterpret_cast<const char*>(input.data()+pos),size_t(n));pos+=size_t(n);}else{if(n>MaxFile-bytes.size())throw Failure("Save exceeds size limit");bytes.insert(bytes.end(),v.begin(),v.end());}}
-  else if constexpr(Optional<T>::value){bool present=v.has_value();value(present);if(reading){if(present)v.emplace();else v.reset();}if(present)value(*v);}
+  else if constexpr(std::is_same_v<T,SharedProperties>){
+   if(reading)value(v.write());
+   else {
+    // Archive's scalar writer assigns normalized values even while encoding.
+    // Never write through shared definitions (a save worker can run alongside
+    // gameplay). A single-node temporary retains the exact legacy byte layout.
+    uint64_t n=v.size();value(n);if(n>MaxCount)throw Failure("Save collection limit exceeded");
+    for(const auto& node:v.read()){auto copy=node;value(copy);}
+   }
+  }
+  else if constexpr(Optional<T>::value||Indirect<T>::value){bool present=v.has_value();value(present);if(reading){if(present){if constexpr(Indirect<T>::value)allocate(1,sizeof(typename T::value_type));v.emplace();}else v.reset();}if(present)value(*v);}
   else if constexpr(Vector<T>::value){uint64_t n=v.size();value(n);if(n>MaxCount||(reading&&n>input.size()-pos))throw Failure("Save collection limit exceeded");if(reading){allocate(size_t(n),sizeof(typename T::value_type));v.resize(size_t(n));}for(auto& x:v)value(x);}
   else if constexpr(Map<T>::value){uint64_t n=v.size();value(n);if(n>MaxCount||(reading&&n>input.size()-pos))throw Failure("Save map limit exceeded");if(reading){allocate(size_t(n),sizeof(typename T::value_type)+48);v.clear();for(uint64_t i=0;i<n;++i){typename T::key_type k{};typename T::mapped_type x{};(*this)(k,x);if(!v.emplace(std::move(k),std::move(x)).second)throw Failure("Duplicate save map key");}}else for(auto& [key,x]:v){auto k=key;(*this)(k,x);}}
   else if constexpr(Set<T>::value){uint64_t n=v.size();value(n);if(n>MaxCount||(reading&&n>input.size()-pos))throw Failure("Save set limit exceeded");if(reading){allocate(size_t(n),sizeof(typename T::value_type)+48);v.clear();for(uint64_t i=0;i<n;++i){typename T::value_type x{};value(x);if(!v.insert(x).second)throw Failure("Duplicate save set entry");}}else for(auto x:v)value(x);}

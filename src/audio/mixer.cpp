@@ -115,7 +115,7 @@ void AudioMixer::update(uint64_t handle, float gain, float pan) {
     }
 }
 void AudioMixer::stopEffects() { for (auto& voice : voices_) { voice.active = false; voice.handle = 0; } }
-void AudioMixer::stop(uint64_t handle) { for (auto& voice : voices_) if (voice.handle == handle) { voice.active = false; voice.handle = 0; } }
+void AudioMixer::stop(uint64_t handle) { for (auto& voice : voices_) if (handle && voice.handle == handle) voice = {}; }
 void AudioMixer::stopMusic() { music_.active = queuedMusic_.active = musicOverlay_.active = false; }
 void AudioMixer::stopAll() { stopEffects(); stopMusic(); outputGain_ = 1; }
 void AudioMixer::setMasterVolume(float gain) { master_ = gainValue(gain); }
@@ -148,18 +148,27 @@ size_t AudioMixer::mixVoice(Voice& voice, float* stereo, size_t frames) {
     size_t i = 0;
     for (; i < frames; ++i) {
         if (voice.position >= clip.frames) {
-            if (voice.loop) voice.position = std::fmod(voice.position, double(clip.frames));
+            if (voice.loop) { if(clip.stream)voice.streamOffset+=uint64_t(voice.position/clip.frames)*clip.frames; voice.position = std::fmod(voice.position, double(clip.frames)); }
             else { voice.active = false; break; }
         }
         const size_t first = size_t(voice.position);
         const size_t second = first + 1 < clip.frames ? first + 1 : voice.loop ? 0 : first;
         const float fraction = float(voice.position - first);
+        float streamA[2]{},streamB[2]{};
+        if(clip.stream){
+            const auto next=voice.streamOffset+first+(second==first?0:1);
+            if(!clip.stream->frame(voice.streamOffset+first,streamA)||!clip.stream->frame(next,streamB)){
+                if(clip.stream->failed())voice.active=false;
+                break; // Underrun: silence and hold the source clock; never wait for disk.
+            }
+        }
         for (unsigned channel = 0; channel < 2; ++channel) {
-            const float a = sample(clip, first, channel), b = sample(clip, second, channel);
+            const float a = clip.stream?streamA[channel]:sample(clip, first, channel), b = clip.stream?streamB[channel]:sample(clip, second, channel);
             stereo[2 * i + channel] += (a + (b - a) * fraction) * (channel ? right : left);
         }
         voice.position += step;
     }
+    if(clip.stream)clip.stream->consume(voice.streamOffset+uint64_t(voice.position));
     if (!voice.loop && voice.position >= clip.frames) voice.active = false;
     return i;
     // Keep clip alive after completion; its memory is freed only by a main-thread

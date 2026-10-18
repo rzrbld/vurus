@@ -1,6 +1,6 @@
 #pragma once
 #include <SDL.h>
-#include <SDL_opengl.h>
+#include "render/gl_api.h"
 #include <array>
 #include <string>
 namespace vyruz {
