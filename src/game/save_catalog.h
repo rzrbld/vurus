@@ -25,4 +25,7 @@ std::vector<SaveCatalogEntry> listSaveCatalog(const std::filesystem::path& baseS
 // Legacy/manual files and symlinks are never replaced or pruned.
 std::optional<std::filesystem::path> writeHistorySave(const std::filesystem::path& baseSlot,
     const std::string& profile,const SaveGame&,std::string& error);
+std::optional<std::filesystem::path> writeHistorySave(const std::filesystem::path& baseSlot,
+    const std::string& profile,SaveGame&&,std::string& error);
+
 }

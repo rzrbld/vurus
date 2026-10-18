@@ -1,9 +1,9 @@
 // Native42b360 writes a224x168 TGA;427ef0 draws it at(8,150).
 // Capture the last presented gameplay frame. Preview failure must never turn a
 // successfully committed paid checkpoint into a reported save failure.
-void captureSavePreview(App& a,std::filesystem::path path) {
-    if(!a.window || a.menu.open())return;
-    const int w=a.gfx.drawableWidth(),h=a.gfx.drawableHeight();if(w<=0||h<=0)return;
+std::vector<uint8_t> readSavePreview(App& a) {
+    if(!a.window || a.menu.open())return {};
+    const int w=a.gfx.drawableWidth(),h=a.gfx.drawableHeight();if(w<=0||h<=0)return {};
     GLint readBuffer=0,alignment=0;glGetIntegerv(GL_READ_BUFFER,&readBuffer);glGetIntegerv(GL_PACK_ALIGNMENT,&alignment);
     glReadBuffer(GL_FRONT);glPixelStorei(GL_PACK_ALIGNMENT,1);
     std::vector<uint8_t> pixels(size_t(w)*h*3);glReadPixels(0,0,w,h,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());
@@ -16,6 +16,10 @@ void captureSavePreview(App& a,std::filesystem::path path) {
         const size_t source=(size_t(h-ch+y*ch/168)*w+x*cw/224)*3,destination=18+(size_t(y)*224+x)*3;
         tga[destination]=pixels[source+2];tga[destination+1]=pixels[source+1];tga[destination+2]=pixels[source];
     }
+    return tga;
+}
+void writeSavePreview(std::filesystem::path path,const std::vector<uint8_t>& tga) {
+    if(tga.empty())return;
     path.replace_extension(".tga");
 #ifdef _WIN32
     FILE* file=_wfopen(path.c_str(),L"wbx");
@@ -27,6 +31,9 @@ void captureSavePreview(App& a,std::filesystem::path path) {
         const bool closed=std::fclose(file)==0;
         if(!written || !closed){std::error_code error;std::filesystem::remove(path,error);}
     }
+}
+void captureSavePreview(App& a,std::filesystem::path path) {
+    writeSavePreview(std::move(path),readSavePreview(a));
 }
 void drawSavePreview(App& a) {
     if(a.menu.page!=vyruz::MenuPage::SavedSessions || a.menu.selected<0 || size_t(a.menu.selected)>=a.saveCatalog.size())return;

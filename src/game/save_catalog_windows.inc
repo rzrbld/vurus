@@ -40,11 +40,11 @@ SaveCatalogEntry metadata(const fs::path& path,uint64_t n,bool legacy){SaveCatal
 }
 fs::path saveHistoryDirectory(const fs::path& base,const std::string& profile){return base.parent_path()/"saves"/profileComponent(profile);}
 fs::path defaultRetryPath(const fs::path& base,const std::string& profile){return saveHistoryDirectory(base,profile)/"default.vzs";}
-bool writeDefaultRetry(const fs::path& base,const std::string& profile,const SaveGame& save,std::string& error){DirectoryGuard guard;if(!guard.history(base,profile,true)){error="Cannot open retry directory";return false;}auto path=defaultRetryPath(base,profile);const auto attrs=GetFileAttributesW(path.c_str());if(attrs!=INVALID_FILE_ATTRIBUTES&&!regularPath(path)){error="Retry destination is not a regular file";return false;}std::vector<uint8_t> bytes;return encodeSave(save,bytes,error)&&platform::atomicWrite(path,bytes,error);}
+bool writeDefaultRetry(const fs::path& base,const std::string& profile,const SaveGame& save,std::string& error){DirectoryGuard guard;if(!guard.history(base,profile,true)){error="Cannot open retry directory";return false;}auto path=defaultRetryPath(base,profile);const auto attrs=GetFileAttributesW(path.c_str());if(attrs!=INVALID_FILE_ATTRIBUTES&&!regularPath(path)){error="Retry destination is not a regular file";return false;}std::vector<uint8_t> bytes;return encodeStoredSave(save,bytes,error)&&platform::atomicWrite(path,bytes,error);}
 bool readDefaultRetry(const fs::path& base,const std::string& profile,SaveGame& save,std::string& error){DirectoryGuard guard;if(!guard.history(base,profile,false)){error="No retry session";return false;}return readRegular(defaultRetryPath(base,profile),save,error);}
 std::vector<SaveCatalogEntry> listSaveCatalog(const fs::path& base,const std::string& profile){std::vector<SaveCatalogEntry> out;DirectoryGuard guard;if(guard.history(base,profile,false)){auto entries=numbered(saveHistoryDirectory(base,profile));std::sort(entries.begin(),entries.end(),[](const auto& a,const auto& b){return a.name>b.name;});for(const auto& e:entries)if(e.regular&&out.size()<7)out.push_back(metadata(e.path,e.number,false));}if(regularPath(base))out.push_back(metadata(base,0,true));return out;}
-std::optional<fs::path> writeHistorySave(const fs::path& base,const std::string& profile,const SaveGame& save,std::string& error){
-    std::vector<uint8_t> bytes;if(!encodeSave(save,bytes,error))return {};DirectoryGuard guard;if(!guard.history(base,profile,true)){error="Cannot open save history";return {};}
+static std::optional<fs::path> publishHistorySave(const fs::path& base,const std::string& profile,const std::vector<uint8_t>& bytes,std::string& error){
+DirectoryGuard guard;if(!guard.history(base,profile,true)){error="Cannot open save history";return {};}
     auto folder=saveHistoryDirectory(base,profile);uint64_t next=0;for(const auto& e:numbered(folder)){if(e.number==UINT64_MAX){error="Save history number exhausted";return {};}next=std::max(next,e.number+1);}
     // Each writer owns a different staging name. MoveFileEx without REPLACE
     // publishes a complete file exclusively; raced names are never overwritten.
@@ -54,4 +54,13 @@ std::optional<fs::path> writeHistorySave(const fs::path& base,const std::string&
     if(next>=7)for(const auto& e:numbered(folder))if(e.regular&&e.number<=next-7){if(removeRegular(e.path)){auto preview=e.path;preview.replace_extension(".tga");removeRegular(preview);}}
     error.clear();return result;
 }
+std::optional<fs::path> writeHistorySave(const fs::path& base,const std::string& profile,const SaveGame& save,std::string& error){
+    std::vector<uint8_t> bytes;if(!encodeStoredSave(save,bytes,error))return {};
+    return publishHistorySave(base,profile,bytes,error);
+}
+std::optional<fs::path> writeHistorySave(const fs::path& base,const std::string& profile,SaveGame&& save,std::string& error){
+    std::vector<uint8_t> bytes;if(!encodeStoredSave(std::move(save),bytes,error))return {};
+    return publishHistorySave(base,profile,bytes,error);
+}
+
 }

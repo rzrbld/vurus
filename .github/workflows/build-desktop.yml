@@ -38,6 +38,12 @@ jobs:
           repository: libsdl-org/SDL
           ref: release-2.32.10
           path: work/ci-sdl
+      - name: zlib source (static save compression)
+        uses: actions/checkout@v4
+        with:
+          repository: madler/zlib
+          ref: v1.3.1
+          path: work/ci-zlib
       - name: Linux dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libsdl2-dev libgl1-mesa-dev ninja-build
@@ -49,13 +55,13 @@ jobs:
           rustc --version
       - name: Configure Linux
         if: runner.os == 'Linux'
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DVYRUZ_ZLIB_SOURCE="${{ github.workspace }}/work/ci-zlib"
       - name: Configure macOS
         if: runner.os == 'macOS'
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DVYRUZ_SDL_SOURCE="$PWD/work/ci-sdl" -DVYRUZ_ENABLE_SMAA=OFF -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DVYRUZ_ZLIB_SOURCE="${{ github.workspace }}/work/ci-zlib" -DVYRUZ_SDL_SOURCE="$PWD/work/ci-sdl" -DVYRUZ_ENABLE_SMAA=OFF -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
       - name: Configure Windows
         if: runner.os == 'Windows'
-        run: cmake -S . -B build -A x64 -DBUILD_TESTING=ON -DVYRUZ_SDL_SOURCE="$pwd/work/ci-sdl"
+        run: cmake -S . -B build -A x64 -DBUILD_TESTING=ON -DVYRUZ_ZLIB_SOURCE="${{ github.workspace }}/work/ci-zlib" -DVYRUZ_SDL_SOURCE="$pwd/work/ci-sdl"
       - name: Build engine first
         run: cmake --build build --config Release --target vurus --parallel ${{ matrix.parallel }}
       - name: Windows critical integration checks

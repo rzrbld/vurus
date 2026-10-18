@@ -1,7 +1,13 @@
 // Native427120/42b710 mode2 selects a separate per-profile default session.
 // Gameplay captures the entry state; startup scenery and demos must not replace it.
-void persistRetrySession(App& a) {
+void persistRetrySession(App& a,bool asynchronous=false) {
     if(!a.retryPersistence || a.demoActive || !a.restartLevel || a.restartPath=="CAVE/DEMO.3DG")return;
+    if(a.saveFuture.valid())return;
+    if(asynchronous){
+        std::string error;
+        if(!startAsyncRetry(a,error))std::fprintf(stderr,"Could not start retry save: %s (in-memory retry retained)\n",error.c_str());
+        a.retryDiskPath.clear();a.retryCheckedProfile=a.options.storageProfile();return;
+    }
     vyruz::SaveGame save;save.currentLevel=a.restartPath;save.levels=a.visited;
     save.levels[save.currentLevel]=*a.restartLevel;
     std::string error;
@@ -10,6 +16,7 @@ void persistRetrySession(App& a) {
     a.retryDiskPath.clear();a.retryCheckedProfile=a.options.storageProfile();
 }
 void recoverRetrySession(App& a) {
+    if(a.saveFuture.valid())return; // Worker holds read access to the entry snapshot.
     if(a.savePath.empty())return;
     const auto& profile=a.options.storageProfile();
     if(a.restartLevel && a.restartProfile==profile){a.retryCheckedProfile=profile;return;}

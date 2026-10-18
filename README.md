@@ -55,6 +55,18 @@ builds and tests on all four platforms; physical hardware testing remains ongoin
   the Crosshair switch follows Aim assist and defaults to On.
 - Changing your player name keeps your existing save history.
 
+## Saving improvements in v0.1.2
+
+Saves now encode and write in the background, with a Saving indicator. New
+checkpoints use lossless zlib compression, preserving all game state. A local
+single-level checkpoint shrank from 7.56 MB to 0.63 MB; a synthetic large checkpoint
+from 196.6 MB to 16.3 MB (about 92% smaller). Results depend on saved state. These are
+desktop measurements, not Steam Deck performance guarantees.
+
+Old uncompressed saves remain readable. **Older Vurus builds cannot read newly
+compressed saves.** Existing files are not converted automatically. Atomic writes,
+save fees and failure protection are retained.
+
 ## Performance notes
 
 The engine uses compact projectile storage and spatial queries, caches repeated
@@ -122,7 +134,7 @@ assets or third-party names and logos.
 Keyboard/mouse and SDL2 controllers are supported. In menus, use arrows/Enter,
 left stick or D-pad/A, or mouse; B/Escape goes back. Right stick aims and the right
 trigger fires. Controls are remappable. Optional controller aim assistance has
-Off, Slight, Medium and Full modes; it targets enemies, never destructible scenery.
+Off, Slight, Medium, Full and Retaliate modes; it targets enemies, never destructible scenery.
 
 Video → Advanced includes window/fullscreen/borderless modes, independent HUD
 aspect, sprite filtering, vignette and Off/CRT/Retro/Bright screen shaders.
@@ -143,7 +155,7 @@ ctest --test-dir build -C Release --output-on-failure --parallel 2
 ./build/vurus --data /path/to/game.iso
 ```
 
-On Linux, install `g++ cmake libsdl2-dev libgl1-mesa-dev` and Rust. Package with
+On Linux, install `g++ cmake libsdl2-dev zlib1g-dev libgl1-mesa-dev` and Rust. Package with
 `sh packaging/package_linux.sh build dist`. On Windows use Visual Studio 2022
 and a Windows SDK; macOS needs Xcode command-line tools. Windows/macOS builds
 use SDL2 source via `-DVYRUZ_SDL_SOURCE=/absolute/path/to/SDL`, then
@@ -186,3 +198,7 @@ reports. Do not upload original game archives, disc images, extracted assets,
 saves, credentials or private development material. Synthetic tests require no
 original game data. Game screenshots above are the selected documentation images;
 playable original resources are not part of this repository or its packages.
+
+Save compression uses [zlib](https://zlib.net/) by Jean-loup Gailly and Mark Adler;
+see [LICENSE.md](LICENSE.md). Release builds link zlib statically. Source builds
+need zlib development files, or `-DVYRUZ_ZLIB_SOURCE=/path/to/zlib`.

@@ -1928,7 +1928,7 @@ void GameWorld::updateLift(size_t i,float milliseconds) {
         if (margin<0 || std::abs(.559016994f*dx+1.118033989f*dy)>margin ||
             std::abs(-.559016994f*dx+1.118033989f*dy)>margin) return;
         const int64_t cost=std::max<int64_t>(0,-static_cast<int64_t>(propertyNumber(currentObject.properties,"Kill-Count")));
-        if (player().vitals.money<cost) { message_="Insufficient credits for Lift";return; }
+        if (player().vitals.money-(saveRequest_?saveRequest_->cost:0)<cost) { message_="Insufficient credits for Lift";return; }
         const auto destination=liftDestination(currentProperties,scene_->mapPath);if(!destination)return;
         transition_=TransitionRequest{i,*destination,cost};return;
 }
@@ -1983,7 +1983,7 @@ size_t GameWorld::enemiesRemaining() const { return std::count_if(actors_.begin(
 float GameWorld::playerSurfaceSpeed() const { const auto v=nativeToSurface(motion_.velocityX,motion_.velocityZ);return std::hypot(v.x,v.y)/.014f; }
 void GameWorld::toggleMap() {
     if(!player().alive)return;
-    if(!map_.toggle(player().vitals.money)) {
+    if(!map_.toggle(player().vitals.money-(saveRequest_?saveRequest_->cost:0))) {
         notifications_.mapDenied(playerName_);
         voiceEvent("V-NEED-CASH.WAV",0,1000,5000);
         message_.clear();
@@ -2340,7 +2340,7 @@ void GameWorld::tick(float seconds,const WorldInput& suppliedInput) {
     if(map_.open() && player().alive) {
         auto& money=actors_[player_].vitals.money;
         const auto before=money;
-        money-=map_.advance(seconds*1000.0,money);
+        money-=map_.advance(seconds*1000.0,money-(saveRequest_?saveRequest_->cost:0));
         if(before/5000!=money/5000)audioEvent(AudioEventKind::MapCash,player_);
         if(!map_.open()) {
             notifications_.mapDenied(playerName_);

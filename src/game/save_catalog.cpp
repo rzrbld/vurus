@@ -112,7 +112,7 @@ bool writeDefaultRetry(const std::filesystem::path& base,const std::string& prof
 #if defined(__linux__) && !defined(VYRUZ_PORTABLE_POSIX_FILES)
     return writeSaveFile("/proc/self/fd/"+std::to_string(directory.value)+"/default.vzs",save,error);
 #else
-    std::vector<uint8_t> bytes;if(!encodeSave(save,bytes,error))return false;
+    std::vector<uint8_t> bytes;if(!encodeStoredSave(save,bytes,error))return false;
     static std::atomic<uint64_t> serial{0};std::string temporary;int fd=-1;
     for(int i=0;i<100;++i){temporary=".retry-"+std::to_string(::getpid())+"-"+std::to_string(++serial);fd=::openat(directory.value,temporary.c_str(),O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC,0600);if(fd>=0||errno!=EEXIST)break;}
     if(fd<0){error=std::strerror(errno);return false;}
@@ -148,8 +148,8 @@ std::vector<SaveCatalogEntry> listSaveCatalog(const std::filesystem::path& base,
     }
     return result;
 }
-std::optional<std::filesystem::path> writeHistorySave(const std::filesystem::path& base,const std::string& profile,const SaveGame& save,std::string& error){
-    std::vector<uint8_t> bytes;if(!encodeSave(save,bytes,error))return {};
+static std::optional<std::filesystem::path> publishHistorySave(const std::filesystem::path& base,const std::string& profile,const std::vector<uint8_t>& bytes,std::string& error){
+
     Fd directory(historyFd(base,profile,true));
     auto fail=[&](const char* action){error=std::string(action)+": "+std::strerror(errno);return std::optional<std::filesystem::path>{};};
     if(directory.value<0)return fail("Cannot open save history");
@@ -195,6 +195,15 @@ std::optional<std::filesystem::path> writeHistorySave(const std::filesystem::pat
     }
     ::fsync(directory.value);error.clear();return saveHistoryDirectory(base,profile)/name;
 }
+std::optional<std::filesystem::path> writeHistorySave(const std::filesystem::path& base,const std::string& profile,const SaveGame& save,std::string& error){
+    std::vector<uint8_t> bytes;if(!encodeStoredSave(save,bytes,error))return {};
+    return publishHistorySave(base,profile,bytes,error);
+}
+std::optional<std::filesystem::path> writeHistorySave(const std::filesystem::path& base,const std::string& profile,SaveGame&& save,std::string& error){
+    std::vector<uint8_t> bytes;if(!encodeStoredSave(std::move(save),bytes,error))return {};
+    return publishHistorySave(base,profile,bytes,error);
+}
+
 }
 
 #endif

@@ -1,6 +1,7 @@
 #include "game/save_file.h"
 #include "game/lift_access.h"
 #include <bit>
+#include <zlib.h>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -352,11 +353,56 @@ bool validSaveLevelPath(const std::string& p){
  std::filesystem::path path(p);for(const auto& part:path)if(part==".."||part==".")return false;
  auto ext=path.extension().string();for(char& c:ext)if(c>='a'&&c<='z')c-=32;return ext==".3DG";
 }
-bool encodeSave(const SaveGame& source,std::vector<uint8_t>& out,std::string& error){try{validate(source);SaveGame s=source;for(auto& [path,level]:s.levels)normalizeSavedSurprise(level.world);if(s.restartLevel)normalizeSavedSurprise(s.restartLevel->world);Archive payload;payload(s);Archive a;for(size_t i=0;i<8;++i)a.integer(uint8_t(Magic[i]),1);a.integer(payload.version,4);a.integer(payload.bytes.size(),8);a.integer(hash(payload.bytes),8);if(payload.bytes.size()>MaxFile-a.bytes.size())throw Failure("Save exceeds 256 MiB limit");a.bytes.insert(a.bytes.end(),payload.bytes.begin(),payload.bytes.end());out=std::move(a.bytes);error.clear();return true;}catch(const std::exception& e){error=e.what();return false;}}
-bool decodeSave(std::span<const uint8_t> bytes,SaveGame& out,std::string& error){try{if(bytes.size()>MaxFile)throw Failure("Save exceeds 256 MiB limit");Archive header(bytes);for(size_t i=0;i<8;++i)if(header.integer(0,1)!=uint8_t(Magic[i]))throw Failure("Not a Vyruz port save");auto version=header.integer(0,4);if(version!=1&&version!=2&&version!=3&&version!=4&&version!=5&&version!=6&&version!=7&&version!=8&&version!=9&&version!=10&&version!=11&&version!=12&&version!=13&&version!=14&&version!=15&&version!=16&&version!=17&&version!=18&&version!=19&&version!=20&&version!=21&&version!=22&&version!=23&&version!=24&&version!=25&&version!=26&&version!=27&&version!=28&&version!=29&&version!=30&&version!=31&&version!=32&&version!=33&&version!=34&&version!=35)throw Failure("Unsupported save version");auto size=header.integer(0,8),checksum=header.integer(0,8);auto payload=bytes.subspan(header.pos);if(size!=payload.size())throw Failure("Invalid save payload length");if(hash(payload)!=checksum)throw Failure("Save checksum mismatch");Archive a(payload);a.version=uint32_t(version);SaveGame s;a(s);if(a.pos!=payload.size())throw Failure("Trailing save data");validate(s);out=std::move(s);error.clear();return true;}catch(const std::exception& e){error=e.what();return false;}}
+bool encodeSave(SaveGame&& s,std::vector<uint8_t>& out,std::string& error){try{validate(s);for(auto& [path,level]:s.levels)normalizeSavedSurprise(level.world);if(s.restartLevel)normalizeSavedSurprise(s.restartLevel->world);Archive payload;payload(s);Archive a;for(size_t i=0;i<8;++i)a.integer(uint8_t(Magic[i]),1);a.integer(payload.version,4);a.integer(payload.bytes.size(),8);a.integer(hash(payload.bytes),8);if(payload.bytes.size()>MaxFile-a.bytes.size())throw Failure("Save exceeds 256 MiB limit");a.bytes.insert(a.bytes.end(),payload.bytes.begin(),payload.bytes.end());out=std::move(a.bytes);error.clear();return true;}catch(const std::exception& e){error=e.what();return false;}}
+bool encodeSave(const SaveGame& source,std::vector<uint8_t>& out,std::string& error){try{SaveGame owned=source;return encodeSave(std::move(owned),out,error);}catch(const std::exception& e){error=e.what();return false;}}
+// Storage envelope1 contains the unchanged versioned VYRZSAVE stream.
+// Keep raw encoding available for deterministic comparisons and legacy fixtures.
+bool packSave(std::vector<uint8_t>& bytes,std::string& error){try{
+ uLongf size=compressBound(static_cast<uLong>(bytes.size()));
+ std::vector<uint8_t> packed(size);
+ if(compress2(packed.data(),&size,bytes.data(),static_cast<uLong>(bytes.size()),Z_BEST_SPEED)!=Z_OK)
+  throw Failure("Save compression failed");
+ if(size+20<bytes.size()){
+  Archive header;for(char c:std::string_view("VYRZPACK",8))header.integer(uint8_t(c),1);
+  header.integer(1,4);header.integer(bytes.size(),8);
+  header.bytes.insert(header.bytes.end(),packed.begin(),packed.begin()+size);
+  bytes=std::move(header.bytes);
+ }
+ error.clear();return true;
+}catch(const std::exception& e){error=e.what();return false;}}
+bool encodeStoredSave(SaveGame&& save,std::vector<uint8_t>& out,std::string& error){
+ std::vector<uint8_t> bytes;if(!encodeSave(std::move(save),bytes,error)||!packSave(bytes,error))return false;
+ out=std::move(bytes);return true;
+}
+bool encodeStoredSave(const SaveGame& save,std::vector<uint8_t>& out,std::string& error){
+ std::vector<uint8_t> bytes;if(!encodeSave(save,bytes,error)||!packSave(bytes,error))return false;
+ out=std::move(bytes);return true;
+}
+bool decodeSave(std::span<const uint8_t> bytes,SaveGame& out,std::string& error){try{if(bytes.size()>MaxFile)throw Failure("Save exceeds 256 MiB limit");std::vector<uint8_t> inflated;
+ if(bytes.size()>=8 && std::memcmp(bytes.data(),"VYRZPACK",8)==0){
+  Archive envelope(bytes);envelope.pos=8;
+  if(envelope.integer(0,4)!=1)throw Failure("Unsupported save compression version");
+  const auto size=envelope.integer(0,8);
+  if(size<28 || size>MaxFile)throw Failure("Invalid uncompressed save size");
+  inflated.resize(static_cast<size_t>(size));
+  z_stream stream{};stream.next_in=const_cast<Bytef*>(bytes.data()+envelope.pos);
+  stream.avail_in=static_cast<uInt>(bytes.size()-envelope.pos);
+  stream.next_out=inflated.data();stream.avail_out=static_cast<uInt>(inflated.size());
+  if(inflateInit(&stream)!=Z_OK)throw Failure("Cannot initialize save decompression");
+  const int result=inflate(&stream,Z_FINISH);
+  const bool complete=result==Z_STREAM_END && stream.total_out==size && stream.avail_in==0;
+  inflateEnd(&stream);
+  if(!complete)throw Failure("Invalid compressed save data");
+  bytes=inflated; // The normal magic/checksum/validation below also rejects nested envelopes.
+ }
+ Archive header(bytes);for(size_t i=0;i<8;++i)if(header.integer(0,1)!=uint8_t(Magic[i]))throw Failure("Not a Vyruz port save");auto version=header.integer(0,4);if(version!=1&&version!=2&&version!=3&&version!=4&&version!=5&&version!=6&&version!=7&&version!=8&&version!=9&&version!=10&&version!=11&&version!=12&&version!=13&&version!=14&&version!=15&&version!=16&&version!=17&&version!=18&&version!=19&&version!=20&&version!=21&&version!=22&&version!=23&&version!=24&&version!=25&&version!=26&&version!=27&&version!=28&&version!=29&&version!=30&&version!=31&&version!=32&&version!=33&&version!=34&&version!=35)throw Failure("Unsupported save version");auto size=header.integer(0,8),checksum=header.integer(0,8);auto payload=bytes.subspan(header.pos);if(size!=payload.size())throw Failure("Invalid save payload length");if(hash(payload)!=checksum)throw Failure("Save checksum mismatch");Archive a(payload);a.version=uint32_t(version);SaveGame s;a(s);if(a.pos!=payload.size())throw Failure("Trailing save data");validate(s);out=std::move(s);error.clear();return true;}catch(const std::exception& e){error=e.what();return false;}}
 uint64_t catalogFingerprint(const SceneContent& content){auto classes=content.classes;auto paths=content.paths;Archive a;a(classes,paths);return hash(a.bytes);}
 bool writeSaveFile(const std::string& path,const SaveGame& s,std::string& error){
- std::vector<uint8_t> bytes;if(!encodeSave(s,bytes,error))return false;
+ std::vector<uint8_t> bytes;if(!encodeStoredSave(s,bytes,error))return false;
+ return platform::atomicWrite(path,bytes,error);
+}
+bool writeSaveFile(const std::string& path,SaveGame&& s,std::string& error){
+ std::vector<uint8_t> bytes;if(!encodeStoredSave(std::move(s),bytes,error))return false;
  return platform::atomicWrite(path,bytes,error);
 }
 bool readSaveFile(const std::string& path,SaveGame& out,std::string& error){

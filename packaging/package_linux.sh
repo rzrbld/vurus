@@ -14,6 +14,7 @@ install -m 755 "$project_dir/packaging/launch.sh" "$staging/vurus-linux/launch.s
 install -m 644 "$project_dir/packaging/README.txt" "$staging/vurus-linux/README.txt"
 install -m 644 "$project_dir/LICENSE" "$project_dir/LICENSE.md" "$staging/vurus-linux/"
 mkdir "$staging/vurus-linux/LICENSES"
+install -m 644 "$project_dir/third_party/zlib/LICENSE" "$staging/vurus-linux/LICENSES/zlib.txt"
 mkdir -p "$staging/vurus-linux/third_party/oxideav-indeo"
 cp -R "$project_dir/third_party/oxideav-indeo/rust-licenses" "$staging/vurus-linux/third_party/oxideav-indeo/"
 install -m 644 "$project_dir/third_party/smaa/LICENSE.txt" "$staging/vurus-linux/LICENSES/SMAA.txt"

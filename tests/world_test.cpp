@@ -637,6 +637,16 @@ int main() try {
     check(!world.saveRequest(),"partial dwell restore preserves remaining time");
     world.tick(.1f,{});check(world.saveRequest().has_value(),"exactly sufficient funds permit save");
 
+    const auto reservedMoney=world.player().vitals.money;
+    world.setPlayerPosition(1300,1000);world.tick(.1f,{});
+    check(world.saveRequest().has_value(),"pending disk save survives departure");
+    world.toggleMap();
+    check(!world.mapOpen()&&world.player().vitals.money==reservedMoney,"map cannot spend reserved save fee");
+    world.finishSave(false,"background write failed");
+    check(world.player().vitals.money==reservedMoney&&!world.saveRequest(),"background failure releases fee without charging");
+    world.toggleMap();check(world.mapOpen(),"released save fee is spendable again");
+    world.toggleMap();
+
     // Native reward credit is independent of killer ownership, once per death;
     // noneligible scenery, nonpositive Reward and the player do not pay.
     SceneContent rewards;rewards.classes={player,box};rewards.classes[1].id={1};

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <chrono>
 #include <thread>
+#include <future>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -66,6 +67,7 @@ constexpr int kPlayerDirections = 24;          // binary: Vyruz binds ANM indice
 
 constexpr float kMoveDt = 1.f / 60.f;
 
+struct SaveResult { bool ok=false,retry=false;std::string path,error; };
 struct App {
     bool debugEnabled=false;
     double debugFrameSum=0,debugFramePeak=0;unsigned debugFrameCount=0;
@@ -104,6 +106,9 @@ struct App {
     bool retryPersistence=false; //Only actual interactive campaign entries write defaults.
     std::string savePath,lastSavedPath,loadError;
     bool saveHistory=false,saveCatalogDirty=true;
+    // The worker only reads visited/restartLevel; replacement actions wait until
+    // completion. Declared after those snapshots so its destructor joins first.
+    std::future<SaveResult> saveFuture;
     std::string saveCatalogProfile;
     std::vector<vyruz::SaveCatalogEntry> saveCatalog;
     GLuint savePreviewTexture=0;
@@ -502,10 +507,83 @@ bool saveSession(App& a,int64_t cost,std::string& error) {
     if(ok)a.saveCatalogDirty=true;
     return ok;
 }
-bool serviceSave(App& a) {
+bool startAsyncSave(App& a,int64_t cost,std::string& error) {
+    try {
+        auto snapshot=std::make_unique<vyruz::SaveGame>();
+        snapshot->currentLevel=levelKey(a.content.mapPath);
+        vyruz::SavedLevel current;
+        if(!captureLevel(a,current,error))return false;
+        auto& money=current.world.actors.at(current.world.player).vitals.money;
+        if(cost<0||money<cost){error="Not enough credits to save.";return false;}
+        money-=cost;current.world.message.clear();
+        snapshot->levels.emplace(snapshot->currentLevel,std::move(current));
+        auto preview=a.saveHistory?readSavePreview(a):std::vector<uint8_t>{};
+        const auto path=a.savePath,profile=a.options.storageProfile();
+        const bool history=a.saveHistory;
+        a.saveFuture=std::async(std::launch::async,[&a,snapshot=std::move(snapshot),preview=std::move(preview),path,profile,history]() mutable {
+            SaveResult result;
+            try {
+                // Destroy large working state here, never in future::get on the
+                // render thread. Only the small result crosses back.
+                auto save=std::move(*snapshot);snapshot.reset();
+                for(const auto& [key,level]:a.visited)save.levels.emplace(key,level);
+                save.restartLevel=a.restartLevel;
+                std::error_code ec;const auto parent=std::filesystem::path(path).parent_path();
+                if(!parent.empty())std::filesystem::create_directories(parent,ec);
+                if(ec){result.error="Cannot create save directory: "+ec.message();return result;}
+                if(history) {
+                    if(auto written=vyruz::writeHistorySave(path,profile,std::move(save),result.error)){
+                        result.ok=true;result.path=written->string();
+                    }
+                } else {
+                    result.ok=vyruz::writeSaveFile(path,std::move(save),result.error);
+                    if(result.ok)result.path=path;
+                }
+                // Optional preview failure must never undo a committed save.
+                if(result.ok)try{writeSavePreview(result.path,preview);}catch(...){}
+            }catch(const std::exception& e){result.error=e.what();}
+            return result;
+        });
+        error.clear();return true;
+    }catch(const std::exception& e){error=e.what();return false;}
+}
+bool startAsyncRetry(App& a,std::string& error) {
+    try {
+        const auto path=a.savePath,profile=a.options.storageProfile(),level=a.restartPath;
+        a.saveFuture=std::async(std::launch::async,[&a,path,profile,level] {
+            SaveResult result;result.retry=true;
+            try {
+                vyruz::SaveGame save;save.currentLevel=level;save.levels=a.visited;
+                save.levels[save.currentLevel]=*a.restartLevel;
+                result.ok=vyruz::writeDefaultRetry(path,profile,save,result.error);
+            }catch(const std::exception& e){result.error=e.what();}
+            return result;
+        });
+        error.clear();return true;
+    }catch(const std::exception& e){error=e.what();return false;}
+}
+bool serviceSave(App& a,bool asynchronous=false) {
+    if(a.saveFuture.valid()){
+        if(a.saveFuture.wait_for(std::chrono::seconds(0))!=std::future_status::ready)return false;
+        const auto result=a.saveFuture.get();
+        if(result.retry){
+            if(!result.ok)std::fprintf(stderr,"Could not store default retry session: %s (in-memory retry retained)\n",result.error.c_str());
+            return false;
+        }
+        a.world.finishSave(result.ok,result.error);
+        if(result.ok){a.lastSavedPath=result.path;a.saveCatalogDirty=true;a.audio.speech("V-GAME-SAVED.WAV",500,1000,3000);}
+        std::printf("save %s: %s\n",result.ok?"complete":"failed",result.ok?result.path.c_str():result.error.c_str());
+        return false; // Gameplay never stopped; no clock reset/catch-up.
+    }
     if(a.demoActive)return false;
     if(!a.world.saveRequest())return false;
     const auto request=*a.world.saveRequest();std::string error;
+    if(asynchronous){
+        if(!startAsyncSave(a,request.cost,error)){
+            a.world.finishSave(false,error);std::fprintf(stderr,"save failed: %s\n",error.c_str());
+        }
+        return false;
+    }
     const bool ok=saveSession(a,request.cost,error);a.world.finishSave(ok,error);
     if(ok)a.audio.speech("V-GAME-SAVED.WAV",500,1000,3000);
     std::printf("save %s: %s\n",ok?"complete":"failed",ok?a.lastSavedPath.c_str():error.c_str());
@@ -532,6 +610,7 @@ bool loadSession(App& a,const std::string& selectedPath={}) {
     std::printf("loaded save: %s\n",source.c_str());return true;
 }
 void refreshSaveCatalog(App& a,bool force=false) {
+    if(a.saveFuture.valid())return; // Never decode history while a checkpoint is being committed.
     if(!force && !a.saveCatalogDirty && a.saveCatalogProfile==a.options.storageProfile())return;
     a.saveCatalog=vyruz::listSaveCatalog(a.savePath,a.options.storageProfile());
     a.gfx.deleteTexture(a.savePreviewTexture);a.savePreviewTexture=0;a.savePreviewPath.clear();
@@ -606,7 +685,7 @@ bool changeLevel(App& a,const vyruz::TransitionRequest& request) {
     a.world.setDebugEnemyAI(debugAI);a.world.setDebugGodMode(debugGod);
     a.restartLevel=vyruz::SavedLevel{a.world.snapshot(),a.sceneRenderer.capture()};
     a.restartPath=levelKey(a.content.mapPath);a.restartProfile=a.options.storageProfile();
-    persistRetrySession(a);
+    persistRetrySession(a,true);
     return true;
 }
 
@@ -638,6 +717,7 @@ bool selectDebugLevel(App& a,size_t selected) {
     return true;
 }
 bool applyMenuAction(App& a) {
+    if(a.saveFuture.valid())return false; // Keep queued load/restart actions until the checkpoint commits.
     bool levelChanged=false;
         if(a.menuAction!=vyruz::MenuAction::None) {
             const auto action=a.menuAction;a.menuAction=vyruz::MenuAction::None;
@@ -674,7 +754,7 @@ bool applyMenuAction(App& a) {
                 levelChanged=action==vyruz::MenuAction::Restart?restartLevel(a):
                     loadLevelData(a,path,nullptr,false,false,true,a.options.difficulty);
                 if(levelChanged){
-                    if(action==vyruz::MenuAction::NewGame){a.visited.clear();a.scoreRecorded=false;persistRetrySession(a);}
+                    if(action==vyruz::MenuAction::NewGame){a.visited.clear();a.scoreRecorded=false;persistRetrySession(a,true);}
                     a.sessionStarted=true;a.suppressFireUntilRelease=true;
                 }
                 else a.menu.error="Could not load level. Try again.";
@@ -1265,9 +1345,8 @@ void render(App& a,float alpha=1) {
         // centered safe area; HUD aspect never changes world/camera projection.
         glPushMatrix();glTranslatef(view.uiX(),view.uiY(),0);
         a.hud.drawInventory(a.gfx,a.world,a.inventory,640,480,optionKeyName(a.options.keyBindings[static_cast<size_t>(vyruz::OptionAction::Inventory)]));
-        refreshMenuContext(a);
-        a.menu.debugAI=a.world.debugEnemyAI();a.menu.debugGod=a.world.debugGodMode();
-        a.hud.drawMenu(a.gfx,a.menu);
+        // Open menus are rendered by the earlier branch. Refreshing their
+        // context here decoded every retained save after each gameplay save.
         a.hud.drawPresentation(a.gfx,a.presentation);
         glPopMatrix();
         if(a.world.player().alive && a.world.player().vitals.energy>0 && !a.presentation.open() &&
@@ -1296,6 +1375,8 @@ void render(App& a,float alpha=1) {
         glCopyTexImage2D(GL_TEXTURE_2D,0,GL_RGB,0,0,a.gfx.drawableWidth(),a.gfx.drawableHeight(),0);
         endingColor(a,endingRemaining);
     }
+    if(a.saveFuture.valid())
+        a.hud.drawMenuText(a.gfx,std::string("Saving")+std::string(1+(SDL_GetTicks64()/350)%3,'.'),view.width/2-42,view.height-38,4,160);
     presentApplication(a);
 }
 
@@ -1606,7 +1687,7 @@ int main(int argc, char** argv) {
         //The preloaded first map is title scenery, not a previously played session.
         a.restartLevel.reset();a.restartPath.clear();a.restartProfile.clear();
         recoverRetrySession(a);a.menu.retryAvailable=a.restartLevel.has_value();
-    } else if(a.retryPersistence && loadPath.empty() && probeMenu.empty())persistRetrySession(a);
+    } else if(a.retryPersistence && loadPath.empty() && probeMenu.empty())persistRetrySession(a,true);
     if(startupMenu || !probeMenu.empty()) {
         if(a.inventory.open)a.inventory.close(a.paused);
         if(a.world.mapOpen())a.world.toggleMap();
@@ -1675,14 +1756,14 @@ int main(int argc, char** argv) {
             a.renderFailed = true; break;
         }
         bool levelChanged=applyMenuAction(a);
-        levelChanged=serviceAttractDemo(a,SDL_GetTicks64())||levelChanged;
+        if(!a.saveFuture.valid())levelChanged=serviceAttractDemo(a,SDL_GetTicks64())||levelChanged;
         serviceGameOver(a);
-        const bool savedThisFrame=!a.demoActive&&!a.presentation.open()&&serviceSave(a);
-        if (!a.demoActive && a.world.transition() && !a.menu.open() && !a.presentation.open()) {
+        const bool savedThisFrame=a.saveFuture.valid()?serviceSave(a,true):(!a.demoActive&&!a.presentation.open()&&serviceSave(a,true));
+        if (!a.saveFuture.valid() && !a.demoActive && a.world.transition() && !a.menu.open() && !a.presentation.open()) {
             const auto request=*a.world.transition();
             levelChanged=changeLevel(a,request)||levelChanged;
         }
-        if (a.restart && !a.demoActive) {
+        if (a.restart && !a.demoActive && !a.saveFuture.valid()) {
             if(restartLevel(a))levelChanged=true;
             a.restart=false;
         }
@@ -1778,6 +1859,7 @@ int main(int argc, char** argv) {
                     renderHz,a.gfx.vsyncEnabled(),warmupTimes.size(),static_cast<size_t>(overruns),profileCatchups,profileDroppedTicks);
     }
 
+    if(a.saveFuture.valid()){a.saveFuture.wait();serviceSave(a,true);}
     a.audio.device().close();
     a.loading.clear(a.gfx);
     a.sceneRenderer.clear(a.gfx);

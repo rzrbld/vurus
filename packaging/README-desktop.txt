@@ -22,3 +22,10 @@ separate from CI. Operating-system libraries and graphics drivers are required;
 this is not a fully static operating-system-independent executable.
 
 Third-party notices: LICENSES/ and ./vurus --licenses (vurus.exe on Windows).
+
+Saving (v0.1.2)
+==============
+Checkpoints encode/compress and write in the background. Old saves remain readable,
+but older engine builds cannot read the new compressed saves. No game state is
+removed. Existing files are not rewritten until you save again.
+zlib is statically linked in release builds; its license is included.

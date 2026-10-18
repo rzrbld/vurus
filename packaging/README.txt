@@ -253,3 +253,10 @@ Bloom and sharpening are independent, with or without CRT. Filters apply
 to the game scene before HUD/text and add GPU work. Reset effects disables all.
 
 SMAA: https://github.com/iryoku/smaa (MIT), license in LICENSES/SMAA.txt
+
+Saving (v0.1.2)
+==============
+Checkpoints encode/compress and write in the background. Old saves remain readable,
+but older engine builds cannot read the new compressed saves. No game state is
+removed. Existing files are not rewritten until you save again.
+zlib is statically linked in release builds; its license is included.

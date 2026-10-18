@@ -479,6 +479,9 @@ void GameWorld::updateSaving(float milliseconds) {
                         std::abs(int(pos.y/32)-int(playerPos.y/32))<4;
         notifications_.advanceSavingPrice(id,actors_[id].alive && near,milliseconds);
     }
+    // A background checkpoint owns this request until commit/failure. Moving
+    // away must not cancel its fee/notification or start a second transaction.
+    if(saveRequest_)return;
     std::optional<size_t> plot;
     if(player().alive && !scene_->objects[player_].flags.invisible.value_or(false)) {
         const auto p=playerPosition();
