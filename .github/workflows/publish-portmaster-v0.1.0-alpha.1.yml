@@ -1,0 +1,82 @@
+name: Publish validated portmaster-v0.1.0-alpha.1
+'on':
+  workflow_dispatch: null
+  push:
+    branches:
+    - publish-portmaster-v0.1.0-alpha.1
+    paths:
+    - .github/workflows/publish-portmaster-v0.1.0-alpha.1.yml
+permissions:
+  actions: read
+  contents: write
+  statuses: write
+concurrency:
+  group: publish-portmaster-v0.1.0-alpha.1
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_SHA: 74da7615f0074949a02457ee2ae65f59aec8b6b2
+      BUILD_WORKFLOW: build-portmaster.yml
+      RELEASE_TAG: portmaster-v0.1.0-alpha.1
+    steps:
+    - name: Verify successful source build
+      shell: bash
+      run: "set -euo pipefail\nfor attempt in $(seq 1 40); do\n  gh run list --workflow \"$BUILD_WORKFLOW\" --commit \"$BUILD_SHA\"\
+        \ --event push --branch main --json databaseId,headSha,status,conclusion --limit 10 > runs.json\n  BUILD_RUN=$(jq\
+        \ -r '.[0].databaseId // empty' runs.json)\n  if [ -n \"$BUILD_RUN\" ]; then break; fi\n  sleep 15\ndone\ntest -n\
+        \ \"$BUILD_RUN\"\necho \"BUILD_RUN=$BUILD_RUN\" >> \"$GITHUB_ENV\"\ngh api --method POST \"repos/$GH_REPO/statuses/$BUILD_SHA\"\
+        \ -f state=pending -f context=\"release/$RELEASE_TAG\" -f description=\"Waiting for validated CI run $BUILD_RUN\"\
+        \ -f target_url=\"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN\"\ngh run watch \"$BUILD_RUN\" --exit-status\
+        \ --interval 30\ngh api \"repos/$GH_REPO/actions/runs/$BUILD_RUN\" > run.json\njq -e --arg sha \"$BUILD_SHA\" --arg\
+        \ workflow \".github/workflows/$BUILD_WORKFLOW\" '.status == \"completed\" and .conclusion == \"success\" and .head_sha\
+        \ == $sha and .event == \"push\" and .head_branch == \"main\" and .path == $workflow' run.json\ngh api \"repos/$GH_REPO/actions/runs/$BUILD_RUN/jobs?per_page=100\"\
+        \ > jobs.json\njq -e '[.jobs[] | select(.name == \"build\")] | length == 1 and all(.conclusion == \"success\")' jobs.json\n"
+    - name: Validate CI packages and checksums
+      shell: bash
+      run: "set -euo pipefail\ngh run download \"$BUILD_RUN\" --pattern 'vurus-portmaster-aarch64-alpha-preview' --dir artifacts\n\
+        mkdir packages\nfor name in vurus-portmaster.zip; do\n  mapfile -d '' matches < <(find artifacts -type f -name \"\
+        $name\" -print0)\n  test \"${#matches[@]}\" -eq 1\n  test -s \"${matches[0]}\"\n  cp \"${matches[0]}\" \"packages/$name\"\
+        \ndone\nmapfile -d '' manifests < <(find artifacts -name SHA256SUMS.txt -print0)\ntest \"${#manifests[@]}\" -eq 1\n\
+        cp \"${manifests[0]}\" packages/SHA256SUMS.txt\n(cd packages && sha256sum --check SHA256SUMS.txt)\npython3 - <<'CHECK'\n\
+        from pathlib import Path, PurePosixPath\nimport tarfile, zipfile\nfor p in Path('packages').iterdir():\n if p.suffix\
+        \ == '.txt': continue\n if p.suffix == '.zip':\n  with zipfile.ZipFile(p) as z:\n   assert z.testzip() is None\n \
+        \  names=z.namelist()\n else:\n  with tarfile.open(p) as t: names=t.getnames()\n for name in names:\n  q=PurePosixPath(name)\n\
+        \  assert not q.is_absolute() and '..' not in q.parts, name\n  assert not any(part.lower() in {'work','.git','.agents','.codex','saves','data'}\
+        \ for part in q.parts), name\n  assert q.suffix.lower() not in {'.iso','.bin','.rsc','.gaf','.vzs','.cfg'}, name\n\
+        \ assert any('license' in n.lower() for n in names), p\n print(p.name, 'validated', len(names), 'entries')\nCHECK\n\
+        (cd packages && sha256sum vurus-* > SHA256SUMS.txt)\n"
+    - name: Publish release
+      shell: bash
+      run: "set -euo pipefail\ncat > notes.md <<'NOTES'\nFirst Vurus PortMaster Alpha Preview: ARM64 / OpenGL ES 3.0, optimized\
+        \ Release build.\n\nExtract Vurus.sh and the vurus directory into your firmware's Ports directory. Supply your own\
+        \ original game data as described in vurus/README.txt, then launch through the normal firmware Ports menu. Preserve\
+        \ existing data, saves and settings when updating.\n\nIncludes the shared memory and resource-loading improvements:\
+        \ bounded music/video streaming, compact decoded graphics, current-level snapshots, transient effect reuse and buffered\
+        \ archive/disc I/O.\n\nUser-tested on Anbernic RG40XX H / Allwinner H700 / muOS at 640\xD7480: roughly 30\u201340\
+        \ FPS with FX and terrain effects disabled, dipping into the low 20s during heavy battles. These are observations,\
+        \ not performance guarantees. Long-session and repeated level-transition testing continues.\n\nAdvanced video \u2192\
+        \ FPS counter displays FPS and RSS memory; it is off by default. Desktop post-processing shaders are unavailable in\
+        \ this GLES build. Controller menu navigation and first-run import are supported.\n\nYour original game data is required\
+        \ and is not included. Engine and third-party licenses accompany the package. Verify the ZIP with SHA256SUMS.txt.\n\
+        NOTES\nprintf '\\nBuilt and tested by [GitHub CI](https://github.com/%s/actions/runs/%s), source commit `%s`.\\n'\
+        \ \"$GH_REPO\" \"$BUILD_RUN\" \"$BUILD_SHA\" >> notes.md\ngh release create \"$RELEASE_TAG\" packages/* --target \"\
+        $BUILD_SHA\" --draft --prerelease --title \"Vurus PortMaster Alpha Preview 0.1.0-alpha.1\" --notes-file notes.md\n\
+        gh release edit \"$RELEASE_TAG\" --draft=false --latest=false\n"
+    - name: Report publication result
+      if: always()
+      shell: bash
+      env:
+        RESULT: ${{ job.status }}
+      run: 'state=failure
+
+        if [ "$RESULT" = success ]; then state=success; fi
+
+        gh api --method POST "repos/$GH_REPO/statuses/$BUILD_SHA" -f state="$state" -f context="release/$RELEASE_TAG" -f description="Publication
+        job $RESULT" -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+        '
