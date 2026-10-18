@@ -14,8 +14,11 @@ engineering. You must supply your own original game data.
 
 ## Get started
 
-Download the package for your platform from GitHub Releases when available.
-Development builds are available as artifacts under **Actions → Desktop builds**.
+Download the package for your platform from **[GitHub Releases](https://github.com/rzrbld/vurus/releases/latest)**.
+Releases contain the validated Linux, Windows and macOS builds plus SHA-256 checksums.
+Optional development/testing builds are available as artifacts under
+[Actions → Desktop builds](https://github.com/rzrbld/vurus/actions/workflows/build-desktop.yml);
+these are temporary CI artifacts, not the main release downloads.
 Extract into a writable folder; settings, imported data and saves live beside
 the executable.
 
@@ -28,8 +31,46 @@ the executable.
 First startup shows extraction and CD-music import progress. Existing archives
 and extracted resource directories also work with `--data`. No original game
 files are downloaded or included. See [the player guide](packaging/README.txt)
-for controls, storage and command-line options. Native Windows/macOS CI must pass
-before those packages are considered validated; hardware testing remains needed.
+for controls, storage and command-line options. The v0.1.0 release passed native
+builds and tests on all four platforms; physical hardware testing remains ongoing.
+
+## Modern display and usability features
+
+- **Widescreen and ultrawide support:** aspect ratios from 1:1 through 32:9,
+  including 4:3, 16:10, 16:9 and 21:9.
+- **Resolution choices:** presets from 640×480 through 4K and 8K, including
+  1280×800, 1920×1080, 3440×1440 and 5120×1440; custom window sizes are supported.
+  Available fullscreen modes depend on your display and driver.
+- **Responsive HUD:** Auto follows the actual window aspect ratio, with an
+  independent manual HUD aspect option. Changing the HUD does not change the
+  game camera or stretch the backgrounds.
+- **Windowed, fullscreen and borderless modes**, plus optional sprite filtering,
+  anti-aliasing, CRT/Retro/Bright shaders, bloom, sharpening and vignette.
+- **Keyboard, mouse and controller support:** remappable controls, stick/D-pad
+  menu navigation and optional enemy-only controller aim assistance.
+- **Portable storage and first-run import:** settings and saves stay beside the
+  executable; an in-game progress screen handles resource extraction and CD music.
+
+## Performance notes
+
+The engine uses compact projectile storage and spatial queries, caches repeated
+actor lookups, and prepares sprite data during loading to reduce gameplay spikes.
+These optimizations preserve simulation and animation behavior.
+
+At an earlier Linux optimization checkpoint, a controlled final-level workload
+with 35 generators and 3,600 simulation steps measured:
+
+| Workload | Median simulation CPU time per step | Peak process memory (RSS) |
+|---|---:|---:|
+| Crowded combat | 0.24 ms | About 350 MiB |
+| Heavy Circular Fire stress | 1.22 ms | About 1.09 GiB |
+
+These are workload-specific development measurements, not minimum system
+requirements or benchmarks of every release/platform. CPU time above covers World
+simulation, not rendering, audio or total CPU utilization. Extreme effects increase
+memory use; resolution and optional shaders also affect GPU cost. Hardware FPS and
+CPU percentages depend on the device, frame cap and scene. Launch with `--debug`
+for the FPS/frame-time display, or use `--profile-frames 1200` for a frame-timing report.
 
 ## Screenshots
 
