@@ -1,0 +1,26 @@
+name: Release status diagnostics v0.1.4
+on:
+  push:
+    branches: [release-diagnostics-v0.1.4]
+    paths: [.github/workflows/release-diagnostics-v0.1.4.yml]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Inspect release and build state from the runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          date -u
+          for id in 39282788727 39282800425 39282802420; do
+            gh api "repos/$GH_REPO/actions/runs/$id" --jq '{id,status,conclusion,head_sha,updated_at}'
+            gh api "repos/$GH_REPO/actions/runs/$id/jobs?per_page=100" --jq '.jobs[] | {id,name,status,conclusion,step:[.steps[] | select(.status != "completed") | .name]}'
+          done
+          gh release list --limit 5 --json tagName,isDraft,isPrerelease
