@@ -1,0 +1,163 @@
+name: Release desktop v0.1.4 and PortMaster alpha.2
+'on':
+  push:
+    branches:
+    - publish-v0.1.4
+    paths:
+    - .github/workflows/publish-v0.1.4.yml
+permissions:
+  actions: write
+  contents: write
+concurrency:
+  group: publish-v0.1.4
+  cancel-in-progress: false
+jobs:
+  publish:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - stream: desktop
+          workflow: build-desktop.yml
+          tag: v0.1.4
+          pattern: vurus-*
+        - stream: portmaster
+          workflow: build-portmaster.yml
+          tag: portmaster-v0.1.0-alpha.2
+          pattern: vurus-portmaster-aarch64-alpha-preview
+    runs-on: ubuntu-22.04
+    timeout-minutes: 150
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_SHA: 2a11f1234da4ae37871f8b1d63e5b4817229a295
+      BUILD_REF: release-source-2a11f12
+      BUILD_WORKFLOW: ${{ matrix.workflow }}
+      RELEASE_TAG: ${{ matrix.tag }}
+      ARTIFACT_PATTERN: ${{ matrix.pattern }}
+      STREAM: ${{ matrix.stream }}
+    steps:
+    - name: Dispatch and verify exact source build
+      shell: bash
+      run: |
+        set -euo pipefail
+        test "$(gh api "repos/$GH_REPO/git/ref/heads/$BUILD_REF" --jq .object.sha)" = "$BUILD_SHA"
+        find_run() {
+          gh run list --workflow "$BUILD_WORKFLOW" --branch "$BUILD_REF" --commit "$BUILD_SHA" --event workflow_dispatch --limit 10 --json databaseId,headSha,status,conclusion > runs.json
+          jq -r '.[0].databaseId // empty' runs.json
+        }
+        BUILD_RUN=$(find_run)
+        if [ -z "$BUILD_RUN" ]; then
+          gh workflow run "$BUILD_WORKFLOW" --ref "$BUILD_REF"
+          for attempt in $(seq 1 40); do
+            BUILD_RUN=$(find_run)
+            if [ -n "$BUILD_RUN" ]; then break; fi
+            sleep 15
+          done
+        fi
+        test -n "$BUILD_RUN"
+        echo "BUILD_RUN=$BUILD_RUN" >> "$GITHUB_ENV"
+        echo "Build: https://github.com/$GH_REPO/actions/runs/$BUILD_RUN"
+        for attempt in $(seq 1 240); do
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" > run.json
+          if [ "$(jq -r .status run.json)" = completed ]; then break; fi
+          sleep 30
+        done
+        gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" > run.json
+        jq -e --arg sha "$BUILD_SHA" --arg branch "$BUILD_REF" --arg workflow ".github/workflows/$BUILD_WORKFLOW" '.status == "completed" and .conclusion == "success" and .head_sha == $sha and .event == "workflow_dispatch" and .head_branch == $branch and .path == $workflow' run.json
+        gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN/jobs?per_page=100" > jobs.json
+        if [ "$STREAM" = desktop ]; then
+          jq -e '[.jobs[] | select(.name | startswith("build ("))] | length == 4 and all(.conclusion == "success")' jobs.json
+        else
+          jq -e '[.jobs[] | select(.name == "build")] | length == 1 and all(.conclusion == "success")' jobs.json
+        fi
+    - name: Validate CI packages and checksums
+      shell: bash
+      run: |
+        set -euo pipefail
+        gh run download "$BUILD_RUN" --pattern "$ARTIFACT_PATTERN" --dir artifacts
+        mkdir packages
+        if [ "$STREAM" = desktop ]; then
+          names='vurus-linux.tar.gz vurus-windows-amd64.zip vurus-darwin-arm64.zip vurus-darwin-x86_64.zip'
+        else
+          names='vurus-portmaster.zip'
+          mapfile -d '' revisions < <(find artifacts -name source-revision.txt -print0)
+          test "${#revisions[@]}" -eq 1
+          test "$(cat "${revisions[0]}")" = "$BUILD_SHA"
+        fi
+        for name in $names; do
+          mapfile -d '' matches < <(find artifacts -type f -name "$name" -print0)
+          test "${#matches[@]}" -eq 1
+          test -s "${matches[0]}"
+          cp "${matches[0]}" "packages/$name"
+        done
+        if [ "$STREAM" = portmaster ]; then
+          mapfile -d '' manifests < <(find artifacts -name SHA256SUMS.txt -print0)
+          test "${#manifests[@]}" -eq 1
+          cp "${manifests[0]}" packages/SHA256SUMS.txt
+          (cd packages && sha256sum --check SHA256SUMS.txt)
+        fi
+        python3 - <<'CHECK'
+        from pathlib import Path, PurePosixPath
+        import tarfile, zipfile
+        for p in Path('packages').iterdir():
+         if p.suffix == '.txt': continue
+         if p.suffix == '.zip':
+          with zipfile.ZipFile(p) as z:
+           assert z.testzip() is None
+           names=z.namelist()
+         else:
+          with tarfile.open(p) as t: names=t.getnames()
+         for name in names:
+          q=PurePosixPath(name)
+          assert not q.is_absolute() and '..' not in q.parts, name
+          assert not any(part.lower() in {'work','.git','.agents','.codex','.aws','saves','data'} for part in q.parts), name
+          assert q.suffix.lower() not in {'.iso','.bin','.rsc','.gaf','.vzs','.cfg'}, name
+         assert any('license' in n.lower() for n in names), p
+         print(p.name, 'validated', len(names), 'entries')
+        CHECK
+        (cd packages && sha256sum vurus-* > SHA256SUMS.txt)
+    - name: Publish validated release
+      shell: bash
+      run: |
+        set -euo pipefail
+        cat > notes.md <<'NOTES'
+        This update improves late-session CPU work and menu navigation.
+
+        - Reduce repeated transient-record eligibility scans and preserve ordered spatial candidate queries.
+        - Add Video Effects grouping, VSync control and 30/60/uncapped frame limits.
+        - Give Controls and saved games bounded scrolling lists, clipped long labels and automatic selected-label scrolling.
+        - Add right-side vertical save-list indicators and compact Extras spacing.
+        - Simplify running/build instructions for desktop and PortMaster.
+
+        Save schema v35 and the existing zlib envelope are unchanged. Preserve saves, settings and imported data when updating. Original game resources are required and are not included.
+
+        Handheld measurements on RG40XX H/H700/muOS at 640x480 recorded roughly 31-32 FPS in two stationary CAVE saved scenes, with effects/settings documented in docs/performance_update_2026-10-19.md. Separate short captures recorded roughly 131-140 MiB RSS; longer user sessions reported 190-210 MiB. These are distinct measurements, not full-level averages or performance guarantees.
+
+        Engine and third-party notices accompany the packages. Verify downloads with SHA256SUMS.txt. Physical hardware validation is separate from automated CI.
+        NOTES
+        if [ "$STREAM" = desktop ]; then
+          cat >> notes.md <<'DESKTOP'
+
+        Downloads: Linux x64 / Steam Deck, Windows x64, Apple Silicon macOS and Intel macOS. Mac builds require macOS 15+, are unsigned terminal executables and do not include SMAA; FXAA remains available.
+        DESKTOP
+        else
+          cat >> notes.md <<'HANDHELD'
+
+        PortMaster ARM64 / OpenGL ES 3.0 Alpha Preview. Extract Vurus.sh and the vurus directory into the firmware's Ports directory, supply your original data as described in vurus/README.txt, then launch from Ports. Desktop post-processing shaders are unavailable in this build.
+        HANDHELD
+        fi
+        printf '\nBuilt and tested by [GitHub CI](https://github.com/%s/actions/runs/%s), source commit `%s`.\n' "$GH_REPO" "$BUILD_RUN" "$BUILD_SHA" >> notes.md
+        # New tags/releases only: never replace published assets or move existing tags.
+        if gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" > tag.json 2>/dev/null; then
+          echo 'Tag already exists; stop instead of replacing it.' >&2
+          exit 1
+        fi
+        if [ "$STREAM" = desktop ]; then
+          gh release create "$RELEASE_TAG" packages/* --target "$BUILD_SHA" --draft --title "Vurus $RELEASE_TAG" --notes-file notes.md
+          gh release edit "$RELEASE_TAG" --draft=false --latest
+        else
+          gh release create "$RELEASE_TAG" packages/* --target "$BUILD_SHA" --draft --prerelease --title "Vurus PortMaster Alpha Preview $RELEASE_TAG" --notes-file notes.md
+          gh release edit "$RELEASE_TAG" --draft=false --latest=false
+        fi
+        gh release view "$RELEASE_TAG" --json url,tagName,isDraft,isPrerelease,assets
