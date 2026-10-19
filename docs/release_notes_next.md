@@ -1,8 +1,9 @@
-# Next release — draft changelist
+# Vurus v0.1.3 and PortMaster Alpha Preview
 
-Unreleased candidate; version and date will be assigned during release preparation.
-These notes describe local work awaiting source staging, fresh platform CI and
-package verification. No new binaries have been published with this document.
+Downloads: [desktop v0.1.3](https://github.com/rzrbld/vurus/releases/tag/v0.1.3)
+and [PortMaster Alpha Preview](https://github.com/rzrbld/vurus/releases/tag/portmaster-v0.1.0-alpha.1).
+These releases have independent build and publication workflows. Packages are
+built in GitHub CI and include SHA-256 checksums.
 
 ## Lower memory use
 
@@ -28,7 +29,7 @@ See [measurements and limitations](performance_update_2026-10-19.md).
 - Keep one synchronized archive handle instead of reopening it for every entry.
 - Read only archive headers/directories during initialization instead of loading
   whole archives temporarily. No whole-file mapping or resource cache added.
-- Batch ISO/BIN resource extraction into32-sector reads, preserving raw-sector
+- Batch ISO/BIN resource extraction into 32-sector reads, preserving raw-sector
   handling, progress and cancellation. CD audio was already read in chunks.
 - Host reader benchmarks improved; SD-card/full-level-load gains still need
   device measurement. Loose-file reading is unchanged.
@@ -40,18 +41,21 @@ See [measurements and limitations](performance_update_2026-10-19.md).
   not retroactively repaired.
 - Add a Linux RSS/PSS and memory-category breakdown beneath the debug FPS display.
 - Add an optional FPS/RSS counter in Advanced video settings, disabled by default.
+- Correct the Windows retry-save ownership signature; close retained stream
+  owners before test-fixture cleanup on Windows.
 
 ## Compatibility and validation
 
 - Save schema remains v35 with the existing optional lossless zlib envelope.
   Supported older raw saves still load. Builds predating compressed-save support
   cannot read compressed checkpoints; old large saves can still have load peaks.
-- Local suite:154/154 tests passed, plus targeted resource, rendering and
-  save-continuation audits. Hardware/platform release validation remains pending.
+- CI: Linux passed 154 tests; Windows and each Mac architecture passed 150;
+  ARM64 GLES passed 152 plus its renderer check. Targeted resource, rendering
+  and save-continuation audits complement these automated tests.
 - Native-resolution rendering, immediate-mode desktop submission, short resident
   sound effects and bounded upload scratch remain unchanged after review.
 - PortMaster ARM64 / GLES support has its own CI workflow and Alpha Preview
   packages. Desktop tags (`v*`) and handheld tags (`portmaster-v*`) build and
   prepare their releases independently. Both release jobs create drafts.
-- Fresh ARM64 CI validation is still pending; local host GLES checks do not
-  establish device performance or long-session stability.
+- Physical hardware, long-session and repeated-transition testing continues;
+  automated tests do not establish full device acceptance.

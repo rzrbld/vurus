@@ -39,8 +39,8 @@ builds and tests on all four platforms; physical hardware testing remains ongoin
 
 ARM64 handheld builds use OpenGL ES 3.0 and a separate
 [PortMaster CI workflow](https://github.com/rzrbld/vurus/actions/workflows/build-portmaster.yml).
-Testing packages are CI artifacts; published handheld previews, when available,
-appear separately on [Releases](https://github.com/rzrbld/vurus/releases).
+Download the [PortMaster Alpha Preview](https://github.com/rzrbld/vurus/releases/tag/portmaster-v0.1.0-alpha.1).
+CI artifacts remain available for development testing.
 Desktop and handheld releases do not need to happen together.
 See [installation and limitations](packaging/portmaster/README.txt).
 
@@ -84,15 +84,15 @@ save fees and failure protection are retained.
 
 ## Performance notes
 
-The next-release candidate reduces retained world/snapshot data, streams music
+[Version 0.1.3](https://github.com/rzrbld/vurus/releases/tag/v0.1.3) reduces retained world/snapshot data, streams music
 and intro video, recycles released transient effects and stores decoded sprites
 in compact 16-bit form. Gameplay, animation and filtering regression checks accompany
 these changes; native-resolution rendering remains unchanged.
 
 The user reports ordinary gameplay RSS of approximately **170–250 MB**, compared
 with **500–700 MB** before this series. This is an observation across sessions,
-not a matched benchmark or minimum RAM requirement. These candidate changes have
-not yet been published in new release binaries.
+not a matched benchmark or minimum RAM requirement. The improvements are included
+in desktop v0.1.3 and the PortMaster Alpha Preview.
 
 Controlled examples include fresh snapshot allocations falling from **12–16 MiB
 to 2.5–3.5 MiB**, and the decoded sprite corpus from **57.15 to 28.58 MiB**. Neither

@@ -1,8 +1,9 @@
 # Memory and performance update — 2026-10-19
 
-These results describe the locally validated candidate for the next release,
-not a promise about the currently downloadable packages. Hardware testing and
-fresh platform builds are still required before publication.
+These results describe the optimization series included in desktop v0.1.3 and
+the PortMaster Alpha Preview. CI builds and applicable tests passed on Linux,
+Windows, both macOS architectures and ARM64 GLES. Hardware testing remains
+separate from these host measurements.
 
 ## Observed memory use
 
@@ -39,26 +40,26 @@ Short effects and voices remain resident: the English cache across 25 maps was
 
 Archive initialization now reads headers/directories and retains a synchronized
 file handle, avoiding whole-archive temporary allocation and per-entry reopening.
-For the shipped data archive, requested initialization data fell from51,887,890
-bytes to20,415bytes (stream/OS read-ahead can read more). No payload cache or mmap
+For the shipped data archive, requested initialization data fell from 51,887,890
+bytes to 20,415 bytes (stream/OS read-ahead can read more). No payload cache or mmap
 is introduced; loose files still open and close normally.
 
 A standalone reader benchmark, five warm-cache host sweeps, measured median open
 time **27.14→0.039 ms**, summed entry-read time **6.26→4.05 ms**, and process peak
-RSS **54.8→7.2 MiB**. All477payload hashes combined matched;22slide entries also
+RSS **54.8→7.2 MiB**. All 477 payload hashes combined matched; 22 slide entries also
 matched in a separate sweep. This is not whole-game RSS or complete level-load
-time, and no cold SD-card speedup has been measured. All25maps passed resource
+time, and no cold SD-card speedup has been measured. All 25 maps passed resource
 validation; concurrent reads through copied handles are covered by regression tests.
 
 ## First-run extraction follow-up
 
-ISO/BIN game resources now extract in32-sector chunks, stripping raw-sector
-wrappers in memory with a bounded74KiB buffer. Progress and cancellation retain
-64KiB output intervals. CD music ripping already used sequential chunks.
+ISO/BIN game resources now extract in 32-sector chunks, stripping raw-sector
+wrappers in memory with a bounded 74 KiB buffer. Progress and cancellation retain
+64 KiB output intervals. CD music ripping already used sequential chunks.
 
-A synthetic64MiB+17byte resource, five warm-host samples and reverse-order repeats,
+A synthetic 64 MiB + 17 byte resource, five warm-host samples and reverse-order repeats,
 measured median ISO extraction **117–128→27–35 ms**, and raw BIN extraction
-**120–124→26–37 ms**. All output/progress hashes match. This is roughly3–5× for
+**120–124→26–37 ms**. All output/progress hashes match. This is roughly 3–5× for
 that extraction step, not the complete import: checksums, durable writes and
 publication are excluded. SD-card benefit remains unmeasured. Full-import tests
 cover ISO, MODE1/MODE2, nonzero track starts, final partial sectors and cancellation.
