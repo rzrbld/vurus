@@ -34,5 +34,47 @@ int main(){try{
   need(w.actors().size()==size,"6400 subsequent transient births do not grow records");
   need(disk(w,s.mapPath)==disk(resumed,s.mapPath),"byte-identical recycling continuation after save/reload");
  }
+ // A saved placement can override its class. Derive the role from that
+ // resolved placement, even if an in-memory checkpoint carries stale flags.
+ auto roles=w.snapshot();
+ roles.objects[2].properties.push_back(block("TyPe",{},"AmMo"));
+ roles.actors[2].effect=false;roles.actors[2].hasAmmoAttribute=false;
+ roles.actors[3].effect=false;roles.actors[3].hasAmmoAttribute=true;
+ need(w.restoreSnapshot(roles,e),e.c_str());
+ need(w.actors()[2].hasAmmoAttribute&&!w.actors()[3].hasAmmoAttribute,"restore derives Ammo role from resolved instance, not cached flag or class");
+ w.takeAudioEvents();w.tick(.014f,{});
+ need(w.spawn({1},{1100,1100})==2,"released non-FX Ammo placement retains lowest-slot recycling");
+ need(!w.actors()[2].hasAmmoAttribute,"reuse reconstructs the new instance role");
+ auto unchanged=disk(w,s.mapPath);auto stale=w.snapshot();
+ for(auto& actor:stale.actors)actor.hasAmmoAttribute=!actor.hasAmmoAttribute;
+ SaveGame derived;derived.currentLevel=s.mapPath;derived.levels[s.mapPath].world=stale;
+ std::vector<uint8_t> encoded;need(encodeSave(derived,encoded,e),e.c_str());
+ need(encoded==unchanged,"derived Ammo role never changes serialized layout or bytes");
+ // Restore discards conservative membership history. A later factory birth
+ // must enter the index before its producer sets effect, even on a later tick.
+ auto late=w.snapshot();
+ for(size_t i=1;i<late.actors.size();++i){
+  late.objects[i].authored.key="Create-object";
+  late.actors[i].effect=false;
+ }
+ need(w.restoreSnapshot(late,e),e.c_str());
+ w.takeAudioEvents();w.tick(.014f,{});
+ const auto deferred=w.spawn({1},{1100,1100});
+ need(deferred==late.actors.size(),"protected old slots require a new factory record");
+ need(!w.actors()[deferred].effect,"generic factory has not yet assigned the FX role");
+ const_cast<ActorState&>(w.actors()[deferred]).effect=true;
+ w.expireVisual(deferred);
+ const_cast<ActorState&>(w.actors()[deferred]).effect=false;
+ w.takeAudioEvents();w.tick(.014f,{});
+ const_cast<ActorState&>(w.actors()[deferred]).effect=true;
+ w.takeAudioEvents();w.tick(.014f,{});
+ need(w.spawn({1},{1100,1100})==deferred,"factory candidate survives delayed role assignment and earlier ineligible ticks");
+ auto invalid=w.snapshot();invalid.objects[0].classId={999};
+ const auto beforeRejected=disk(w,s.mapPath);
+ need(!w.restoreSnapshot(invalid,e),"invalid restore rejected");
+ need(disk(w,s.mapPath)==beforeRejected,"rejected restore leaves saved state unchanged");
+ const_cast<ActorState&>(w.actors()[deferred]).effect=true;
+ w.expireVisual(deferred);w.takeAudioEvents();w.tick(.014f,{});
+ need(w.spawn({1},{1100,1100})==deferred,"rejected restore preserves candidate reuse");
  std::cout<<"PASS transient reclamation, pinned/authored preservation and100tick disk continuation\n";
 }catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}

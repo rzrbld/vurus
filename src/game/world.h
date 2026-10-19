@@ -74,6 +74,7 @@ struct ActorState {
     std::uint32_t nativeSubtype=0; // Placement-derived, not serialized; rebuilt on restore.
     bool nativeAwake=false,nativeManaged=false;
     bool nativeFireRequested=false; // actor flag2, retained through Two-pieces conversion.
+    bool hasAmmoAttribute=false; // Resolved instance role; derived on construction/restore, not serialized.
     std::size_t nativeAwakeIndex=0;
     std::uint32_t nativeGeneration=0,nativeCreatorGeneration=0;
     NativeAmmoOwnerCounters nativeAmmoOwner;
@@ -494,6 +495,10 @@ private:
     bool reusableTrail(ClassId) const;
     std::map<uint32_t,std::set<size_t>> freeTrailSlots_;
     std::map<uint32_t,std::vector<size_t>> freeTransientRecords_;
+    // Conservative, sorted slot IDs; never a cached free/pinned decision.
+    std::vector<size_t> transientRecordCandidates_;
+    void registerTransientRecordCandidate(size_t);
+    void rebuildTransientRecordCandidates();
     void collectReleasedTransientRecords();
     uint64_t nextRecordOrder_=0;
     void configureProjectileCreates(Projectile&,bool fromConstructor=false);

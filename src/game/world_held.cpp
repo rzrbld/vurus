@@ -57,6 +57,8 @@ std::optional<size_t> GameWorld::materializeHeldItem(const HeldItem& held,Conten
     if(!local)object.owner.reset();
     actors_[id]=held.actor;actors_[id].alive=true;actors_[id].reactivateMs=-1;actors_[id].nativeHeldOriginal=false;
     actors_[id].nativeSubtype=nativeObjectSubtype(object);
+    actors_[id].hasAmmoAttribute=attribute(object.properties,"ammo")!=nullptr;
+    registerTransientRecordCandidate(id);
     if(!local) {
         // Awake indices are context-local even though the retained body/UID
         //survives carry. Never reuse an index captured in the source World.

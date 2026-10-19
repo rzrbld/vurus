@@ -330,6 +330,7 @@ ActorState GameWorld::makeActor(const ObjectPlacement& object) {
     ActorState actor;
     actor.nativeSubtype=nativeObjectSubtype(object,object.id.value==player_);
     const auto& p=object.properties;
+    actor.hasAmmoAttribute=attribute(p,"ammo")!=nullptr;
     const auto& cls=scene_->classes[object.classId.value];
     const auto& energy=children(cls.properties,"Energy"); const auto& shield=children(cls.properties,"Shield");
     actor.vitals.energy=propertyNumber(energy,"Initial",1);
@@ -442,7 +443,7 @@ bool GameWorld::load(SceneContent& scene,const Level& level,std::string& error,i
     spiderNavigation_.reset();spiderNavigationActors_.clear();
     scene_=&scene;level_=&level;player_=scene.player->value;elapsedMs_=0;playerKills_=0;ammoHits_=ammoMisses_=0;motion_={};map_={};
     catalogHash_=contentFingerprint();savePlot_.reset();saveDwellMs_=0;saveAttempted_=false;saveRequest_.reset();
-    effectSequences_.clear();attachedProtectionActors_.clear();actors_.clear();projectiles_.clear();transition_.reset();rejectedLifts_.clear();diagnostics_.clear();message_.clear();
+    effectSequences_.clear();attachedProtectionActors_.clear();actors_.clear();transientRecordCandidates_.clear();projectiles_.clear();transition_.reset();rejectedLifts_.clear();diagnostics_.clear();message_.clear();
     damageQueue_.clear();contactDamage_.clear();applyingDamage_=false;surprise_={};touchVictims_.clear();heldItems_.clear();
     actorCells_={};bareAmmoCells_={};bareAmmoIndex_.clear();visualAmmoIndex_.clear();
     awakeManager_.entries.clear();awakeVisitIndex_.reset();deferActorFire_=false;deferredActorFire_.reset();
@@ -491,6 +492,7 @@ bool GameWorld::load(SceneContent& scene,const Level& level,std::string& error,i
     for (const auto& name:unsupported) diagnostics_.push_back("random wandering uses port route/occupancy approximation: "+name);
     initializeNativeTileBodies();
     initializeSpiderNavigation();
+    rebuildTransientRecordCandidates();
     return true;
 }
 void GameWorld::setDebugEnemyAI(bool enabled) {
@@ -1106,6 +1108,17 @@ void GameWorld::movePlayer(float dx,float dy) { if (player().alive) { move(playe
 // unchanged so renderer channels and retained audio-bank bindings remain valid.
 // Build once at the tick boundary, never while factory/manager callbacks hold
 // references. Native pool allocation and manager insertion order are unchanged.
+void GameWorld::registerTransientRecordCandidate(size_t id) {
+    // Factories may set effect only after spawn returns. Retain the slot even
+    // if its role later changes; the collector rechecks all dynamic conditions.
+    const auto at=std::lower_bound(transientRecordCandidates_.begin(),transientRecordCandidates_.end(),id);
+    if(at==transientRecordCandidates_.end() || *at!=id)transientRecordCandidates_.insert(at,id);
+}
+void GameWorld::rebuildTransientRecordCandidates() {
+    transientRecordCandidates_.clear();
+    for(size_t i=0;i<actors_.size();++i)
+        if(actors_[i].effect || actors_[i].hasAmmoAttribute)transientRecordCandidates_.push_back(i);
+}
 void GameWorld::collectReleasedTransientRecords() {
     freeTransientRecords_.clear();
     if(actors_.size()<1024)return;
@@ -1135,12 +1148,13 @@ void GameWorld::collectReleasedTransientRecords() {
         }
     }
     // Descending insertion makes pop_back reuse the lowest eligible slot.
-    for(size_t i=actors_.size();i-->0;){
+    for(auto candidate=transientRecordCandidates_.rbegin();candidate!=transientRecordCandidates_.rend();++candidate){
+        const size_t i=*candidate;
         const auto& a=actors_[i];const auto& o=scene_->objects[i];
         if(pinned[i]||a.alive||a.nativeGeneration||a.nativePoolSlot!=SIZE_MAX||
            a.reactivateMs>=0||a.nativeHeldOriginal||a.pooledTrail||a.enemy||a.pickup||a.lift||a.gate||
            !a.generators.empty()||a.generatorParent||!o.authored.key.empty()||
-           (!a.effect && !attribute(o.properties,"ammo")))continue;
+           (!a.effect && !a.hasAmmoAttribute))continue;
         if(i<actorCells_.cell.size()&&actorCells_.cell[i]!=NativeActorCells::Missing)continue;
         freeTransientRecords_[o.classId.value].push_back(i);
     }
@@ -1168,6 +1182,7 @@ size_t GameWorld::spawn(ClassId id,ContentPosition position) {
     object.behaviours=cls.behaviours;object.properties=cls.properties;
     if(reused){scene_->objects[created]=std::move(object);actors_[created]=makeActor(scene_->objects[created]);}
     else {scene_->objects.push_back(std::move(object));actors_.push_back(makeActor(scene_->objects.back()));}
+    registerTransientRecordCandidate(created);
     actors_[created].visualRevision=revision;actors_[created].reusedRecord=reused;
     initializeNativeIdentity(created);
     registerSavingPrice(created);

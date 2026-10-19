@@ -170,6 +170,7 @@ size_t GameWorld::spawnTrail(ClassId cls,ContentPosition position) {
         auto& object=scene_->objects[id];object.position=position;object.owner.reset();
         const auto revision=actors_[id].visualRevision+1;
         actors_[id]=makeActor(object);actors_[id].pooledTrail=true;actors_[id].visualRevision=revision;
+        registerTransientRecordCandidate(id);
         initializeNativeIdentity(id);
         updateSpiderNavigation(id,{},false);
         //Reusable products have no CREATE, but still enter the native graph

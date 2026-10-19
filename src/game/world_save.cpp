@@ -154,6 +154,7 @@ bool GameWorld::restoreSnapshot(const WorldSnapshot& saved,std::string& error) {
         if(a.nativeAmmoContinuation && (!a.nativeMotionHistory() || (!a.alive && a.reactivateMs<0)))return fail("invalid pending Ammo movement");
         if(o.id.value!=i || o.classId.value>=scene_->classes.size() || (o.owner&&o.owner->value>=count) || !position(o.position))return fail("invalid checkpoint object reference");
         a.nativeSubtype=nativeObjectSubtype(o,i==saved.player);
+        a.hasAmmoAttribute=attribute(o.properties,"ammo")!=nullptr;
         if((a.enemyMoveCommand!=0 && a.enemyMoveCommand!=200 && a.enemyMoveCommand!=208) || a.direction<0 || a.direction>=24 || (a.weapons.empty()?a.selectedWeapon!=0:a.selectedWeapon>=a.weapons.size()) ||
            a.routePoint>a.route.size() || (b.targetClass&&b.targetClass->value>=scene_->classes.size()) ||
            static_cast<unsigned>(b.base)>static_cast<unsigned>(BrainBase::Unsupported))return fail("invalid checkpoint actor reference");
@@ -414,7 +415,7 @@ bool GameWorld::restoreSnapshot(const WorldSnapshot& saved,std::string& error) {
     }
     // Older checkpoints saved visible terminals as nonsolid sensors. Derive
     // these two authored roles again without changing the checkpoint layout.
-    freeTransientRecords_.clear();nextRecordOrder_=actors_.size();
+    freeTransientRecords_.clear();rebuildTransientRecordCandidates();nextRecordOrder_=actors_.size();
     for(size_t i=0;i<actors_.size();++i)nextRecordOrder_=std::max(nextRecordOrder_,actorRecordOrder(actors_[i],i)+1);
     freeTrailSlots_.clear();
     contactMines_.clear();
@@ -496,8 +497,11 @@ void GameWorld::updateSaving(float milliseconds) {
             // searching their text properties; retain the exact sensor metric,
             // actor order and first matching colocated terminal.
             if(!propertyBool(object.properties,"Saving-zone"))continue;
-            for(size_t i=0;i<actors_.size();++i)if(actors_[i].alive && propertyBool(scene_->objects[i].properties,"Saving-plot") &&
-                scene_->objects[i].position.x==object.position.x && scene_->objects[i].position.y==object.position.y){plot=i;break;}
+            // Only a colocated body can be the terminal. Keep first-match
+            // actor order, but avoid text-property scans on unrelated actors.
+            for(size_t i=0;i<actors_.size();++i)if(actors_[i].alive &&
+                scene_->objects[i].position.x==object.position.x && scene_->objects[i].position.y==object.position.y &&
+                propertyBool(scene_->objects[i].properties,"Saving-plot")){plot=i;break;}
         }
     }
     if(plot!=savePlot_) {

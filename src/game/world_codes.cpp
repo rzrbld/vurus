@@ -116,6 +116,7 @@ void GameWorld::updateHeldCodes(float milliseconds) {
                 if(!cls){diagnostics_.push_back("Cannot return carried code: source class missing "+source.className);continue;}
                 auto object=source.object;object.id={static_cast<uint32_t>(scene_->objects.size())};object.classId=cls->id;object.owner.reset();
                 target=scene_->objects.size();scene_->objects.push_back(std::move(object));actors_.push_back(makeActor(scene_->objects.back()));
+                registerTransientRecordCandidate(*target);
                 initializeNativeIdentity(*target);
             }
             auto& object=scene_->objects[*target];auto& actor=actors_[*target];
