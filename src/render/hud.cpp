@@ -1,4 +1,5 @@
 #include "render/hud.h"
+#include "render/menu_marquee.h"
 #include "assets/native_font_text.h"
 #include "render/level_map.h"
 #include "game/radar.h"
@@ -9,6 +10,27 @@
 #include <cmath>
 #include <cstdio>
 namespace vyruz {
+namespace {
+// Logical centered-menu coordinates, valid for desktop GL and GLES. Restore
+// the caller's scissor state so list clipping never clips previews/tooltips.
+class MenuListClip {
+public:
+    MenuListClip(Gfx& gfx,int left,int top,int right,int bottom) {
+        GLint viewport[4];glGetIntegerv(GL_VIEWPORT,viewport);glGetIntegerv(GL_SCISSOR_BOX,oldBox_);
+        enabled_=glIsEnabled(GL_SCISSOR_TEST);const auto area=gfx.viewport();
+        int x=viewport[0]+int((area.uiX()+left)*viewport[2]/area.width);
+        int y=viewport[1]+int((area.height-area.uiY()-bottom)*viewport[3]/area.height);
+        int r=viewport[0]+int((area.uiX()+right)*viewport[2]/area.width);
+        int t=viewport[1]+int((area.height-area.uiY()-top)*viewport[3]/area.height);
+        if(enabled_){x=std::max(x,oldBox_[0]);y=std::max(y,oldBox_[1]);r=std::min(r,oldBox_[0]+oldBox_[2]);t=std::min(t,oldBox_[1]+oldBox_[3]);}
+        glEnable(GL_SCISSOR_TEST);glScissor(x,y,std::max(0,r-x),std::max(0,t-y));
+    }
+    ~MenuListClip(){glScissor(oldBox_[0],oldBox_[1],oldBox_[2],oldBox_[3]);if(!enabled_)glDisable(GL_SCISSOR_TEST);}
+    MenuListClip(const MenuListClip&)=delete;
+private:
+    GLint oldBox_[4]{};bool enabled_=false;
+};
+}
 bool HudRenderer::load(const ContentReader& read,const std::string& world,std::string& error) {
     read_=read;
     const auto load=[&](Bank& bank,const std::string& path,bool fonts=false) {
@@ -129,7 +151,7 @@ void HudRenderer::clear(Gfx& gfx) {
     for(auto& [id,bank]:heldBanks_)for(auto t:bank.textures)gfx.deleteTexture(t);
     heldIcons_.clear();heldBanks_.clear();read_={};markers_={};markersReady_=false;
     fonts_.clear();inventoryFonts_.clear();menuFonts_.clear();bonusFonts_.clear();
-    menuEffects_={};menuCursor_={};
+    menuEffects_={};menuCursor_={};saveLabelClock_=saveLabelStart_=0;saveLabelSelection_=-1;saveLabelText_.clear();
 }
 void HudRenderer::drawSurpriseStatus(Gfx& gfx,const GameWorld& world,float width,float height) {
     if(!world.player().alive)return;
@@ -205,6 +227,8 @@ void HudRenderer::drawCursor(Gfx& gfx,float x,float y) {
     glDisable(GL_ALPHA_TEST);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
 }
 unsigned HudRenderer::advanceMenu(MenuPage page,uint32_t elapsedMs,int refreshHz,bool pointerVisible) {
+    if(page==MenuPage::SavedSessions || page==MenuPage::Controls)saveLabelClock_+=elapsedMs;
+    else {saveLabelClock_=saveLabelStart_=0;saveLabelSelection_=-1;saveLabelText_.clear();}
     const unsigned flashes=menuEffects_.advance(page,elapsedMs,refreshHz);
     // 421780 advances the global MENU8 channel with frame elapsed for every
     // logical menu update. Keep its authored phase through submenu changes.
@@ -556,6 +580,20 @@ void HudRenderer::drawInventory(Gfx& gfx,const GameWorld& world,const InventoryV
 }
 
 namespace vyruz {
+float HudRenderer::menuTextWidth(std::string_view value,unsigned index) const {
+    if(!index||index>menuFonts_.size())return 0;
+    const auto& font=menuFonts_[index-1];float pen=0,extent=0;
+    for(unsigned char c:value){const auto parsed=nativeFontByte(c);
+        if(parsed.kind==NativeFontByteKind::Stop||parsed.kind==NativeFontByteKind::Newline)break;
+        if(parsed.kind==NativeFontByteKind::Ignore)continue;
+        if(parsed.kind==NativeFontByteKind::Space){pen+=font.fixedAdvance();extent=std::max(extent,pen);continue;}
+        if(parsed.kind==NativeFontByteKind::Tab){pen=float(nativeFontTabX(int64_t(pen+MenuView::ListLeft),font.fixedAdvance()))-MenuView::ListLeft;continue;}
+        const auto* glyph=font.glyph(parsed.glyph);uint32_t width=0;
+        if(glyph&&glyph->layers[0].frameIndex<vMenu_.animation.frames.size())width=vMenu_.animation.frames[glyph->layers[0].frameIndex].image.width;
+        extent=std::max(extent,pen+float(std::max<int64_t>(width,font.advance(width))));pen+=font.advance(width);
+    }
+    return extent;
+}
 float HudRenderer::drawMenuText(Gfx& gfx,std::string_view value,float x,float y,unsigned fontIndex,float width,bool wrap) {
     if(!fontIndex || fontIndex>menuFonts_.size())return 0;
     for(size_t i=0;i<value.size();++i)if(nativeFontByte(static_cast<uint8_t>(value[i])).kind==NativeFontByteKind::Stop){value=value.substr(0,i);break;}
@@ -640,17 +678,37 @@ void HudRenderer::drawMenu(Gfx& gfx,const MenuView& view,bool backgroundOnly) {
     const auto title=view.title()+(view.paginated()&&rows.size()>10?"  "+std::to_string(view.firstRow()/10+1)+" / "+std::to_string((rows.size()+9)/10):"");
     if(view.page==MenuPage::SavedSessions)write(title,10,120,0);
     else if(view.title()=="Extras")write(title,10,120,0);else write(title,270,50,3);
-    for(size_t i=view.firstRow();i<rows.size() && i<static_cast<size_t>(view.firstRow()+10);++i)
-        write(rows[i].label,view.rowLeft(),view.rowTop()+(i-view.firstRow())*view.rowHeight(),
-            view.page==MenuPage::SavedSessions?(i==static_cast<size_t>(view.selected)?3:2):(i==static_cast<size_t>(view.selected)?1:0));
-    if(view.page==MenuPage::Controls) {
-        write(view.controlsHelp,270,86,3);
-    } else if(view.page==MenuPage::Confirm) {
-        write("Unsaved progress will be lost.",270,250,3);
+    std::optional<MenuListClip> saveClip;
+    const bool list=view.panelList();
+    const int textRight=MenuView::ListRight-24; // Stable right-hand arrow gutter.
+    if(list)saveClip.emplace(gfx,MenuView::ListLeft,MenuView::ListTop,textRight,MenuView::ListBottom);
+    const bool savedRow=list&&view.selected>=0&&view.selected<view.listRowCount();
+    if(!savedRow){saveLabelSelection_=-1;saveLabelText_.clear();}
+    else if(saveLabelSelection_!=view.selected||saveLabelText_!=rows[view.selected].label){
+        saveLabelSelection_=view.selected;saveLabelText_=rows[view.selected].label;saveLabelStart_=saveLabelClock_;
     }
-    if(view.page==MenuPage::DebugSurprises)write("Enter: replace effect and resume\nUp/Down: browse. Esc: back",270,405,3);
+    const float available=list?float(textRight-MenuView::ListLeft):360.f;
+    for(int i:view.visibleRows()){
+        const bool selected=i==view.selected;
+        const float width=list&&selected?menuTextWidth(rows[i].label,4):available;
+        const float offset=list&&selected?saveLabelScrollOffset(double(saveLabelClock_-saveLabelStart_),width,available):0;
+        write(rows[i].label,view.rowLeft()-offset,view.rowBaseline(i),list?(selected?3:2):(selected?1:0),
+              list&&selected?std::max(available,width+1):available);
+    }
+    saveClip.reset();
+    if(view.page==MenuPage::SavedSessions){
+        // Reuse the original inventory/help arrows in the right gutter; they
+        // indicate hidden saves only, never horizontal label overflow or Back.
+        const int first=view.firstRow();
+        if(first>0 && bonus_.animation.sequences.size()>=2)sequence(gfx,bonus_,2,MenuView::ListRight-9,60);
+        if(first+MenuView::ListVisible<view.listRowCount() && bonus_.animation.sequences.size()>=3)
+            sequence(gfx,bonus_,3,MenuView::ListRight-9,280);
+    }
+    if(view.page==MenuPage::Confirm)write("Unsaved progress will be lost.",270,250,3);
+    if(view.page==MenuPage::Controls)write("Up/Down or wheel: select\nEsc: back",270,435,3);
+    else if(view.page==MenuPage::DebugSurprises)write("Enter: replace effect and resume\nUp/Down: browse. Esc: back",270,405,3);
     else if(view.page==MenuPage::DebugLevels)write("Enter: fresh unsaved test session\nDisk saves are unchanged. Esc: back",270,405,3);
-    else if(view.page!=MenuPage::Main && view.page!=MenuPage::Extras && view.page!=MenuPage::Options && view.page!=MenuPage::Game && view.page!=MenuPage::SavedSessions)
+    else if(view.page!=MenuPage::Controls && view.page!=MenuPage::Main && view.page!=MenuPage::Extras && view.page!=MenuPage::Options && view.page!=MenuPage::Game && view.page!=MenuPage::SavedSessions)
         write("Arrows: select   Enter: choose\nMouse: point and click   Esc: back",270,435,3);
     // Port options have up to ten rows; reserve their help below the last row.
     const float helpY=view.page==MenuPage::Options&&rows.size()>8?400:360;

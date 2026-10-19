@@ -28,7 +28,7 @@ int main(){
  menu.move(2);menu.activate(paused);menu.move(1);check(menu.activate(paused)==MenuAction::Restart,"explicit restart");
  menu.back(paused);menu.move(4);menu.activate(paused);check(menu.page==MenuPage::Controls,"game controls page");
  check(!menu.hover(0,0),"outside click is ignored");
- check(menu.hover(MenuView::Left+1,390),"controls back hit target");menu.activate(paused);
+ check(menu.hover(menu.rowLeft()+1,menu.rowBaseline(int(menu.entries().size())-1)-29),"controls back hit target");menu.activate(paused);
  check(menu.page==MenuPage::Game,"controls returns to caller");
  menu.move(3);check(menu.activate(paused)==MenuAction::Options,"in-game options action");
  menu.showOptions();menu.optionTitle="Keyboard";menu.optionLabels.clear();
@@ -43,7 +43,7 @@ int main(){
  menu.saveLabels={"First save","Second save"};menu.saveHelp={"First details","Second details"};menu.showSavedSessions();
  check(menu.page==MenuPage::SavedSessions&&menu.selected==3,"saved sessions default Back after blank spacer");
  menu.move(1);check(menu.selected==0&&menu.selectedHelp()=="First details","save navigation wraps to first record");
- check(menu.hover(266,76)&&menu.selected==1&&menu.selectedHelp()=="Second details","hover chooses second saved record");
+ check(menu.hover(menu.rowLeft()+1,76)&&menu.selected==1&&menu.selectedHelp()=="Second details","hover chooses second saved record");
  check(menu.activate(paused)==MenuAction::LoadSelected&&menu.selectedSave==1,"title selects exact save");
  menu.back(paused);check(menu.page==MenuPage::Main&&paused,"save Back preserves title pause");
  menu.close(paused);menu.show(paused);menu.move(1);check(menu.activate(paused)==MenuAction::LoadGame,"in-game opens browser before confirming a record");
@@ -70,5 +70,27 @@ int main(){
  check(menu.activate(paused)==MenuAction::DebugSelectSurprise,"Surprise selection action");
  menu.back(paused);check(menu.page==MenuPage::Debug,"Surprise back to debug");
  menu.back(paused);menu.back(paused);check(!paused&&!menu.open(),"debug restores original pause state");
+
+ // The extra legacy save is scrollable without moving native Back below315.
+ menu.close(paused);menu.show(paused,true);menu.saveLabels.clear();
+ for(int i=0;i<8;++i)menu.saveLabels.push_back("Save "+std::to_string(i));
+ menu.showSavedSessions();check(menu.firstRow()==0&&menu.rowBaseline(menu.selected)==315,"Back anchored with legacy overflow");
+ menu.move(-1);check(menu.selected==7&&menu.firstRow()==1,"last save scrolls into native seven-row viewport");
+ check(menu.visibleRows()==std::vector<int>({1,2,3,4,5,6,7,8}),"save viewport includes anchored Back");
+ check(!menu.hover(menu.rowLeft()+1,321),"save hits outside panel ignored");
+ check(menu.hover(menu.rowLeft()+1,251)&&menu.selected==7,"scrolled save mouse identity");
+ menu.move(1);check(menu.selected==8&&menu.firstRow()==1&&menu.rowBaseline(8)==315,"Back retains viewport");
+ check(menu.hover(menu.rowLeft()+1,286)&&menu.selected==8,"fixed Back mouse identity");
+ menu.move(1);check(menu.selected==0&&menu.firstRow()==0,"save wrapping returns viewport to start");
+ menu.page=MenuPage::Controls;menu.controlsHelp.clear();for(int i=0;i<20;++i)menu.controlsHelp+="Control\n";
+ menu.selected=0;menu.move(19);check(menu.selected==19&&menu.firstRow()==13,"Controls follows selected row like saves");
+ check(menu.rowLeft()==293&&menu.rowHeight()==35&&menu.rowBaseline(20)==315,"Controls shares save list area and fixed Back");
+ check(menu.visibleRows()==std::vector<int>({13,14,15,16,17,18,19,20}),"Controls seven visible rows and Back");
+ check(menu.hover(294,251)&&menu.selected==19,"Controls mouse identity matches visible row");
+ check(!menu.hover(631,251),"list mouse rejects outside right border");
+ menu.move(1);menu.activate(paused);check(menu.page!=MenuPage::Controls,"Controls Back closes");
+ menu.page=MenuPage::Controls;menu.selected=0;menu.activate(paused);check(menu.page==MenuPage::Controls,"informational control row does not close");
+ menu.page=MenuPage::Extras;check(menu.rowHeight()==30,"Extras uses compact spacing");
+ menu.page=MenuPage::Game;check(menu.rowHeight()==45,"game spacing preserved");
 
 }

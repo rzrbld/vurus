@@ -1,3 +1,4 @@
+#include "render/menu_marquee.h"
 #include "render/menu_effects.h"
 #include <array>
 #include <cassert>
@@ -34,5 +35,12 @@ int main() {
     assert(latch.scanline()==0 && !latch.takeLogo());
     latch.advance(MenuPage::Game,9999,60);
     assert(latch.scanline()==1); // Fresh menu never catches up gameplay time.
+    assert(saveLabelScrollOffset(5000,300,365)==0);
+    assert(saveLabelScrollOffset(999,445,365)==0);
+    assert(saveLabelScrollOffset(2000,445,365)==40);
+    assert(saveLabelScrollOffset(3000,445,365)==80);
+    assert(saveLabelScrollOffset(3999,445,365)==80);
+    assert(saveLabelScrollOffset(5000,445,365)==40);
+    assert(saveLabelScrollOffset(6000,445,365)==0);
     std::puts("PASS native menu clock, RNG flashes, latch, wrap and submenu/reset lifetime");
 }

@@ -27,9 +27,14 @@ public:
     int savedSessions=0;
     bool debugAI=true,debugGod=false;
     bool paginated() const { return page==MenuPage::Options || page==MenuPage::DebugLevels || page==MenuPage::DebugSurprises; }
-    int firstRow() const { return paginated()?selected/10*10:0; }
-    int rowHeight() const { return page==MenuPage::SavedSessions?35:paginated()?30:page==MenuPage::Debug?40:RowHeight; }
-    int rowLeft() const { return page==MenuPage::SavedSessions?265:Left; }
+    int firstRow() const;
+    std::vector<int> visibleRows() const;
+    int rowBaseline(int index) const;
+    bool panelList() const { return page==MenuPage::SavedSessions || page==MenuPage::Controls; }
+    int listRowCount() const;
+    static constexpr int ListLeft=293,ListRight=630,ListTop=40,ListBottom=320,ListVisible=7;
+    int rowHeight() const { return panelList()?35:(paginated()||page==MenuPage::Extras)?30:page==MenuPage::Debug?40:RowHeight; }
+    int rowLeft() const { return panelList()?ListLeft:Left; }
     bool open() const { return page!=MenuPage::Closed; }
     void show(bool& paused,bool main=false);
     void close(bool& paused);
@@ -39,9 +44,10 @@ public:
     MenuAction activate(bool& paused);
     std::vector<MenuEntry> entries() const;
     std::string title() const;
-    int rowTop() const { return page==MenuPage::SavedSessions?70:paginated()?100:page==MenuPage::Controls?405:page==MenuPage::Main&&!retryAvailable?135:Top; }
+    int rowTop() const { return panelList()?70:paginated()?100:page==MenuPage::Main&&!retryAvailable?135:Top; }
     static constexpr int Left=270,Top=90,Width=360,RowHeight=45;
 private:
+    mutable int saveFirst_=0;
     bool wasPaused_=false;
     MenuPage parent_=MenuPage::Game;
     MenuPage saveParent_=MenuPage::Main;

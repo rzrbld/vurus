@@ -67,6 +67,10 @@ private:
     float xtcPhase_=0,xtcY_=0;
     bool xtcActive_=false;
     MenuEffects menuEffects_;
+    uint64_t saveLabelClock_=0,saveLabelStart_=0;
+    int saveLabelSelection_=-1;
+    std::string saveLabelText_;
+    float menuTextWidth(std::string_view,unsigned font) const;
     AnimationCursor menuCursor_;
     Image levelMap_;
     GLuint mapTexture_=0;

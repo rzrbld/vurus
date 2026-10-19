@@ -1031,6 +1031,14 @@ void handleInput(App& a) {
         }
         if(a.menu.open() && ev.type!=SDL_QUIT) {
             a.suppressFireUntilRelease=true;
+            if(a.menu.page==vyruz::MenuPage::Controls){
+                const int delta=ev.type==SDL_MOUSEWHEEL?-wheelSteps(ev.wheel):
+                    ev.type==SDL_KEYDOWN?(ev.key.keysym.sym==SDLK_UP?-1:ev.key.keysym.sym==SDLK_DOWN?1:0):0;
+                if(delta){if(ev.type==SDL_KEYDOWN)a.menuPointerVisible=false;const auto now=SDL_GetTicks64();
+                    if(ev.type==SDL_MOUSEWHEEL||!ev.key.repeat||now>=a.helpNextScroll){a.menu.move(delta);a.helpNextScroll=now+100;}
+                    continue;
+                }
+            }
             if(ev.type==SDL_KEYDOWN && (ev.key.keysym.sym==SDLK_UP || ev.key.keysym.sym==SDLK_DOWN))a.menuPointerVisible=false;
             if(ev.type==SDL_MOUSEMOTION || ev.type==SDL_MOUSEBUTTONDOWN) {
                 const auto point=a.gfx.mousePoint(ev.type==SDL_MOUSEMOTION?ev.motion.x:ev.button.x,ev.type==SDL_MOUSEMOTION?ev.motion.y:ev.button.y);
@@ -1101,6 +1109,12 @@ void handleInput(App& a) {
     }
 
     serviceOptionsHold(a,SDL_GetTicks64());
+    if(a.menu.page==vyruz::MenuPage::Controls && a.inputFocused && SDL_GetTicks64()>=a.helpNextScroll){
+        const bool pad=!a.controllerBlockedUntilNeutral;
+        const bool up=held[SDL_SCANCODE_UP]||(pad&&a.controller.button(SDL_CONTROLLER_BUTTON_DPAD_UP));
+        const bool down=held[SDL_SCANCODE_DOWN]||(pad&&a.controller.button(SDL_CONTROLLER_BUTTON_DPAD_DOWN));
+        if(up||down){a.menu.move(up?-1:1);a.helpNextScroll=SDL_GetTicks64()+100;}
+    }
     if(a.inputFocused&&a.controllerBlockedUntilNeutral&&a.controller.controlsNeutral())a.controllerBlockedUntilNeutral=false;
     if(a.demoActive){advanceDemo(a,kMoveDt*1000);return;}
     if(modal){

@@ -41,7 +41,7 @@ void MenuView::show(bool& paused,bool main) {
     selected=0;error.clear();pending_=MenuAction::None;
 }
 void MenuView::showOptions(){parent_=page;page=MenuPage::Options;selected=0;error.clear();}
-void MenuView::showSavedSessions(){saveParent_=page;page=MenuPage::SavedSessions;selected=int(entries().size())-1;selectedSave=-1;error.clear();}
+void MenuView::showSavedSessions(){saveFirst_=0;saveParent_=page;page=MenuPage::SavedSessions;selected=int(entries().size())-1;selectedSave=-1;error.clear();}
 void MenuView::close(bool& paused) {
     if(!open())return;
     page=MenuPage::Closed;paused=wasPaused_;error.clear();
@@ -61,7 +61,19 @@ std::vector<MenuEntry> MenuView::entries() const {
     case MenuPage::Debug:return {{"Level select",MenuAction::DebugLevels},{debugAI?"Enemy AI: ON":"Enemy AI: OFF",MenuAction::DebugAI},{debugGod?"God mode: ON":"God mode: OFF",MenuAction::DebugGod},{"Fill all ammo",MenuAction::DebugAmmo},{"Add 1,000,000 money",MenuAction::DebugMoney},{"Surprises",MenuAction::DebugSurprises},{"Back",MenuAction::None}};
     case MenuPage::DebugLevels:{std::vector<MenuEntry> rows;for(const auto& path:debugLevels())rows.push_back({path.substr(0,path.size()-4),MenuAction::DebugSelectLevel});return rows;}
     case MenuPage::DebugSurprises:{std::vector<MenuEntry> rows={{"Clear active Surprise",MenuAction::DebugSelectSurprise}};for(int id=1;id<=int(SurpriseKind::Nop);++id)rows.push_back({surpriseName(static_cast<SurpriseKind>(id)),MenuAction::DebugSelectSurprise});return rows;}
-    case MenuPage::Controls:return {{"Back",MenuAction::None}};
+    case MenuPage::Controls:{
+        std::vector<MenuEntry> rows;size_t begin=0;
+        while(begin<controlsHelp.size()){
+            const auto end=controlsHelp.find('\n',begin);
+            auto label=controlsHelp.substr(begin,end==std::string::npos?end:end-begin);
+            if(!label.empty()&&label.back()=='\r')label.pop_back();
+            if(!label.empty())rows.push_back({std::move(label),MenuAction::None});
+            if(end==std::string::npos)break;
+            begin=end+1;
+        }
+        if(rows.size()<ListVisible)rows.push_back({"",MenuAction::None});
+        rows.push_back({"Back",MenuAction::None});return rows;
+    }
     case MenuPage::Confirm:return {{"Cancel",MenuAction::None},{"Confirm",pending_}};
     default:return {};
     }
@@ -91,17 +103,52 @@ void MenuView::back(bool& paused) {
     else if(page==MenuPage::Game)close(paused);
     else if(page==MenuPage::Controls||page==MenuPage::Confirm||page==MenuPage::Options){page=parent_;selected=0;}
 }
+int MenuView::listRowCount() const {
+    if(page==MenuPage::SavedSessions)return int(saveLabels.size());
+    const auto rows=entries();int count=int(rows.size())-1;
+    if(count>0&&rows[count-1].label.empty())--count;
+    return std::max(0,count);
+}
+int MenuView::firstRow() const {
+    if(!panelList())return paginated()?selected/10*10:0;
+    const int count=listRowCount();
+    saveFirst_=std::clamp(saveFirst_,0,std::max(0,count-7));
+    if(selected>=0 && selected<count){
+        if(selected<saveFirst_)saveFirst_=selected;
+        if(selected>=saveFirst_+7)saveFirst_=selected-6;
+    }
+    return saveFirst_;
+}
+std::vector<int> MenuView::visibleRows() const {
+    const int count=int(entries().size()),first=firstRow();std::vector<int> result;
+    if(panelList()){
+        const int size=listRowCount();
+        for(int i=first;i<std::min(size,first+ListVisible);++i)result.push_back(i);
+        if(size<ListVisible)result.push_back(count-2); // Native blank spacer.
+        result.push_back(count-1); // Back stays in the original panel.
+    }else for(int i=first;i<std::min(count,first+10);++i)result.push_back(i);
+    return result;
+}
+int MenuView::rowBaseline(int index) const {
+    if(panelList() && index==int(entries().size())-1)
+        return rowTop()+std::min(int(entries().size())-1,7)*rowHeight();
+    return rowTop()+(index-firstRow())*rowHeight();
+}
 void MenuView::move(int delta) {
     const auto rows=entries();const int n=rows.size();if(!n)return;
     do{selected=((selected+delta)%n+n)%n;}while(delta && rows[selected].label.empty());
 }
 bool MenuView::hover(float x,float y) {
     const auto rows=entries();
-    const int top=rowTop()-30;
-    if(x<rowLeft()||x>=rowLeft()+Width||y<top||y>=top+rowHeight()*std::min<size_t>(10,rows.size()-firstRow()))return false;
-    const int hit=static_cast<int>((y-top)/rowHeight()+firstRow());
-    if(rows[hit].label.empty())return false;
-    selected=hit;return true;
+    if(x<rowLeft()||x>=(panelList()?ListRight:rowLeft()+Width))return false;
+    for(int hit:visibleRows()){
+        const int top=rowBaseline(hit)-30;
+        if(y>=top && y<top+rowHeight()){
+            if(rows[hit].label.empty())return false;
+            selected=hit;return true;
+        }
+    }
+    return false;
 }
 MenuAction MenuView::activate(bool& paused) {
     const auto rows=entries();if(selected<0||static_cast<size_t>(selected)>=rows.size())return MenuAction::None;
@@ -127,10 +174,10 @@ MenuAction MenuView::activate(bool& paused) {
         if(action==MenuAction::None)back(paused);
         return action;
     }
-    if(page==MenuPage::Controls){back(paused);return MenuAction::None;}
+    if(page==MenuPage::Controls){if(selected==int(rows.size())-1)back(paused);return MenuAction::None;}
     if(action==MenuAction::Options)return action;
     if(action==MenuAction::Resume){close(paused);return MenuAction::Resume;}
-    if(action==MenuAction::Controls){parent_=page;page=MenuPage::Controls;selected=0;return MenuAction::None;}
+    if(action==MenuAction::Controls){parent_=page;page=MenuPage::Controls;saveFirst_=0;selected=int(entries().size())-1;return MenuAction::None;}
     if(action==MenuAction::LoadGame || (action==MenuAction::NewGame&&page==MenuPage::Main))return action;
     parent_=page;pending_=action;page=MenuPage::Confirm;selected=0;
     return MenuAction::None;
