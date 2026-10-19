@@ -12,99 +12,75 @@ is an experimental community project; reports and contributions are welcome.
 the 2000 game by C2V.** It is a native reimplementation based on direct reverse
 engineering. You must supply your own original game data.
 
-## Get started
+## How to run
 
-Download the package for your platform from **[GitHub Releases](https://github.com/rzrbld/vurus/releases/latest)**.
-Releases contain the validated Linux, Windows and macOS builds plus SHA-256 checksums.
-Use the included `SHA256SUMS.txt` to verify your downloaded package.
-Optional development/testing builds are available as artifacts under
-[Actions → Desktop builds](https://github.com/rzrbld/vurus/actions/workflows/build-desktop.yml);
-these are temporary CI artifacts, not the main release downloads.
-Extract into a writable folder; settings, imported data and saves live beside
-the executable.
+Download your platform's package from **[GitHub Releases](https://github.com/rzrbld/vurus/releases)**
+and verify it with the accompanying `SHA256SUMS.txt`. Desktop and PortMaster
+packages are listed separately. CI artifacts are optional testing builds.
+You need your own original game disc image or extracted resources.
 
-- **Linux / Steam Deck:** put your original ISO or single-BIN CUE/BIN beside
-  `vurus` and `launch.sh`, then run `./launch.sh`.
-- **Windows:** run `vurus.exe --data "path\to\game.iso"` in a terminal.
-- **macOS:** run `./vurus --data /path/to/game.iso` in a terminal. Builds are
-  unsigned and not notarized; macOS security prompts may require user approval.
+### Desktop and Steam Deck
 
-First startup shows extraction and CD-music import progress. Existing archives
-and extracted resource directories also work with `--data`. No original game
-files are downloaded or included. See [the player guide](packaging/README.txt)
-for controls, storage and command-line options. The v0.1.0 release passed native
-builds and tests on all four platforms; physical hardware testing remains ongoing.
+Extract the package into a writable folder.
 
-## PortMaster Alpha Preview
+- **Linux / Steam Deck:** place your original ISO or single-BIN CUE/BIN beside
+  `vurus` and `launch.sh`, then run `./launch.sh`. On Steam Deck, start from
+  Desktop Mode; the launcher can also be added as a non-Steam game.
+- **Windows:** place the original disc image beside `vurus.exe` and run it.
+  You can also select resources with `vurus.exe --data "path\to\game.iso"`.
+- **macOS:** run `./vurus --data /path/to/game.iso` in a terminal. Builds require
+  macOS 15 or later and are unsigned/not notarized.
 
-ARM64 handheld builds use OpenGL ES 3.0 and a separate
-[PortMaster CI workflow](https://github.com/rzrbld/vurus/actions/workflows/build-portmaster.yml).
-Download the [PortMaster Alpha Preview](https://github.com/rzrbld/vurus/releases/tag/portmaster-v0.1.0-alpha.1).
-CI artifacts remain available for development testing.
-Desktop and handheld releases do not need to happen together.
-See [installation and limitations](packaging/portmaster/README.txt).
+### Handhelds with PortMaster
 
-On an Anbernic RG40XX H running muOS, the user reports roughly 30–40 FPS
-with FX and terrain effects disabled, with low-20s dips in heavy battles.
-These are observations, not guarantees; long-session testing continues.
-This is an optimized Release build labeled Alpha Preview, not an official
-PortMaster catalog release. Original game data is required.
+Requires an **ARM64 device with OpenGL ES 3.0 or later**, running muOS or another
+PortMaster-compatible firmware.
 
-## Modern display and usability features
+1. Install PortMaster on your device.
+2. Extract `Vurus.sh` and the `vurus/` folder together into the firmware's
+   `ports` directory.
+3. Place your original ISO or single-BIN CUE/BIN inside `vurus/`, beside
+   `vurus.aarch64`. Alternatively, copy an existing imported `data/` folder there.
+4. Start **Vurus** from the firmware's Ports menu. The first launch imports the
+   resources and CD music, with progress and controller navigation.
 
-- **Widescreen and ultrawide support:** aspect ratios from 1:1 through 32:9,
-  with resolution presets from 640×480 through 4K and 8K and custom window sizes,
-  including 1280×800, 3440×1440 and 5120×1440.
-  Available fullscreen modes depend on your display and driver.
-- **Independent HUD layout:** Auto follows the window aspect ratio; manual HUD
-  aspect settings leave the camera and backgrounds unchanged.
-- **Windowed, fullscreen and borderless modes**, sprite filtering and optional
-  FXAA/SMAA, CRT/Retro/Bright shaders, bloom, sharpening and vignette. Availability
-  depends on platform; FXAA and SMAA cannot be enabled together.
-- **Keyboard, mouse and controller controls:** remapping, stick/D-pad menu
-  navigation. Control → Sensitivity groups move/aim sensitivity and stick deadzone;
-  the Crosshair switch follows Aim assist and defaults to On.
-- **Enemy-only controller aim assistance:** Off, Slight, Medium, Full and
-  Retaliate (the last enemy whose projectile damaged you), with terrain visibility
-  checks. Destructible scenery is excluded.
-- **Debug tools:** `--debug` enables the testing menu, FPS/frame-time display
-  and Linux memory breakdown; normal launches keep testing controls hidden.
+Keep your existing `data/`, saves and settings when upgrading. See the
+[handheld installation guide](packaging/portmaster/README.txt) for details.
+Desktop first launch also shows import progress. No original game files are
+included or downloaded. The [player guide](packaging/README.txt) covers controls,
+settings and command-line options.
 
-## Saving improvements in v0.1.2
+## Port Features
 
-Saves now encode and write in the background, with a Saving indicator. New
-checkpoints use lossless zlib compression, preserving all game state. A local
-single-level checkpoint shrank from 7.56 MB to 0.63 MB; a synthetic large checkpoint
-from 196.6 MB to 16.3 MB (about 92% smaller). Results depend on saved state. These are
-desktop measurements, not Steam Deck performance guarantees.
+- **Native Linux, Windows and macOS builds**, with Steam Deck and ARM64
+  PortMaster handheld support.
+- **OpenGL rendering** on desktop and **OpenGL ES** on handhelds.
+- **Widescreen and ultrawide support**, multiple resolutions, adaptive HUD,
+  windowed/fullscreen/borderless modes.
+- **Optional CRT, Retro and Bright shaders**, sprite filtering, FXAA/SMAA,
+  bloom and sharpening. Desktop post-processing is unavailable in the GLES build;
+  SMAA is unavailable on macOS.
+- **Keyboard, mouse and controller support**, remappable controls and
+  controller aim assistance for Steam Deck and handheld play.
 
-Old uncompressed saves remain readable. **Older Vurus builds cannot read newly
-compressed saves.** Existing files are not converted automatically. Atomic writes,
-save fees and failure protection are retained.
+## Performance
 
-## Performance notes
+Recent development-build tests on **Anbernic RG40XX H** (Allwinner H700,
+1 GB RAM, muOS, 640×480):
 
-[Version 0.1.3](https://github.com/rzrbld/vurus/releases/tag/v0.1.3) reduces retained world/snapshot data, streams music
-and intro video, recycles released transient effects and stores decoded sprites
-in compact 16-bit form. Gameplay, animation and filtering regression checks accompany
-these changes; native-resolution rendering remains unchanged.
+| Saved-scene test | Frame rate |
+| --- | ---: |
+| CAVE/T1C1 | ~31 FPS |
+| CAVE/T1C2 | ~32 FPS |
 
-The user reports ordinary gameplay RSS of approximately **170–250 MB**, compared
-with **500–700 MB** before this series. This is an observation across sessions,
-not a matched benchmark or minimum RAM requirement. The improvements are included
-in desktop v0.1.3 and the PortMaster Alpha Preview.
+Separate short on-device samples used approximately **131–140 MiB RSS**;
+longer user sessions reported around **190–210 MiB**. These are process-memory
+observations, not total device RAM or guaranteed peaks.
 
-Controlled examples include fresh snapshot allocations falling from **12–16 MiB
-to 2.5–3.5 MiB**, and the decoded sprite corpus from **57.15 to 28.58 MiB**. Neither
-figure represents total process memory. In a matched final-level CPU workload,
-World median/p95 time changed from **0.186/0.366 ms to 0.175/0.351 ms** per step;
-this excludes rendering/audio and is not a hardware FPS claim.
-
-See the [performance and memory report](docs/performance_update_2026-10-19.md)
-for workload details, percentile timings, limitations and validation. Resolution,
-optional shaders and driver allocations still affect memory and GPU cost.
-Use `--debug` for FPS/frame-time and Linux RSS/PSS, or `--profile-frames 1200`
-for a frame-timing report. Device testing remains separate from host benchmarks.
+The FPS tests used stationary saved scenes, normal audio/music, shadows/reactor
+FX/vignette On, ground details Off and sprite filtering Off. Busy combat can
+run slower. See the [performance report](docs/performance_update_2026-10-19.md)
+for conditions and measurement details.
 
 ## Screenshots
 
@@ -119,12 +95,11 @@ battle captures with player damage disabled.
 
 **Screen shader: Retro** — CRT effect with warm color correction.
 
-### CAVE/T2C2 — Default
+### CAVE/T2C2 — No Shader
 
 ![Rocket battle on CAVE/T2C2 with screen shader disabled](docs/screenshots/t2c2-default-800p.png)
 
-**Screen shader: Off** — FXAA and Trilinear remain enabled; “Default” here refers
-only to the screen shader.
+**Screen shader: Off** — FXAA and Trilinear filtering remain enabled.
 
 ### CPU/T3P1 — Bright
 
@@ -147,45 +122,39 @@ being reimplemented; this project claims no ownership of the original content.
 Any license applying to Vurus's code does not grant rights to original game
 assets or third-party names and logos.
 
-## Controls and options
+## Quick start build
 
-Keyboard/mouse and SDL2 controllers are supported. In menus, use arrows/Enter,
-left stick or D-pad/A, or mouse; B/Escape goes back. Right stick aims and the right
-trigger fires. Controls are remappable. Optional controller aim assistance has
-Off, Slight, Medium, Full and Retaliate modes; it targets enemies, never destructible scenery.
+### Desktop
 
-Video → Effects contains Reactor FX, Ground / smoke and Shadows.
-Video → Frame cap offers 30 / 60 / Uncapped (default 60), while gameplay stays
-at 60 Hz. Video → Advanced includes window/fullscreen/borderless modes,
-independent HUD aspect, sprite filtering and VSync On/Off (default On).
-VSync can still limit uncapped rendering; turn it Off for fully uncapped output.
-`--fps 60|90` overrides the saved frame cap for one run.
-Advanced → Scene effects contains Vignette, Off/CRT/Retro/Bright screen shaders,
-mutually exclusive FXAA/SMAA, and optional bloom and sharpening.
-SMAA is unavailable on macOS's legacy OpenGL path. Audio has separate effects,
-voices, music and menu sounds. `--debug` enables the testing menu, FPS/frame-time
-counter and F2 shortcut; ordinary launches hide them.
-
-## Build
-
-Requires a C++20 compiler, CMake, Rust/Cargo (CI pins 1.99.0), SDL2 and OpenGL development files.
-The Indeo decoder builds offline from the vendored source, without Cargo packages.
+Requires a C++20 compiler, CMake, Rust/Cargo, SDL2, OpenGL and zlib development
+files. From the source directory:
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
 cmake --build build --config Release --parallel 2
 ctest --test-dir build -C Release --output-on-failure --parallel 2
-./build/vurus --data /path/to/game.iso
 ```
 
-On Linux, install `g++ cmake libsdl2-dev zlib1g-dev libgl1-mesa-dev` and Rust. Package with
-`sh packaging/package_linux.sh build dist`. On Windows use Visual Studio 2022
-and a Windows SDK; macOS needs Xcode command-line tools. Windows/macOS builds
-use SDL2 source via `-DVYRUZ_SDL_SOURCE=/absolute/path/to/SDL`, then
-`cmake --build build --config Release --target package` creates a portable ZIP.
-The included Actions workflow builds Linux x64, Windows x64, macOS arm64 and
-macOS x64. macOS targets version 15 or later. OS libraries and graphics drivers
-remain dependencies; this is not a completely static OS-independent executable.
+Windows/macOS builds need additional SDL2/zlib source configuration; see the
+[full build guide](docs/building.md#desktop-builds).
+
+### Handheld / PortMaster
+
+Use an ARM64 Docker host, or Docker configured for ARM64 emulation:
+
+```sh
+docker build --platform linux/arm64 -t vurus-portmaster-builder:local packaging/portmaster
+mkdir -p work/portmaster-build dist/portmaster
+docker run --rm --platform linux/arm64 \
+  -v "$PWD:/source:ro" \
+  -v "$PWD/work/portmaster-build:/build" \
+  -v "$PWD/dist/portmaster:/dist" \
+  vurus-portmaster-builder:local sh /source/tools/build_portmaster.sh /build /dist
+```
+
+The package is `dist/portmaster/vurus-portmaster.zip`.
+The [full build guide](docs/building.md) covers dependencies, platform flags,
+packaging and the separate desktop/handheld CI workflows.
 
 ## Credits and licenses
 
@@ -195,6 +164,8 @@ remain dependencies; this is not a completely static OS-independent executable.
 - **OpenAI Codex:** AI development collaborator for implementation, reverse
   engineering, testing and documentation; not a GitHub account or an endorsement
   by OpenAI.
+- [zlib](https://zlib.net/): save compression, by Jean-loup Gailly and Mark Adler;
+  zlib license.
 - [SDL2](https://github.com/libsdl-org/SDL): windows, input and audio; zlib license.
 - [OxideAV/oxideav-indeo](https://github.com/OxideAV/oxideav-indeo): Indeo5 video
   decoder, MIT, Karpelès Lab Inc. and contributors. [Vendoring notes](third_party/oxideav-indeo/VENDORED.md).
@@ -216,12 +187,9 @@ notices remain in `third_party/` and are included with binary packages.
 
 ## Contributing
 
+
 Please include the map, reproduction steps, OS and graphics settings in bug
 reports. Do not upload original game archives, disc images, extracted assets,
 saves, credentials or private development material. Synthetic tests require no
 original game data. Game screenshots above are the selected documentation images;
 playable original resources are not part of this repository or its packages.
-
-Save compression uses [zlib](https://zlib.net/) by Jean-loup Gailly and Mark Adler;
-see [LICENSE.md](LICENSE.md). Release builds link zlib statically. Source builds
-need zlib development files, or `-DVYRUZ_ZLIB_SOURCE=/path/to/zlib`.

@@ -5,6 +5,35 @@ the PortMaster Alpha Preview. CI builds and applicable tests passed on Linux,
 Windows, both macOS architectures and ARM64 GLES. Hardware testing remains
 separate from these host measurements.
 
+## Handheld measurements — 2026-10-19
+
+Development builds tested on Anbernic RG40XX H / Allwinner H700 / Mali-G31,
+1GB RAM, muOS,640×480. Normal Ports launcher, normal audio/music, filtering Off,
+shadows/reactor/vignette On, ground details Off, VSync60Hz. No concurrent builds,
+tracing or timing instrumentation during these FPS runs.
+
+Two runs per saved scene/build,120warmup+300measured frames per launch.
+The current candidate's mean run-median frame times were:
+
+| Saved scene | Median frame time | Approximate FPS | Frame p95 / p99 |
+| --- | ---: | ---: | ---: |
+| CAVE/T1C1 |31.8745ms|31.37|33.501 /40.542ms|
+| CAVE/T1C2 |30.8150ms|32.45|34.027 /40.666ms|
+
+FPS is the reciprocal of the mean of two run medians, not arithmetic mean FPS.
+All runs dropped zero simulation ticks. Initial populations were985live actors
+among1225records for T1C1 and697among1756 for T1C2. These were stationary saved
+scenes, without player movement/firing, not full-level or heavy-combat averages.
+The profiler did not measure final live/channel populations; starting counts
+must not be treated as final counts.
+
+Separate short on-device captures recorded RSS133,988KiB (~130.8MiB) on T1C1
+and143,728KiB (~140.4MiB) on T1C2. These RAM samples were not taken from the
+same untraced FPS runs. Longer user sessions reported roughly190–210MiB RSS;
+that is a separate observation without matched scene/settings. Neither memory
+figure is a peak guarantee or total system/GPU RAM consumption. Busy encounters
+can run slower; the results do not establish60FPS or all-device performance.
+
 ## Observed memory use
 
 The user reports ordinary gameplay RSS falling from approximately **500–700 MB
