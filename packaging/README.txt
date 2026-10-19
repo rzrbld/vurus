@@ -38,9 +38,13 @@ Options / Video / Advanced / Mode: Windowed, Fullscreen (exclusive), Borderless 
 display resolution; unavailable changes retain the prior setting. Borderless
 fullscreen uses the desktop size. Unavailable saved modes fall back to Windowed
 for that run. Existing HUD aspect, brightness and filtering options are retained.
-Video / Advanced / Vignette toggles original shaded gameplay screen edges
+Video / Effects: Reactor FX, Ground / smoke, Shadows.
+Video / Frame cap: 30 / 60 / Uncapped (default 60); gameplay stays at 60 Hz.
+Video / Advanced / VSync: On/Off (default On). VSync may limit uncapped rendering.
+Use VSync Off for fully uncapped rendering; --fps overrides the saved cap.
+Video / Advanced / Scene effects / Vignette toggles original shaded gameplay screen edges
 (default On); HUD panels stay clear.
-Video / Advanced / CRT shader toggles MAME-PSGS curvature, scanlines and phosphor
+Video / Advanced / Scene effects / Screen shader toggles MAME-PSGS curvature, scanlines and phosphor
 mask (default Off). Requires OpenGL2.1 shader support and adds GPU work. Off
 restores normal rendering. Apache2.0 license/notices are in LICENSES and --licenses.
 Extras / Controls help shows current bindings; arrows, D-pad or wheel scroll;
@@ -162,7 +166,7 @@ Launch, data and user files
     Load a standard SDL2 controller mapping database before setup/gameplay
     input.
   --fps 60|90
-    Select the fallback render cap when VSync is unavailable; default 60.
+    Override the saved frame cap for this run (60 or 90 FPS).
     Gameplay simulation remains 60 Hz.
 
 Audio
@@ -246,7 +250,7 @@ Explicit --data wins. Help and licenses do not require game resources.
 --debug also shows FPS, average FRAME milliseconds and MAX frame milliseconds.
 Updated every half second; includes VSync/pacing, not GPU-only timing.
 
-Video / Advanced / Screen shader: Off / CRT / Retro / Bright (warm CRT colors; Bright adds highlight glow).
+Video / Advanced / Scene effects / Screen shader: Off / CRT / Retro / Bright (warm CRT colors; Bright adds highlight glow).
 Scene effects: FXAA, SMAA, Subtle bloom and Gentle sharpening, all default Off.
 FXAA and SMAA exclude each other. SMAA requires OpenGL 3.0 and uses three passes.
 Bloom and sharpening are independent, with or without CRT. Filters apply

@@ -24,6 +24,7 @@ public:
     void shutdown();
 
     bool vsyncEnabled() const { return vsync_; }
+    bool setVsync(bool enabled,std::string& error);
     int windowWidth() const { return winW_; }
     int windowHeight() const { return winH_; }
     Viewport viewport() const {return Viewport::fit(winW_,winH_);}

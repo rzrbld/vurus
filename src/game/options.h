@@ -19,6 +19,8 @@ struct GameOptions {
     int width = 1280, height = 960;
 #endif
     int windowMode = 0; // Windowed, exclusive Fullscreen, Borderless fullscreen, Borderless window.
+    bool vsync = true; // Synchronize presentation; software cap remains when disabled.
+    int frameCap = 60; // Presentation only: 0 uncapped, 30 or 60 FPS.
     int gamma = 50; // Bounded port brightness: 0..100, neutral50; legacy key retained.
     int spriteFiltering = 0; // Off, Bilinear, Trilinear (port presentation option).
     bool fxaa=false,bloom=false,sharpen=false; // Optional scene-only filters.

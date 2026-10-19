@@ -18,6 +18,9 @@ bool applyOptionsRuntime(App& a,const vyruz::GameOptions& o,std::string& error,b
     a.hud.setLanguage(o.hudLanguage);a.world.setHudLanguage(o.hudLanguage);
     if(!vyruz::applyWindowVideo(a.window,o.windowMode,o.width,o.height,resizeWindow,a.windowedBounds,error)){if(displayFailure)*displayFailure=true;return false;}
     int w=0,h=0;SDL_GetWindowSize(a.window,&w,&h);a.gfx.resize(w,h);
+    // Preserve startup's software fallback on displays without swap control;
+    // disabling must actually succeed; enabling may retain the software cap.
+    if(!a.gfx.setVsync(o.vsync,error) && !o.vsync)return false;
 #if VYRUZ_GLES
     // A copied desktop config must not prevent handheld startup or audio edits.
     if(!a.gfx.setCRT(false,error)||!a.gfx.setSceneEffects(false,false,false,error,false))return false;
@@ -69,9 +72,8 @@ void refreshOptions(App& a) {
         m.optionHelp={"Resolution, brightness and visual detail.","Music, Sound FX, Quality, Frequency, Mono/Stereo.","Input device, Key settings.","User name, Game difficulty level.",""};break;
     case 1: {
         m.optionTitle="Video";m.optionLabels={"Resolution: "+std::to_string(a.gfx.windowWidth())+" x "+std::to_string(a.gfx.windowHeight()),
-            "Brightness: "+std::to_string(o.gamma),"Reactor FX: "+std::string(on(o.reactorFx)),
-            "Ground / smoke: "+std::string(on(o.groundDetails)),"Shadows: "+std::string(on(o.shadows)),"Advanced","Reset video","Back"};
-        m.optionHelp={"","Adjust midtones. 50 is neutral; black and white stay unchanged.","","","","Display mode, HUD aspect and sprite filtering.","",""};break;
+            "Brightness: "+std::to_string(o.gamma),"Effects","Frame cap: "+(o.frameCap?std::to_string(o.frameCap):std::string("Uncapped")),"Advanced","Reset video","Back"};
+        m.optionHelp={"","Adjust midtones. 50 is neutral; black and white stay unchanged.","Reactor FX, ground details/smoke and shadows.","30 / 60 / Uncapped. Gameplay stays at 60 Hz. VSync may limit uncapped rendering; --fps overrides this setting.","Display mode, HUD aspect, filtering and VSync.","",""};break;
     }
     case 2:
         m.optionTitle="Audio";m.optionLabels={"Sound FX: "+std::string(on(o.soundFx)),"Voices: "+std::string(on(o.voices)),"Music: "+std::string(on(o.music)),
@@ -82,10 +84,11 @@ void refreshOptions(App& a) {
         std::string aspect(vyruz::HudAspects[o.hudAspect].name);
         if(o.hudAspect==0){const float actual=float(a.gfx.windowWidth())/std::max(1,a.gfx.windowHeight());const auto closest=std::min_element(vyruz::HudAspects.begin()+1,vyruz::HudAspects.end(),[&](const auto& l,const auto& r){return std::abs(actual-float(l.numerator)/l.denominator)<std::abs(actual-float(r.numerator)/r.denominator);});aspect+=" ("+(std::abs(actual-float(closest->numerator)/closest->denominator)<actual*.03f?std::string(closest->name):std::string("window"))+")";}
         m.optionTitle="Advanced video";m.optionLabels={"Mode: "+std::string(o.windowMode==0?"Windowed":o.windowMode==1?"Fullscreen":o.windowMode==2?"Borderless fullscreen":"Borderless window"),"HUD aspect: "+aspect,
-            "Sprite filtering: "+std::string(o.spriteFiltering==0?"Off":o.spriteFiltering==1?"Bilinear":"Trilinear"),"Vignette: "+std::string(on(o.vignette)),"Screen shader: "+std::string(!o.crt?"Off":o.crtBright?"Bright":o.crtRetro?"Retro":"CRT"),"Scene effects","FPS counter: "+std::string(on(o.fpsCounter)),"Reset advanced","Back"};
-        m.optionHelp={"Windowed / Fullscreen / Borderless fullscreen (desktop resolution) / Borderless window.","Auto follows the window. Manual ratios change only the HUD; camera and backgrounds stay unchanged.","Smooth world sprites. Off keeps sharp pixels. Trilinear also filters reduced sprites.","Original shaded screen edges. The HUD remains clear.","Off / CRT / Retro / Bright. Retro is warm; Bright adds a soft highlight glow.","FXAA, subtle bloom and gentle sharpening for the scene; HUD stays crisp.","Show rendered frames per second, averaged over half a second.","",""};break;
+            "Sprite filtering: "+std::string(o.spriteFiltering==0?"Off":o.spriteFiltering==1?"Bilinear":"Trilinear"),"VSync: "+std::string(on(o.vsync)),"Scene effects","FPS counter: "+std::string(on(o.fpsCounter)),"Reset advanced","Back"};
+        m.optionHelp={"Windowed / Fullscreen / Borderless fullscreen (desktop resolution) / Borderless window.","Auto follows the window. Manual ratios change only the HUD; camera and backgrounds stay unchanged.","Smooth world sprites. Off keeps sharp pixels. Trilinear also filters reduced sprites.","Synchronize frames with the display. Off uses the software render cap.","Screen shaders, vignette, antialiasing, bloom and sharpening.","Show rendered frames per second, averaged over half a second.","",""};break;
     }
-    case 14:m.optionTitle="Scene effects";m.optionLabels={"FXAA: "+std::string(on(o.fxaa)),"SMAA: "+std::string(on(o.smaa)),"Subtle bloom: "+std::string(on(o.bloom)),"Gentle sharpening: "+std::string(on(o.sharpen)),"Reset effects","Back"};m.optionHelp={"Smooth jagged scene edges. May soften fine detail.","SMAA 1x Medium. Disables FXAA; requires OpenGL 3.0.","Soft glow around bright scene highlights.","Mild local contrast with bounded halos.","Turn all scene effects off.",""};
+    case 16:m.optionTitle="Effects";m.optionLabels={"Reactor FX: "+std::string(on(o.reactorFx)),"Ground / smoke: "+std::string(on(o.groundDetails)),"Shadows: "+std::string(on(o.shadows)),"Back"};m.optionHelp={"Vehicle reactor effects.","Ground details and smoke.","Actor shadows.",""};break;
+    case 14:m.optionTitle="Scene effects";m.optionLabels={"FXAA: "+std::string(on(o.fxaa)),"SMAA: "+std::string(on(o.smaa)),"Subtle bloom: "+std::string(on(o.bloom)),"Gentle sharpening: "+std::string(on(o.sharpen)),"Screen shader: "+std::string(!o.crt?"Off":o.crtBright?"Bright":o.crtRetro?"Retro":"CRT"),"Vignette: "+std::string(on(o.vignette)),"Reset effects","Back"};m.optionHelp={"Smooth jagged scene edges. May soften fine detail.","SMAA 1x Medium. Disables FXAA; requires OpenGL 3.0.","Soft glow around bright scene highlights.","Mild local contrast with bounded halos.","Off / CRT / Retro / Bright. Retro is warm; Bright adds a soft highlight glow.","Original shaded screen edges. The HUD remains clear.","Restore scene effect defaults.",""};
 #if defined(VYRUZ_ENABLE_SMAA) && !VYRUZ_ENABLE_SMAA
         m.optionLabels[1]="SMAA: unavailable";m.optionHelp[1]="Unavailable in this platform build. Use FXAA instead.";
 #endif
@@ -123,9 +126,11 @@ void refreshOptions(App& a) {
     case 7:m.optionTitle="Mouse";m.optionLabels={std::string("Fire: ")+optionMouseName(o.fireButton),std::string("Forward: ")+optionMouseName(o.thrustButton),"Back"};break;
     }
 #if VYRUZ_GLES
-    if(a.optionsPage==8){m.optionLabels[4]="Screen shader: unavailable";m.optionHelp[4]="Post-processing is disabled in this handheld build.";}
+    if(a.optionsPage==14){m.optionLabels[4]="Screen shader: unavailable";m.optionHelp[4]="Post-processing is disabled in this handheld build.";}
     if(a.optionsPage==14)for(int i=0;i<4;++i){m.optionLabels[i]=std::string(i==0?"FXAA":i==1?"SMAA":i==2?"Subtle bloom":"Gentle sharpening")+": unavailable";m.optionHelp[i]="Post-processing is disabled in this handheld build.";}
 #endif
+    if(a.optionsPage==8 && o.vsync && !a.gfx.vsyncEnabled())
+        m.optionHelp[3]="VSync is unavailable on this display; the software render cap is active.";
     m.selected=std::clamp(m.selected,0,int(m.optionLabels.size())-1);
 }
 void refreshMenuContext(App& a) {
@@ -159,7 +164,7 @@ void optionsBack(App& a) {
     a.menuHold.reset();
     if(a.bindingCapture){a.bindingCapture=0;SDL_StopTextInput();a.menu.error.clear();refreshOptions(a);return;}
     if(a.optionsPage==0)a.menu.back(a.paused);
-    else {a.optionsPage=a.optionsPage==15?3:(a.optionsPage==13||a.optionsPage==14)?8:a.optionsPage==8?1:a.optionsPage>=9?2:a.optionsPage>=5?3:0;a.menu.selected=0;refreshOptions(a);}
+    else {a.optionsPage=a.optionsPage==16?1:a.optionsPage==15?3:(a.optionsPage==13||a.optionsPage==14)?8:a.optionsPage==8?1:a.optionsPage>=9?2:a.optionsPage>=5?3:0;a.menu.selected=0;refreshOptions(a);}
     a.suppressFireUntilRelease=true;
 }
 template<size_t N> int nextOption(int current,const int (&values)[N],int step) {
@@ -174,8 +179,9 @@ void changeOption(App& a,int step=1) {
         a.optionsPage=row+1;a.menu.selected=0;refreshOptions(a);return;
     }
     if(a.optionsPage==1) {
-        if(row==7){optionsBack(a);return;}
-        if(row==5){a.optionsPage=8;a.menu.selected=0;refreshOptions(a);return;}
+        if(row==6){optionsBack(a);return;}
+        if(row==2){a.optionsPage=16;a.menu.selected=0;refreshOptions(a);return;}
+        if(row==4){a.optionsPage=8;a.menu.selected=0;refreshOptions(a);return;}
         if(row==0) {
             if(next.windowMode==2){a.menu.error="Borderless fullscreen uses the desktop resolution";return;}
             if(a.resolutions.empty()) {
@@ -193,34 +199,34 @@ void changeOption(App& a,int step=1) {
             const int index=found==a.resolutions.end()?0:int(found-a.resolutions.begin());
             const auto mode=a.resolutions[(index+step+int(a.resolutions.size()))%a.resolutions.size()];next.width=mode.first;next.height=mode.second;
         } else if(row==1)next.gamma=std::clamp(next.gamma+step*5,0,100);
-        else if(row==2)next.reactorFx=!next.reactorFx;
-        else if(row==3)next.groundDetails=!next.groundDetails;
-        else if(row==4)next.shadows=!next.shadows;
-        else {next.windowMode=defaults.windowMode;next.shadows=defaults.shadows;next.width=defaults.width;next.height=defaults.height;next.gamma=defaults.gamma;next.fpsCounter=defaults.fpsCounter;next.vignette=defaults.vignette;next.crt=defaults.crt;next.crtRetro=defaults.crtRetro;next.crtBright=defaults.crtBright;next.fxaa=defaults.fxaa;next.smaa=defaults.smaa;next.bloom=defaults.bloom;next.sharpen=defaults.sharpen;next.spriteFiltering=defaults.spriteFiltering;next.hudAspect=defaults.hudAspect;next.reactorFx=defaults.reactorFx;next.groundDetails=defaults.groundDetails;}
+        else if(row==3)next.frameCap=nextOption(next.frameCap,{30,60,0},step);
+        else {next.frameCap=defaults.frameCap;next.vsync=defaults.vsync;next.windowMode=defaults.windowMode;next.shadows=defaults.shadows;next.width=defaults.width;next.height=defaults.height;next.gamma=defaults.gamma;next.fpsCounter=defaults.fpsCounter;next.vignette=defaults.vignette;next.crt=defaults.crt;next.crtRetro=defaults.crtRetro;next.crtBright=defaults.crtBright;next.fxaa=defaults.fxaa;next.smaa=defaults.smaa;next.bloom=defaults.bloom;next.sharpen=defaults.sharpen;next.spriteFiltering=defaults.spriteFiltering;next.hudAspect=defaults.hudAspect;next.reactorFx=defaults.reactorFx;next.groundDetails=defaults.groundDetails;}
+    } else if(a.optionsPage==16){
+        if(row==3){optionsBack(a);return;}
+        if(row==0)next.reactorFx=!next.reactorFx;
+        else if(row==1)next.groundDetails=!next.groundDetails;
+        else if(row==2)next.shadows=!next.shadows;
     } else if(a.optionsPage==8){
-        if(row==8){optionsBack(a);return;}
-        if(row==6)next.fpsCounter=!next.fpsCounter;
-        else if(row==5){a.optionsPage=14;a.menu.selected=0;refreshOptions(a);return;}
+        if(row==7){optionsBack(a);return;}
+        if(row==5)next.fpsCounter=!next.fpsCounter;
+        else if(row==4){a.optionsPage=14;a.menu.selected=0;refreshOptions(a);return;}
         else if(row==0){a.optionsPage=13;a.menu.selected=next.windowMode;refreshOptions(a);return;}
         else if(row==1)next.hudAspect=(next.hudAspect+step+int(vyruz::HudAspects.size()))%int(vyruz::HudAspects.size());
         else if(row==2)next.spriteFiltering=nextOption(next.spriteFiltering,{0,1,2},step);
-        else if(row==3)next.vignette=!next.vignette;
-        else if(row==4){
-#if VYRUZ_GLES
-            a.menu.error="Screen shaders are unavailable in this build";return;
-#endif
-            const int mode=((next.crt?(next.crtBright?3:next.crtRetro?2:1):0)+step+4)%4;next.crt=mode!=0;next.crtRetro=mode>=2;next.crtBright=mode==3;}
-        else {next.fpsCounter=defaults.fpsCounter;next.windowMode=defaults.windowMode;next.hudAspect=defaults.hudAspect;next.spriteFiltering=defaults.spriteFiltering;next.vignette=defaults.vignette;next.crt=defaults.crt;next.crtRetro=defaults.crtRetro;next.crtBright=defaults.crtBright;next.fxaa=defaults.fxaa;next.smaa=defaults.smaa;next.bloom=defaults.bloom;next.sharpen=defaults.sharpen;}
+        else if(row==3)next.vsync=!next.vsync;
+        else {next.vsync=defaults.vsync;next.fpsCounter=defaults.fpsCounter;next.windowMode=defaults.windowMode;next.hudAspect=defaults.hudAspect;next.spriteFiltering=defaults.spriteFiltering;next.vignette=defaults.vignette;next.crt=defaults.crt;next.crtRetro=defaults.crtRetro;next.crtBright=defaults.crtBright;next.fxaa=defaults.fxaa;next.smaa=defaults.smaa;next.bloom=defaults.bloom;next.sharpen=defaults.sharpen;}
     } else if(a.optionsPage==14){
-        if(row==5){optionsBack(a);return;}
+        if(row==7){optionsBack(a);return;}
 #if VYRUZ_GLES
-        if(row<4){a.menu.error="Post-processing is unavailable in this build";return;}
+        if(row<=4){a.menu.error="Post-processing is unavailable in this build";return;}
 #endif
         if(row==0){next.fxaa=!next.fxaa;if(next.fxaa)next.smaa=false;}
         else if(row==1){next.smaa=!next.smaa;if(next.smaa)next.fxaa=false;}
         else if(row==2)next.bloom=!next.bloom;
         else if(row==3)next.sharpen=!next.sharpen;
-        else next.fxaa=next.smaa=next.bloom=next.sharpen=false;
+        else if(row==4){const int mode=((next.crt?(next.crtBright?3:next.crtRetro?2:1):0)+step+4)%4;next.crt=mode!=0;next.crtRetro=mode>=2;next.crtBright=mode==3;}
+        else if(row==5)next.vignette=!next.vignette;
+        else {next.fxaa=defaults.fxaa;next.smaa=defaults.smaa;next.bloom=defaults.bloom;next.sharpen=defaults.sharpen;next.crt=defaults.crt;next.crtRetro=defaults.crtRetro;next.crtBright=defaults.crtBright;next.vignette=defaults.vignette;}
     } else if(a.optionsPage==13){
         if(row==4){optionsBack(a);return;}
         next.windowMode=row;

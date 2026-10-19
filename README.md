@@ -154,9 +154,14 @@ left stick or D-pad/A, or mouse; B/Escape goes back. Right stick aims and the ri
 trigger fires. Controls are remappable. Optional controller aim assistance has
 Off, Slight, Medium, Full and Retaliate modes; it targets enemies, never destructible scenery.
 
-Video → Advanced includes window/fullscreen/borderless modes, independent HUD
-aspect, sprite filtering, vignette and Off/CRT/Retro/Bright screen shaders.
-FXAA and SMAA are mutually exclusive, with optional bloom and sharpening.
+Video → Effects contains Reactor FX, Ground / smoke and Shadows.
+Video → Frame cap offers 30 / 60 / Uncapped (default 60), while gameplay stays
+at 60 Hz. Video → Advanced includes window/fullscreen/borderless modes,
+independent HUD aspect, sprite filtering and VSync On/Off (default On).
+VSync can still limit uncapped rendering; turn it Off for fully uncapped output.
+`--fps 60|90` overrides the saved frame cap for one run.
+Advanced → Scene effects contains Vignette, Off/CRT/Retro/Bright screen shaders,
+mutually exclusive FXAA/SMAA, and optional bloom and sharpening.
 SMAA is unavailable on macOS's legacy OpenGL path. Audio has separate effects,
 voices, music and menu sounds. `--debug` enables the testing menu, FPS/frame-time
 counter and F2 shortcut; ordinary launches hide them.

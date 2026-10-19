@@ -20,11 +20,8 @@ bool Gfx::init(SDL_Window* window) {
         std::fprintf(stderr, "SDL_GL_CreateContext failed: %s\n", SDL_GetError());
         return false;
     }
-    const char* driver=SDL_GetCurrentVideoDriver();
-    // Offscreen Mesa accepts interval 1 but has no display retrace to wait for.
-    const bool headless=driver && (!std::strcmp(driver,"offscreen") || !std::strcmp(driver,"dummy"));
-    vsync_ = !headless && SDL_GL_SetSwapInterval(1)==0 && SDL_GL_GetSwapInterval()==1;
-    if(!vsync_)SDL_GL_SetSwapInterval(0);
+    std::string swapError;
+    if(!setVsync(true,swapError)){SDL_GL_SetSwapInterval(0);vsync_=false;}
     std::printf("frame pacing: %s\n",vsync_?"VSync":"software deadline pacing (VSync unavailable)");
     SDL_GetWindowSize(window_, &winW_, &winH_);
 
@@ -47,6 +44,21 @@ bool Gfx::init(SDL_Window* window) {
     std::printf("OpenGL renderer: %s (%s)\n", renderer ? renderer : "unknown",
                 vendor ? vendor : "unknown");
     return true;
+}
+
+bool Gfx::setVsync(bool enabled,std::string& error) {
+    const char* driver=SDL_GetCurrentVideoDriver();
+    // Offscreen Mesa accepts interval1 without a display retrace. Keep the
+    // software deadline clock for offscreen/dummy contexts, as at startup.
+    const bool headless=driver && (!std::strcmp(driver,"offscreen") || !std::strcmp(driver,"dummy"));
+    const int interval=enabled && !headless?1:0;
+    if(SDL_GL_GetSwapInterval()!=interval && SDL_GL_SetSwapInterval(interval)!=0) {
+        error=std::string("VSync: ")+SDL_GetError();
+        vsync_=!headless && SDL_GL_GetSwapInterval()!=0;
+        return false;
+    }
+    vsync_=!headless && SDL_GL_GetSwapInterval()!=0;
+    error.clear();return true;
 }
 
 void Gfx::shutdown() {

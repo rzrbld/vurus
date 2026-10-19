@@ -18,6 +18,11 @@ int main(){try{
  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION,2);SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION,1);
 #endif
  auto* window=SDL_CreateWindow("Renderer test",0,0,640,480,SDL_WINDOW_OPENGL|SDL_WINDOW_HIDDEN);need(window,SDL_GetError());Gfx gfx;need(gfx.init(window),"renderer init");
+ std::string swapError;
+ need(gfx.setVsync(false,swapError)&&!gfx.vsyncEnabled(),"VSync disabled at runtime");
+ const bool syncAvailable=gfx.setVsync(true,swapError);
+ if(!syncAvailable)need(!swapError.empty(),"unsupported swap control reports an error");
+ need(gfx.setVsync(false,swapError)&&!gfx.vsyncEnabled(),"VSync can be disabled again");
  GLint maxTexture=0;glGetIntegerv(GL_MAX_TEXTURE_SIZE,&maxTexture);std::printf("maximum texture size: %d\n",maxTexture);
  gfx.beginFrame(640,480);gfx.clear(0,0,0);glDisable(GL_TEXTURE_2D);glDisable(GL_BLEND);
  glPushMatrix();glTranslatef(40,50,0);glScalef(2,2,1);glColor4f(1,0,0,1);rectangle(0,0,20,20);glPopMatrix();

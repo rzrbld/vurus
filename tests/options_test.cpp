@@ -23,14 +23,16 @@ int main() {
     const std::filesystem::path root=directory,path=root/"settings.cfg";
     std::string error="old error";
     GameOptions original;assert(validateOptions(original,error)&&error.empty());
-    assert(!original.fpsCounter);
+    assert(!original.fpsCounter && original.vsync && original.frameCap==60);
+    for(int cap:{0,30,60}){auto valid=original;valid.frameCap=cap;assert(validateOptions(valid,error));}
+    for(int cap:{-1,1,90}){auto invalid=original;invalid.frameCap=cap;assert(!validateOptions(invalid,error));}
     assert(!original.smaa&&!original.fxaa&&original.crosshair);
     GameOptions conflict=original;conflict.smaa=conflict.fxaa=true;assert(!validateOptions(conflict,error));
     GameOptions options=original;options.gamma=73;
     // A first launch keeps caller defaults, including explicit command-line policy.
     assert(loadOptions(path.string(),options,error)&&options.gamma==73&&error.empty());
     options.windowMode=3;options.width=1280;options.height=800;options.gamma=0;options.spriteFiltering=2;options.hudAspect=11;options.hudLanguage=2;
-    options.fpsCounter=true;
+    options.fpsCounter=true;options.vsync=false;options.frameCap=30;
     options.fxaa=options.bloom=options.sharpen=true;options.crt=true;options.crtRetro=true;options.crtBright=true;options.vignette=false;options.shadows=false;options.reactorFx=false;options.soundFx=false;options.music=false;options.menuSounds=false;
     options.effectsVolume=.375f;options.voicesVolume=.125f;options.musicVolume=.875f;
     options.audioBits=8;options.audioRate=11025;options.audioChannels=1;
@@ -52,7 +54,7 @@ int main() {
     assert(entries==1);
     // Invalid complete files are rejected without partially applying earlier fields.
     for(const std::string bad:{
-        "video.fps_counter=2\n", "video.fps_counter=0\nvideo.fps_counter=1\n", "controls.crosshair=2\n", "controller.aim_assist=-1\n", "video.width=800\nvideo.gamma=101\n", "video.window_mode=-1\n", "video.window_mode=4\n", "video.window_mode=1.5\n", "video.window_mode=0\nvideo.window_mode=1\n", "video.fxaa=2\n", "video.bloom=true\n", "video.sharpen=1\nvideo.sharpen=0\n", "video.crt_retro=2\n", "video.crt_bright=2\n", "video.crt=2\n", "video.crt=true\n", "video.crt=1\nvideo.crt=0\n", "video.vignette=2\n", "video.vignette=true\n", "video.vignette=0\nvideo.vignette=1\n", "video.sprite_filtering=-1\n", "video.sprite_filtering=3\n",
+        "video.frame_cap=90\n", "video.frame_cap=30\nvideo.frame_cap=0\n", "video.vsync=2\n", "video.vsync=true\n", "video.vsync=0\nvideo.vsync=1\n", "video.fps_counter=2\n", "video.fps_counter=0\nvideo.fps_counter=1\n", "controls.crosshair=2\n", "controller.aim_assist=-1\n", "video.width=800\nvideo.gamma=101\n", "video.window_mode=-1\n", "video.window_mode=4\n", "video.window_mode=1.5\n", "video.window_mode=0\nvideo.window_mode=1\n", "video.fxaa=2\n", "video.bloom=true\n", "video.sharpen=1\nvideo.sharpen=0\n", "video.crt_retro=2\n", "video.crt_bright=2\n", "video.crt=2\n", "video.crt=true\n", "video.crt=1\nvideo.crt=0\n", "video.vignette=2\n", "video.vignette=true\n", "video.vignette=0\nvideo.vignette=1\n", "video.sprite_filtering=-1\n", "video.sprite_filtering=3\n",
         "hud.language=0\n", "hud.language=3\n", "hud.language=1.5\n",
         "video.hud_aspect=-1\n", "video.hud_aspect=12\n", "video.hud_aspect=1.5\n", "video.hud_aspect=1\nvideo.hud_aspect=2\n",
         "audio.effects_volume=nan\n", "audio.effects_volume=inf\n", "audio.effects_volume=1.1\n",

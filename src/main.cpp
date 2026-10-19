@@ -1,3 +1,4 @@
+#include <limits>
 #include "video/window_mode.h"
 #include <SDL.h>
 
@@ -1484,6 +1485,7 @@ int main(int argc, char** argv) {
     bool explicitSavePath=false;
     bool probePause=false,probeInventory=false;float probeDamage=0;
     int profileFrames=0,profileWarmup=120,renderHz=60;
+    bool renderHzOverride=false;
     bool havePlayerOverride = false;
     float playerOverrideX = 0.f, playerOverrideY = 0.f;
     int walkSteps = 0;
@@ -1526,7 +1528,7 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--fps") && i+1<argc){
             const std::string value=argv[++i];
             if(value!="60"&&value!="90"){std::fprintf(stderr,"--fps expects 60 or 90\n");return 1;}
-            renderHz=std::stoi(value);
+            renderHz=std::stoi(value);renderHzOverride=true;
         }
         else if (!std::strcmp(argv[i], "--profile-frames") && i+1<argc) profileFrames=std::clamp(std::atoi(argv[++i]),0,36000);
         else if (!std::strcmp(argv[i], "--profile-warmup") && i+1<argc) profileWarmup=std::clamp(std::atoi(argv[++i]),0,36000);
@@ -1794,6 +1796,7 @@ int main(int argc, char** argv) {
     Uint64 lastFrame = SDL_GetPerformanceCounter();
     double pendingTime = 0.0;
     double softwareDeadline = static_cast<double>(lastFrame);
+    int previousRenderHz=-1;
     std::string lastTitle;
     std::vector<double> frameTimes,tickTimes,renderTimes,workTimes,warmupTimes,worldTimes,animationTimes;
     int profileFrame=0,profileCatchups=0,profileDroppedTicks=0;
@@ -1920,7 +1923,12 @@ int main(int argc, char** argv) {
             }
         }
         if(measuring)workTimes.push_back(1000.0*(SDL_GetPerformanceCounter()-now)/timerFrequency);
-        if (!a.gfx.vsyncEnabled() && !a.quit) {
+        // Cap presentation independently of the fixed 60 Hz simulation. Apply
+        // even with VSync (e.g. 30 FPS on a 60 Hz display); swap wait already
+        // counts toward the absolute deadline. Zero skips only software pacing.
+        if(!renderHzOverride)renderHz=a.options.frameCap;
+        if(renderHz!=previousRenderHz){softwareDeadline=static_cast<double>(now);previousRenderHz=renderHz;}
+        if (renderHz>0 && !a.quit) {
             softwareDeadline+=static_cast<double>(timerFrequency)/renderHz;
             double counter=static_cast<double>(SDL_GetPerformanceCounter());
             // Absolute deadlines avoid adding render time to every frame.
@@ -1934,6 +1942,7 @@ int main(int argc, char** argv) {
                 counter=static_cast<double>(SDL_GetPerformanceCounter());
             }
         }
+        if(renderHz==0)softwareDeadline=static_cast<double>(SDL_GetPerformanceCounter());
         recordDebugFrame(a,1000.0*(SDL_GetPerformanceCounter()-now)/timerFrequency);
         if(profileFrames) {
             const double elapsed=1000.0*(SDL_GetPerformanceCounter()-now)/timerFrequency;
@@ -1956,7 +1965,7 @@ int main(int argc, char** argv) {
         report("World tick",worldTimes);report("scene/HUD animation tick",animationTimes);
         report("render/present",renderTimes);report("frame before software pacing",workTimes);
         std::printf("profile level=%s objects=%zu actors=%zu resolution=%dx%d\n",a.content.mapPath.c_str(),a.content.objects.size(),a.world.actors().size(),a.options.width,a.options.height);
-        const double budget=1000.0/renderHz;
+        const double budget=renderHz>0?1000.0/renderHz:std::numeric_limits<double>::infinity();
         const auto overruns=std::count_if(frameTimes.begin(),frameTimes.end(),[&](double ms){return ms>budget*1.5;});
         std::printf("profile requested_hz=%d vsync=%d warmup=%zu frames_over_1.5_budget=%zu catchup_frames=%d dropped_ticks=%d\n",
                     renderHz,a.gfx.vsyncEnabled(),warmupTimes.size(),static_cast<size_t>(overruns),profileCatchups,profileDroppedTicks);
