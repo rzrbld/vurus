@@ -1,4 +1,4 @@
-name: Release desktop v0.1.4 and PortMaster alpha.2
+name: Publish desktop v0.1.4 after job status convergence
 'on':
   push:
     branches:
@@ -9,7 +9,7 @@ permissions:
   actions: write
   contents: write
 concurrency:
-  group: publish-v0.1.4
+  group: publish-v0.1.4-desktop-retry
   cancel-in-progress: false
 jobs:
   publish:
@@ -21,10 +21,6 @@ jobs:
           workflow: build-desktop.yml
           tag: v0.1.4
           pattern: vurus-*
-        - stream: portmaster
-          workflow: build-portmaster.yml
-          tag: portmaster-v0.1.0-alpha.2
-          pattern: vurus-portmaster-aarch64-alpha-preview
     runs-on: ubuntu-22.04
     timeout-minutes: 150
     env:
@@ -65,12 +61,20 @@ jobs:
         done
         gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" > run.json
         jq -e --arg sha "$BUILD_SHA" --arg branch "$BUILD_REF" --arg workflow ".github/workflows/$BUILD_WORKFLOW" '.status == "completed" and .conclusion == "success" and .head_sha == $sha and .event == "workflow_dispatch" and .head_branch == $branch and .path == $workflow' run.json
-        gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN/jobs?per_page=100" > jobs.json
-        if [ "$STREAM" = desktop ]; then
-          jq -e '[.jobs[] | select(.name | startswith("build ("))] | length == 4 and all(.conclusion == "success")' jobs.json
-        else
-          jq -e '[.jobs[] | select(.name == "build")] | length == 1 and all(.conclusion == "success")' jobs.json
-        fi
+        # Overall workflow success can precede individual job-record updates.
+        for attempt in $(seq 1 120); do
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN/jobs?per_page=100" > jobs.json
+          if jq -e '[.jobs[] | select(.name | startswith("build ("))] | length == 4 and all(.conclusion == "success")' jobs.json; then
+            exit 0
+          fi
+          if jq -e '[.jobs[] | select(.name | startswith("build ("))] | any(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out")' jobs.json; then
+            echo 'A build job failed; refusing publication.' >&2
+            exit 1
+          fi
+          sleep 15
+        done
+        echo 'Timed out waiting for successful build-job records.' >&2
+        exit 1
     - name: Validate CI packages and checksums
       shell: bash
       run: |
