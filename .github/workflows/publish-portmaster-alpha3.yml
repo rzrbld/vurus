@@ -59,28 +59,37 @@ jobs:
         \  assert z.read(name)\n b=z.read('vurus/vurus.aarch64')\n assert b[:5]==b'\\x7fELF\\x02' and b[5]==1 and struct.unpack_from('<H',b,18)[0]==183\n\
         PY\n"
     - name: Publish verified prerelease without rebuilding
-      run: "set -euo pipefail\ncat > notes.md <<'NOTES'\nPortMaster Alpha Preview alpha.3 improves sustained handheld performance\
-        \ and rendering.\n\n- Reuse expired destruction debris records while preserving authored objects, inventory, reactivation\
-        \ and referenced identities.\n- Update the player hit-flash timer without scanning every world record.\n- Batch compatible\
-        \ GLES draws in their original order and pack animation frames and font glyphs into bounded texture atlases.\n- Capture\
-        \ save thumbnails only when saving, with safe asynchronous delivery and shutdown cancellation.\n\nPreserves accepted\
-        \ gameplay and save schema v35 with its existing compressed envelope and supported legacy readers. Trilinear filtering\
-        \ retains independent mip chains. Desktop OpenGL rendering remains on its existing path.\n\nValidated locally on H700\
-        \ / Mali at 640\xD7480. Repeated crowded-scene atlas comparisons improved reciprocal median FPS from 18.9 to 20.2,\
-        \ with smoother frame times; this is a scoped result, not a performance guarantee. The ARM64 CI build, tests and packaging\
-        \ passed.\n\nExtract Vurus.sh and the vurus directory into your firmware's Ports directory. Preserve your existing\
-        \ data, saves, settings and scores when updating. Original game data is required and is not included. Verify the package\
-        \ using SHA256SUMS.txt. This remains an alpha prerelease.\n\nBuilt and tested by [PortMaster CI](https://github.com/rzrbld/vurus/actions/runs/39346417314),\
-        \ source commit [5478187](https://github.com/rzrbld/vurus/commit/547818773d03c1a56166cfc00b680b7955339fb3). This release\
-        \ reuses that exact CI package.\nNOTES\n# Refuse to replace any existing tag or release.\ngh api \"repos/$GH_REPO/git/matching-refs/tags/$RELEASE_TAG\"\
-        \ > tag.json\njq -e 'length == 0' tag.json\ngh release create \"$RELEASE_TAG\" artifacts/dist/portmaster/vurus-portmaster.zip\
-        \ artifacts/dist/portmaster/SHA256SUMS.txt --repo \"$GH_REPO\" --target \"$BUILD_SHA\" --draft --prerelease --latest=false\
-        \ --title \"Vurus PortMaster Alpha Preview alpha.3\" --notes-file notes.md\ngh api \"repos/$GH_REPO/git/ref/tags/$RELEASE_TAG\"\
-        \ --jq '.object.sha' > tag-sha.txt\ntest \"$(cat tag-sha.txt)\" = \"$BUILD_SHA\"\ngh release edit \"$RELEASE_TAG\"\
-        \ --repo \"$GH_REPO\" --draft=false --prerelease --latest=false\ngh release view \"$RELEASE_TAG\" --repo \"$GH_REPO\"\
-        \ --json url,isDraft,isPrerelease,tagName,assets > published.json\njq -e '.isDraft == false and .isPrerelease == true\
-        \ and .tagName == \"portmaster-v0.1.0-alpha.3\" and ([.assets[].name] | sort == [\"SHA256SUMS.txt\",\"vurus-portmaster.zip\"\
-        ])' published.json\n"
+      run: 'set -euo pipefail
+
+        gh api "repos/$GH_REPO/releases/417881479" > draft.json
+
+        jq -e ''.id == 417881479 and .draft == true and .prerelease == true and .tag_name == "portmaster-v0.1.0-alpha.3" and
+        .target_commitish == "547818773d03c1a56166cfc00b680b7955339fb3" and ([.assets[].name] | sort == ["SHA256SUMS.txt","vurus-portmaster.zip"])
+        and ([.assets[] | select(.name == "vurus-portmaster.zip")][0].digest == "sha256:cc1554c918976e409b6e757dd979b3f30574629c482bb243b6f77d67749a0c5e")''
+        draft.json
+
+        gh api "repos/$GH_REPO/git/matching-refs/tags/$RELEASE_TAG" > tag.json
+
+        jq -e ''length == 0'' tag.json
+
+        # Create using this job''s token to avoid recursive build workflows.
+
+        gh api --method POST "repos/$GH_REPO/git/refs" -f ref="refs/tags/$RELEASE_TAG" -f sha="$BUILD_SHA" > created-tag.json
+
+        jq -e ''.object.sha == "547818773d03c1a56166cfc00b680b7955339fb3"'' created-tag.json
+
+        gh release edit "$RELEASE_TAG" --repo "$GH_REPO" --draft=false --prerelease --latest=false
+
+        gh api "repos/$GH_REPO/releases/417881479" > published.json
+
+        jq -e ''.draft == false and .prerelease == true and .tag_name == "portmaster-v0.1.0-alpha.3" and ([.assets[].name]
+        | sort == ["SHA256SUMS.txt","vurus-portmaster.zip"])'' published.json
+
+        gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq ''.object.sha'' > tag-sha.txt
+
+        test "$(cat tag-sha.txt)" = "$BUILD_SHA"
+
+        '
     - name: Retain publication receipt
       if: always()
       uses: actions/upload-artifact@v4
