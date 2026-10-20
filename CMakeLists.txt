@@ -798,3 +798,13 @@ if(BUILD_TESTING)
   target_link_libraries(wav_stream_test PRIVATE SDL2::SDL2)
   add_test(NAME wav_stream COMMAND wav_stream_test)
 endif()
+
+# Opt-in native animation and synchronization audit; uses user-supplied data.
+if(BUILD_TESTING)
+  get_target_property(VYRUZ_PHASE_AUDIT_SOURCES vurus SOURCES)
+  list(REMOVE_ITEM VYRUZ_PHASE_AUDIT_SOURCES src/main.cpp)
+  add_executable(enemy_animation_phase_audit EXCLUDE_FROM_ALL
+    tests/enemy_animation_phase_audit.cpp ${VYRUZ_PHASE_AUDIT_SOURCES})
+  target_include_directories(enemy_animation_phase_audit PRIVATE src)
+  target_link_libraries(enemy_animation_phase_audit PRIVATE SDL2::SDL2 OpenGL::GL indeo)
+endif()

@@ -583,11 +583,19 @@ void SceneRenderer::syncActors(const std::vector<ActorState>& actors) {
         auto& scan=channelScan_[i];
         if(scan.object<actors.size()) {
             const auto& actor=actors[scan.object];
-            if(scan.passive&&!actor.alive&&!actor.gate&&!actor.lift&&scan.visualRevision==actor.visualRevision) {
-                if(!scan.inactive)channels_[i].pendingAudio.clear();
-                scan.inactive=true;
+            if(scan.passive&&!actor.gate&&!actor.lift&&scan.visualRevision==actor.visualRevision) {
+                if(!actor.alive) {
+                    if(!scan.inactive)channels_[i].pendingAudio.clear();
+                    scan.inactive=true;
+                } else {
+                    // syncActorChannel has no work for this unchanged policy.
+                    scan.inactive=false;workingChannels_.push_back(i);
+                }
                 continue;
             }
+            // Keep the ordering key current even for firing/native channels
+            // whose pose synchronization is admitted in a separate phase.
+            scan.visualRevision=actor.visualRevision;
         }
         scan.inactive=false;
         workingChannels_.push_back(i);
@@ -598,11 +606,15 @@ void SceneRenderer::syncActors(const std::vector<ActorState>& actors) {
         syncActorChannel(c,actor);
         scan.visualRevision=c.visualRevision;
     }
-    std::stable_sort(workingChannels_.begin(),workingChannels_.end(),[&](size_t a,size_t b){
-        const auto x=channels_[a].object,y=channels_[b].object;
-        return (x<actors.size()?actorRecordOrder(actors[x],x):x)<
-               (y<actors.size()?actorRecordOrder(actors[y],y):y);
-    });
+    // Stable birth ordering uses the current compact scan key, including
+    // native/firing channels whose Channel revision synchronizes elsewhere.
+    const auto order=[&](size_t index) {
+        const auto& scan=channelScan_[index];
+        if(scan.object>=actors.size())return uint64_t(scan.object);
+        const auto birth=scan.visualRevision>>32;
+        return birth?birth-1:uint64_t(scan.object);
+    };
+    std::stable_sort(workingChannels_.begin(),workingChannels_.end(),[&](size_t a,size_t b){return order(a)<order(b);});
 }
 void SceneRenderer::syncActorChannel(Channel& c,const ActorState& actor) {
         if(c.visualRevision!=actor.visualRevision) {
