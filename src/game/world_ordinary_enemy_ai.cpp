@@ -305,6 +305,18 @@ bool GameWorld::advanceOrdinaryEnemyAI(size_t id,float seconds,std::span<const C
             actor.direction=actor.enemyTurn->logicalHeading;
         }
     }
+    // 441367..4413b8, after AI/idle and before motion: clear Roller's
+    // turn command for a small PREVIOUS surface displacement. The body pose
+    // has already advanced; retain its heading and countdown.
+    if(actor.enemyTurn && actor.enemyTurnConfig.subtype==0x1c && actor.enemyTurn->turnCommand!=0){
+        if(actor.enemyMoveCommand==0)motionCommand.lateral=0;
+        else{
+            const auto previous=actor.nativeMotion->previousSurface;
+            const long double dx=static_cast<long double>(position.x)-previous.x;
+            const long double dy=static_cast<long double>(position.y)-previous.y;
+            if(dx*dx+dy*dy<.25L)actor.enemyTurn->turnCommand=0;
+        }
+    }
     advanceShieldRegeneration(id);
     motionCommand.heading=actor.direction;
     motionCommand.throttle=actor.enemyMoveCommand==200?EnemyThrottle::Forward:actor.enemyMoveCommand==208?EnemyThrottle::Reverse:EnemyThrottle::Neutral;
