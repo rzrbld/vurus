@@ -76,5 +76,34 @@ int main(){try{
  const_cast<ActorState&>(w.actors()[deferred]).effect=true;
  w.expireVisual(deferred);w.takeAudioEvents();w.tick(.014f,{});
  need(w.spawn({1},{1100,1100})==deferred,"rejected restore preserves candidate reuse");
- std::cout<<"PASS transient reclamation, pinned/authored preservation and100tick disk continuation\n";
+ // Moving debris uses ordinary Thing lifetime, not renderer FX expiry.
+ // Preserve authored dead structures and live references while reusing only
+ // released runtime products of the audited class, including after disk load.
+ auto debrisScene=fixture();
+ ObjectClass debris;debris.id={2};debris.name="Big-Particle-1";
+ debris.behaviours={"Straight"};
+ debris.properties={value("Sub-type","Thing"),value("Managed","1"),
+  value("Bounding-box-size","0"),value("Launched","1"),value("Use-inertia","1"),
+  value("Speed-max","45"),value("Life-Time","28")};
+ debrisScene.classes.push_back(debris);auto debrisOriginal=debrisScene;
+ GameWorld dw;need(dw.load(debrisScene,l,e),e.c_str());dw.setDebugGodMode(true);
+ for(int j=0;j<1100;++j)dw.spawn({2},{1200,1200});
+ const auto placed=dw.spawn({2},{1200,1200});debrisScene.objects[placed].authored.key="Create-object";
+ const auto owner=emit(dw,{1000,1000});debrisScene.objects[owner].owner=ObjectId{1};
+ dw.takeAudioEvents();dw.tick(.014f,{});dw.takeAudioEvents();dw.tick(.014f,{});
+ need(!dw.actors()[1].alive&&dw.actors()[1].nativePoolSlot==SIZE_MAX,"debris lifetime releases native body");
+ need(dw.actors()[1].contactConfig.launchedThing&&!dw.actors()[1].effect&&!dw.actors()[1].hasAmmoAttribute,"ordinary Thing debris role preserved");
+ const auto debrisSize=dw.actors().size();dw.takeAudioEvents();dw.tick(.014f,{});
+ need(dw.spawn({2},{1200,1200})==2,"debris reuses lowest unpinned same-class slot");
+ need(!dw.actors()[placed].alive&&debrisScene.objects[placed].authored.key=="Create-object","authored dead Thing retained");
+ SaveGame debrisDisk;need(decodeSave(disk(dw,debrisScene.mapPath),debrisDisk,e),e.c_str());
+ GameWorld dr;need(dr.load(debrisOriginal,l,e)&&dr.restoreSnapshot(debrisDisk.levels.at(debrisScene.mapPath).world,e),e.c_str());dr.setDebugGodMode(true);
+ need(dr.actors()[3].contactConfig.launchedThing,"restore rebuilds debris role");
+ for(int tick=0;tick<90;++tick){
+  dw.takeAudioEvents();dr.takeAudioEvents();dw.tick(.014f,{});dr.tick(.014f,{});
+  if(tick%3==0)for(int j=0;j<24;++j)need(dw.spawn({2},{1200,1200})==dr.spawn({2},{1200,1200}),"same debris reuse IDs after reload");
+  need(dw.actors().size()==debrisSize,"repeated debris bursts remain bounded");
+  need(disk(dw,debrisScene.mapPath)==disk(dr,debrisScene.mapPath),"exact active debris and death-state disk continuation");
+ }
+ std::cout<<"PASS FX/Thing reclamation, pinned/authored preservation and disk continuation\n";
 }catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}

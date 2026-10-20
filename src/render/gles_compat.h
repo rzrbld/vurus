@@ -29,6 +29,35 @@ using GLdouble = double;
 namespace vyruz::gles {
 bool initialize(std::string& error);
 void shutdown();
+// Deferred draws must complete before raw GL resource/state operations.
+void flush();
+void texImage2D(GLenum target,GLint level,GLint internalformat,GLsizei width,GLsizei height,GLint border,GLenum format,GLenum type,const void* pixels);
+void texSubImage2D(GLenum target,GLint level,GLint xoffset,GLint yoffset,GLsizei width,GLsizei height,GLenum format,GLenum type,const void* pixels);
+void texParameteri(GLenum target,GLenum pname,GLint param);
+void generateMipmap(GLenum target);
+void deleteTextures(GLsizei n,const GLuint* textures);
+void deleteFramebuffers(GLsizei n,const GLuint* framebuffers);
+void copyTexSubImage2D(GLenum target,GLint level,GLint xoffset,GLint yoffset,GLint x,GLint y,GLsizei width,GLsizei height);
+void bindFramebuffer(GLenum target,GLuint framebuffer);
+void framebufferTexture2D(GLenum target,GLenum attachment,GLenum textarget,GLuint texture,GLint level);
+void readPixels(GLint x,GLint y,GLsizei width,GLsizei height,GLenum format,GLenum type,void* pixels);
+void viewport(GLint x,GLint y,GLsizei width,GLsizei height);
+void scissor(GLint x,GLint y,GLsizei width,GLsizei height);
+void clear(GLbitfield mask);
+void useProgram(GLuint program);
+void blitFramebuffer(GLint srcX0,GLint srcY0,GLint srcX1,GLint srcY1,GLint dstX0,GLint dstY0,GLint dstX1,GLint dstY1,GLbitfield mask,GLenum filter);
+void blendEquation(GLenum mode);
+void blendEquationSeparate(GLenum modeRGB,GLenum modeAlpha);
+void colorMask(GLboolean red,GLboolean green,GLboolean blue,GLboolean alpha);
+void depthMask(GLboolean flag);
+void depthFunc(GLenum func);
+void cullFace(GLenum mode);
+void frontFace(GLenum mode);
+void activeTexture(GLenum texture);
+void bindTexture(GLenum target,GLuint texture);
+void blendFunc(GLenum src,GLenum dst);
+void blendFuncSeparate(GLenum srcRGB,GLenum dstRGB,GLenum srcAlpha,GLenum dstAlpha);
+
 void begin(GLenum);void end();
 void vertex(float,float);void texCoord(float,float);void color(float,float,float,float);
 void enable(GLenum);void disable(GLenum);
@@ -64,3 +93,30 @@ void readTexture(int width,int height,void* pixels);
 #define glPushAttrib vyruz::gles::pushAttrib
 #define glPopAttrib vyruz::gles::popAttrib
 #define glShadeModel(mode) ((void)0)
+
+#define glTexImage2D vyruz::gles::texImage2D
+#define glTexSubImage2D vyruz::gles::texSubImage2D
+#define glTexParameteri vyruz::gles::texParameteri
+#define glGenerateMipmap vyruz::gles::generateMipmap
+#define glDeleteTextures vyruz::gles::deleteTextures
+#define glDeleteFramebuffers vyruz::gles::deleteFramebuffers
+#define glCopyTexSubImage2D vyruz::gles::copyTexSubImage2D
+#define glBindFramebuffer vyruz::gles::bindFramebuffer
+#define glFramebufferTexture2D vyruz::gles::framebufferTexture2D
+#define glReadPixels vyruz::gles::readPixels
+#define glViewport vyruz::gles::viewport
+#define glScissor vyruz::gles::scissor
+#define glClear vyruz::gles::clear
+#define glUseProgram vyruz::gles::useProgram
+#define glBlitFramebuffer vyruz::gles::blitFramebuffer
+#define glBlendEquation vyruz::gles::blendEquation
+#define glBlendEquationSeparate vyruz::gles::blendEquationSeparate
+#define glColorMask vyruz::gles::colorMask
+#define glDepthMask vyruz::gles::depthMask
+#define glDepthFunc vyruz::gles::depthFunc
+#define glCullFace vyruz::gles::cullFace
+#define glFrontFace vyruz::gles::frontFace
+#define glActiveTexture vyruz::gles::activeTexture
+#define glBindTexture vyruz::gles::bindTexture
+#define glBlendFunc vyruz::gles::blendFunc
+#define glBlendFuncSeparate vyruz::gles::blendFuncSeparate

@@ -5,6 +5,7 @@
 #include <cstring>
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 
 namespace vyruz {
 
@@ -28,6 +29,7 @@ bool Gfx::init(SDL_Window* window) {
 #if VYRUZ_GLES
     std::string error;
     if(!gles::initialize(error)){std::fprintf(stderr,"GLES renderer: %s\n",error.c_str());shutdown();return false;}
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE,&atlasMaximum_);
 #endif
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
@@ -70,9 +72,13 @@ void Gfx::shutdown() {
     deleteTexture(brightness_);brightness_=0;brightnessW_=brightnessH_=0;
 #if VYRUZ_GLES
     if(ctx_){
+        for(const auto& [id,sprite]:atlasSprites_)glDeleteTextures(1,&id);
+        atlasSprites_.clear();
+        for(const auto& [id,page]:atlasPages_)glDeleteTextures(1,&id);
+        atlasPages_.clear();atlasWorldBytes_=atlasWorldUsed_=atlasFontBytes_=0;
         if(previewFramebuffer_)glDeleteFramebuffers(1,&previewFramebuffer_);
         if(previewTexture_)glDeleteTextures(1,&previewTexture_);
-        previewFramebuffer_=previewTexture_=0;previewValid_=false;
+        previewFramebuffer_=previewTexture_=0;previewValid_=previewRequested_=false;
         gles::shutdown();
     }
 #endif
@@ -130,12 +136,122 @@ GLuint Gfx::uploadTexture(const GafBitmap& bitmap,bool sprite) {
     return uploadTexture(rgba.data(),bitmap.width,bitmap.height,sprite);
 }
 
+#if VYRUZ_GLES
+Gfx::AtlasRegion Gfx::atlasUpload(const uint8_t* rgba,int w,int h,int kind) {
+    // Separate nearest world, bilinear world, and nearest font pages. Bounded
+    // independently of the animation cache; large/overflow frames stay standalone.
+    const int size=std::min(kind==2?256:(w+2<=512 && h+2<=512)?512:1024,atlasMaximum_);
+    const int rw=w+2,rh=h+2;
+    if(w<=0 || h<=0 || rw>size || rh>size)return {};
+    auto chosen=atlasPages_.end();size_t slot=0;int waste=0x7fffffff;
+    for(auto it=atlasPages_.begin();it!=atlasPages_.end();++it) {
+        auto& page=it->second;
+        if(page.kind!=kind)continue;
+        for(size_t i=0;i<page.free.size();++i) {
+            const auto r=page.free[i];
+            if(r.w>=rw && r.h>=rh && r.w*r.h-rw*rh<waste) {
+                chosen=it;slot=i;waste=r.w*r.h-rw*rh;
+            }
+        }
+    }
+    if(chosen==atlasPages_.end()) {
+        const size_t bytes=size_t(size)*size*4;
+        if((kind==2?atlasFontBytes_+bytes>2u*1024*1024:atlasWorldBytes_+bytes>32u*1024*1024))return {};
+        GLuint id=0;glGenTextures(1,&id);glBindTexture(GL_TEXTURE_2D,id);current_=id;
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,kind==1?GL_LINEAR:GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,kind==1?GL_LINEAR:GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,size,size,0,GL_RGBA,GL_UNSIGNED_BYTE,nullptr);
+        chosen=atlasPages_.emplace(id,AtlasPage{size,kind,0,{{0,0,size,size}}}).first;slot=0;
+        (kind==2?atlasFontBytes_:atlasWorldBytes_)+=bytes;
+    }
+    auto& page=chosen->second;const auto space=page.free[slot];
+    page.free.erase(page.free.begin()+slot);
+    if(space.w>rw)page.free.push_back({space.x+rw,space.y,space.w-rw,rh});
+    if(space.h>rh)page.free.push_back({space.x,space.y+rh,space.w,space.h-rh});
+    ++page.users;
+    if(kind!=2)atlasWorldUsed_+=size_t(rw)*rh*4;
+    // Replicated one-texel border is clamp-to-edge for both nearest and linear.
+    // Transparent filtered RGB has already been dilated by the existing helper.
+    std::vector<uint8_t> padded(size_t(rw)*rh*4);
+    for(int y=0;y<rh;++y)for(int x=0;x<rw;++x)
+        std::memcpy(&padded[(size_t(y)*rw+x)*4],rgba+(size_t(std::clamp(y-1,0,h-1))*w+std::clamp(x-1,0,w-1))*4,4);
+    glBindTexture(GL_TEXTURE_2D,chosen->first);current_=chosen->first;
+    glPixelStorei(GL_UNPACK_ALIGNMENT,1);
+    glTexSubImage2D(GL_TEXTURE_2D,0,space.x,space.y,rw,rh,GL_RGBA,GL_UNSIGNED_BYTE,padded.data());
+    return {chosen->first,{space.x,space.y,rw,rh}};
+}
+void Gfx::atlasRelease(AtlasRegion region) {
+    if(!region.page)return;
+    auto it=atlasPages_.find(region.page);if(it==atlasPages_.end())return;
+    auto& page=it->second;
+    if(page.kind!=2)atlasWorldUsed_-=size_t(region.rect.w)*region.rect.h*4;
+    if(!--page.users) {
+        glDeleteTextures(1,&region.page);if(current_==region.page)current_=0;
+        (page.kind==2?atlasFontBytes_:atlasWorldBytes_)-=size_t(page.size)*page.size*4;
+        atlasPages_.erase(it);return;
+    }
+    // Reuse holes after frame eviction. Coalesce guillotine siblings so repeated
+    // animation/level changes cannot accumulate unusable small allocations.
+    auto r=region.rect;
+    for(size_t i=0;i<page.free.size();) {
+        const auto b=page.free[i];AtlasRect merged;
+        if(r.y==b.y && r.h==b.h && (r.x+r.w==b.x || b.x+b.w==r.x))merged={std::min(r.x,b.x),r.y,r.w+b.w,r.h};
+        else if(r.x==b.x && r.w==b.w && (r.y+r.h==b.y || b.y+b.h==r.y))merged={r.x,std::min(r.y,b.y),r.w,r.h+b.h};
+        else {++i;continue;}
+        r=merged;page.free.erase(page.free.begin()+i);i=0;
+    }
+    page.free.push_back(r);
+}
+#endif
+GLuint Gfx::uploadSpriteTexture(const GafBitmap& bitmap,bool filterable) {
+#if VYRUZ_GLES
+    if(bitmap.valid()) {
+        const auto rgba=bitmap.rgbaImage();
+        const auto region=atlasUpload(rgba.rgba.data(),bitmap.width,bitmap.height,filterable?0:2);
+        if(region.page) {
+            // Logical frame identities retain the existing residency slots. Only
+            // atlas pages own pixel storage; this name is never bound for drawing.
+            GLuint id=0;glGenTextures(1,&id);
+            atlasSprites_[id]={region,{}};
+            if(filterable)spriteTextures_[id]={bitmap.width,bitmap.height,0,0,false,size_t(region.rect.w)*region.rect.h*4};
+            return id;
+        }
+    }
+#endif
+    return uploadTexture(bitmap,filterable);
+}
+size_t Gfx::atlasTextureBytes() const {
+#if VYRUZ_GLES
+    return atlasWorldBytes_+atlasFontBytes_;
+#else
+    return 0;
+#endif
+}
+
+size_t Gfx::spriteAtlasSlackBytes() const {
+#if VYRUZ_GLES
+    return atlasWorldBytes_-atlasWorldUsed_;
+#else
+    return 0;
+#endif
+}
+
 size_t Gfx::spriteTextureBytes(GLuint tex) const {
     const auto found=spriteTextures_.find(tex);
     return found==spriteTextures_.end()?0:found->second.bytes;
 }
 
 void Gfx::deleteTexture(GLuint tex) {
+#if VYRUZ_GLES
+    if(auto it=atlasSprites_.find(tex);it!=atlasSprites_.end()) {
+        // A freed region may be overwritten by the next upload on this page.
+        gles::flush();
+        atlasRelease(it->second.plain);atlasRelease(it->second.linear);
+        atlasSprites_.erase(it);
+    }
+#endif
     if(auto found=spriteTextures_.find(tex);found!=spriteTextures_.end()) {
         if(found->second.texture){glDeleteTextures(1,&found->second.texture);if(current_==found->second.texture)current_=0;}
         spriteTextures_.erase(found);
@@ -191,8 +307,50 @@ GLuint Gfx::filteredTexture(GLuint original,const GafBitmap* source) {
     }
     return sprite.texture;
 }
-void Gfx::beginQuads(GLuint tex,bool filterSprite,const GafBitmap* filterSource) {
+GLuint Gfx::resolveQuadTexture(GLuint tex,bool filterSprite,const GafBitmap* filterSource) {
+#if VYRUZ_GLES
+    atlasU_=atlasV_=0;atlasW_=atlasH_=1;
+    if(auto it=atlasSprites_.find(tex);it!=atlasSprites_.end()) {
+        auto region=it->second.plain;
+        if(filterSprite && spriteFiltering_!=0) {
+            if(!filterSource || !filterSource->valid() || filterSource->width!=region.rect.w-2 || filterSource->height!=region.rect.h-2)
+                throw std::logic_error("filtered atlas draw requires matching compact source");
+            if(spriteFiltering_==1 && !it->second.linearAttempted) {
+                it->second.linearAttempted=true;
+                auto base=filterSource->rgbaImage();
+                visitFilteredSpriteMips(SpriteMip{base.width,base.height,std::move(base.rgba)},false,[&](size_t,const SpriteMip& mip){
+                    it->second.linear=atlasUpload(mip.rgba.data(),mip.width,mip.height,1);
+                });
+                if(it->second.linear.page)spriteTextures_.at(tex).bytes+=size_t(it->second.linear.rect.w)*it->second.linear.rect.h*4;
+            }
+            // Independent mip chains preserve the accepted trilinear filter.
+            // World atlas callers always supply their compact source here.
+            if(spriteFiltering_==1 && it->second.linear.page)region=it->second.linear;
+            else {
+                region={};
+                tex=filteredTexture(tex,filterSource);
+            }
+        }
+        if(region.page) {
+            const float size=float(atlasPages_.at(region.page).size);
+            atlasU_=(region.rect.x+1)/size;atlasV_=(region.rect.y+1)/size;
+            atlasW_=(region.rect.w-2)/size;atlasH_=(region.rect.h-2)/size;
+            tex=region.page;
+        }
+    }else
+#endif
     if(filterSprite && spriteFiltering_!=0)tex=filteredTexture(tex,filterSource);
+    return tex;
+}
+void Gfx::prepareSpriteTexture(GLuint tex,bool filterSprite,const GafBitmap* source) {
+#if VYRUZ_GLES
+    resolveQuadTexture(tex,filterSprite,source);
+#else
+    (void)tex;(void)filterSprite;(void)source;
+#endif
+}
+void Gfx::beginQuads(GLuint tex,bool filterSprite,const GafBitmap* filterSource) {
+    tex=resolveQuadTexture(tex,filterSprite,filterSource);
     if (tex != current_) {
         glBindTexture(GL_TEXTURE_2D, tex);
         current_ = tex;
@@ -204,6 +362,12 @@ void Gfx::quad(float x0, float y0, float u0, float v0,
                float x1, float y1, float u1, float v1,
                float x2, float y2, float u2, float v2,
                float x3, float y3, float u3, float v3) {
+#if VYRUZ_GLES
+    u0=atlasU_+u0*atlasW_;v0=atlasV_+v0*atlasH_;
+    u1=atlasU_+u1*atlasW_;v1=atlasV_+v1*atlasH_;
+    u2=atlasU_+u2*atlasW_;v2=atlasV_+v2*atlasH_;
+    u3=atlasU_+u3*atlasW_;v3=atlasV_+v3*atlasH_;
+#endif
     glTexCoord2f(u0, v0);
     glVertex2f(x0, y0);
     glTexCoord2f(u1, v1);
@@ -338,10 +502,16 @@ std::vector<uint8_t> Gfx::presentedPreview() const{
 }
 #endif
 void Gfx::present() {
+#if VYRUZ_GLES
+    gles::flush();
+#endif
     applyBrightness();
     applyCRT();
 #if VYRUZ_GLES
-    capturePreview();
+    if(previewRequested_){previewRequested_=false;capturePreview();}
+#endif
+#if VYRUZ_GLES
+    gles::flush();
 #endif
     if(swapEnabled_)SDL_GL_SwapWindow(window_);
 }

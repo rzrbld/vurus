@@ -368,14 +368,14 @@ void HudRenderer::advance(double ms,const GameWorld* world) {
     }
     syncInventory(*world);
 }
-void HudRenderer::bitmap(Gfx& gfx,Bank& bank,size_t id,float x,float y,float clip) {
+void HudRenderer::bitmap(Gfx& gfx,Bank& bank,size_t id,float x,float y,float clip,bool atlas) {
     if(id>=bank.animation.frames.size())return;
     clip=std::clamp(clip,0.f,1.f);if(clip==0)return;
     const auto& image=bank.animation.frames[id].image;
     const float w=std::floor(image.width*clip),h=image.height;
     if(!w||!h)return;
     auto& texture=bank.textures[id];
-    if(!texture)texture=gfx.uploadTexture(image);
+    if(!texture)texture=atlas?gfx.uploadSpriteTexture(image,false):gfx.uploadTexture(image);
     gfx.beginQuads(texture);
     const float u=w/image.width;
     gfx.quad(x,y,0,0,x+w,y,u,0,x+w,y+h,u,1,x,y+h,0,1);gfx.endQuads();
@@ -397,27 +397,39 @@ void HudRenderer::text(Gfx& gfx,std::string_view value,float x,float y,size_t fo
 void HudRenderer::textBank(Gfx& gfx,std::string_view value,float x,float y,Bank& bank,const GafFont& font,
                            bool additive,bool uppercase,float maxWidth) {
     const float start=x;
-    if(additive){glEnable(GL_ALPHA_TEST);glAlphaFunc(GL_GREATER,.5f);glBlendFunc(GL_ONE,GL_ONE);}
+    const auto layout=[&](auto emit) {
+        float penX=x,penY=y;
     for(unsigned char c:value) {
         if(uppercase && c>='a' && c<='z') c-='a'-'A';
         const auto parsed=nativeFontByte(c);
         if(parsed.kind==NativeFontByteKind::Stop)break;
-        if(parsed.kind==NativeFontByteKind::Newline){x=start;y+=font.lineAdvance();continue;}
+        if(parsed.kind==NativeFontByteKind::Newline){penX=start;penY+=font.lineAdvance();continue;}
         if(parsed.kind==NativeFontByteKind::Ignore)continue;
-        if(parsed.kind==NativeFontByteKind::Tab){x=float(nativeFontTabX(static_cast<int64_t>(x),font.fixedAdvance()));continue;}
-        if(parsed.kind==NativeFontByteKind::Space){x+=font.fixedAdvance();continue;}
+        if(parsed.kind==NativeFontByteKind::Tab){penX=float(nativeFontTabX(static_cast<int64_t>(penX),font.fixedAdvance()));continue;}
+        if(parsed.kind==NativeFontByteKind::Space){penX+=font.fixedAdvance();continue;}
         const auto* glyph=font.glyph(parsed.glyph);uint32_t width=0;
         if(glyph && glyph->layers[0].frameIndex<bank.animation.frames.size())
             width=bank.animation.frames[glyph->layers[0].frameIndex].image.width;
-        if(x-start+std::max<int64_t>(width,font.advance(width))>maxWidth)break;
+        if(penX-start+std::max<int64_t>(width,font.advance(width))>maxWidth)break;
         if(glyph && glyph->layers[0].frameIndex<bank.animation.frames.size())for(size_t i=0;i<glyph->layers.size();++i) {
             const auto& l=glyph->layers[i];if(l.frameIndex>=bank.animation.frames.size())continue;
             // Font offsets cancel the bitmap hotspot (44ba30).
-            bitmap(gfx,bank,l.frameIndex,x+l.offsetX,y+l.offsetY);
+            emit(l.frameIndex,penX+l.offsetX,penY+l.offsetY);
             if(i==0)width=bank.animation.frames[l.frameIndex].image.width;
         }
-        x+=font.advance(width);
+        penX+=font.advance(width);
     }
+    };
+#if VYRUZ_GLES
+    // Prepare this text's glyphs together, before the first glyph samples the
+    // font page. Keep lazy per-string residency and the exact native layout.
+    layout([&](size_t id,float,float){
+        auto& texture=bank.textures[id];
+        if(!texture)texture=gfx.uploadSpriteTexture(bank.animation.frames[id].image,false);
+    });
+#endif
+    if(additive){glEnable(GL_ALPHA_TEST);glAlphaFunc(GL_GREATER,.5f);glBlendFunc(GL_ONE,GL_ONE);}
+    layout([&](size_t id,float px,float py){bitmap(gfx,bank,id,px,py,1,true);});
     if(additive){glDisable(GL_ALPHA_TEST);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);}
 }
 void HudRenderer::draw(Gfx& gfx,const GameWorld& world,const SceneContent& scene,bool paused,float w,float h) {

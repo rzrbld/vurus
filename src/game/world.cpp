@@ -1117,7 +1117,8 @@ void GameWorld::registerTransientRecordCandidate(size_t id) {
 void GameWorld::rebuildTransientRecordCandidates() {
     transientRecordCandidates_.clear();
     for(size_t i=0;i<actors_.size();++i)
-        if(actors_[i].effect || actors_[i].hasAmmoAttribute)transientRecordCandidates_.push_back(i);
+        if(actors_[i].effect || actors_[i].hasAmmoAttribute || actors_[i].contactConfig.launchedThing)
+            transientRecordCandidates_.push_back(i);
 }
 void GameWorld::collectReleasedTransientRecords() {
     freeTransientRecords_.clear();
@@ -1154,7 +1155,10 @@ void GameWorld::collectReleasedTransientRecords() {
         if(pinned[i]||a.alive||a.nativeGeneration||a.nativePoolSlot!=SIZE_MAX||
            a.reactivateMs>=0||a.nativeHeldOriginal||a.pooledTrail||a.enemy||a.pickup||a.lift||a.gate||
            !a.generators.empty()||a.generatorParent||!o.authored.key.empty()||
-           (!a.effect && !a.hasAmmoAttribute))continue;
+           // Audited moving death products are Thing, not FX. Their derived
+           // contact role admits expired debris without reclassifying it or
+           // reclaiming authored structures and other ordinary Things.
+           (!a.effect && !a.hasAmmoAttribute && !a.contactConfig.launchedThing))continue;
         if(i<actorCells_.cell.size()&&actorCells_.cell[i]!=NativeActorCells::Missing)continue;
         freeTransientRecords_[o.classId.value].push_back(i);
     }
@@ -2319,8 +2323,8 @@ void GameWorld::tick(float seconds,const WorldInput& suppliedInput) {
         notifications_.greenInfo(NoticeKind::Warning,notifications_.language()==2?"DANGER : BOUCLIER FAIBLE":"DANGER : SHIELD IS LOW",100,100,500,true);
         voiceEvent("V-SHIELD-LOW.WAV",0,1000,15000);
     }
-    for(auto& actor:actors_)actor.hitFlashMs=std::max(0.f,actor.hitFlashMs-seconds*1000);
     auto& feedback=actors_[player_];
+    feedback.hitFlashMs=std::max(0.f,feedback.hitFlashMs-seconds*1000);
     const auto& visualProperties=scene_->objects[player_].properties;
     const auto& thrustLimits=children(visualProperties,"Thrust");
     const float acceleration=std::max(0.f,propertyNumber(visualProperties,"Acceleration-step",1));

@@ -39,6 +39,12 @@ public:
 
     GLuint uploadTexture(const uint8_t* rgba, int w, int h,bool sprite=false);
     GLuint uploadTexture(const GafBitmap&,bool sprite=false);
+    // GLES atlas cache for compact animation frames and font glyphs. Desktop
+    // retains standalone textures. Filterable frames borrow their source again
+    // at beginQuads when filtering is enabled.
+    GLuint uploadSpriteTexture(const GafBitmap&,bool filterable=true);
+    size_t atlasTextureBytes() const;
+    size_t spriteAtlasSlackBytes() const;
     void deleteTexture(GLuint tex);
     // Uploaded RGBA payload for a registered sprite and its retained filter copy.
     // Excludes driver overhead; returns zero for unregistered/deleted textures.
@@ -47,6 +53,9 @@ public:
     // Optional compact source must match the uploaded pixels. It is borrowed
     // only for this call, never retained.
     void beginQuads(GLuint tex,bool filterSprite=false,const GafBitmap* filterSource=nullptr);
+    // Prepare visible frames before their pages enter the draw stream. This
+    // avoids repeated texture mutation while earlier quads sample the same page.
+    void prepareSpriteTexture(GLuint tex,bool filterSprite,const GafBitmap* source);
     void setSpriteFiltering(int mode) { spriteFiltering_=mode; }
     int spriteFiltering() const { return spriteFiltering_; }
     // Vertices in virtual screen space (top-left origin).
@@ -74,7 +83,9 @@ public:
     // Diagnostic readback must occur before swapping a GLES backbuffer.
     void setSwapEnabled(bool enabled) { swapEnabled_=enabled; }
 #if VYRUZ_GLES
-    // GLES cannot read the front buffer after swap. Keep a tiny GPU thumbnail.
+    // GLES cannot read the front buffer after swap. Capture only requested saves.
+    void requestPreview() {previewRequested_=true;previewValid_=false;}
+    void cancelPreview() {previewRequested_=previewValid_=false;}
     std::vector<uint8_t> presentedPreview() const;
 #endif
     void setGamma(int value) { gamma_=value; }
@@ -83,8 +94,20 @@ private:
     std::vector<uint8_t> bitmapScratch_; // capped at1MiB; large uploads use temporary storage
     bool swapEnabled_=true;
 #if VYRUZ_GLES
+    int atlasMaximum_=0;
+    struct AtlasRect {int x=0,y=0,w=0,h=0;};
+    struct AtlasRegion {GLuint page=0;AtlasRect rect;};
+    struct AtlasPage {int size=0,kind=0;size_t users=0;std::vector<AtlasRect> free;};
+    struct AtlasSprite {AtlasRegion plain,linear;bool linearAttempted=false;};
+    size_t atlasWorldBytes_=0,atlasWorldUsed_=0,atlasFontBytes_=0;
+    std::map<GLuint,AtlasPage> atlasPages_;
+    std::map<GLuint,AtlasSprite> atlasSprites_;
+    AtlasRegion atlasUpload(const uint8_t*,int,int,int kind);
+    void atlasRelease(AtlasRegion);
+    // Mapping resets at every beginQuads, including ordinary terrain/UI draws.
+    float atlasU_=0,atlasV_=0,atlasW_=1,atlasH_=1;
     GLuint previewTexture_=0,previewFramebuffer_=0;
-    bool previewValid_=false;
+    bool previewValid_=false,previewRequested_=false;
     void capturePreview();
 #endif
     SmaaPass smaa_;
@@ -93,6 +116,7 @@ private:
     struct FilteredTexture {int width,height;GLuint texture=0;int mode=0;bool mipmaps=false;size_t bytes=0;};
     std::map<GLuint,FilteredTexture> spriteTextures_;
     GLuint filteredTexture(GLuint original,const GafBitmap* source);
+    GLuint resolveQuadTexture(GLuint,bool,const GafBitmap*);
     int spriteFiltering_=0;
     SDL_Window* window_ = nullptr;
     SDL_GLContext ctx_ = nullptr;

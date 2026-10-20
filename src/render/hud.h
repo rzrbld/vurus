@@ -79,7 +79,7 @@ private:
     std::array<AnimationCursor,9> iconCursors_;
     std::vector<GafFont> fonts_,inventoryFonts_,menuFonts_,bonusFonts_;
     void textBank(Gfx&,std::string_view,float,float,Bank&,const GafFont&,bool additive,bool uppercase,float maxWidth);
-    void bitmap(Gfx&,Bank&,size_t,float,float,float clip=1);
+    void bitmap(Gfx&,Bank&,size_t,float,float,float clip=1,bool atlas=false);
     void sequence(Gfx&,Bank&,size_t,float,float,float clip=1,const GafSubframe* pose=nullptr);
     void text(Gfx&,std::string_view,float,float,size_t font=0,bool inventory=false,float maxWidth=10000);
 };

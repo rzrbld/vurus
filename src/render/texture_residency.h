@@ -33,7 +33,12 @@ public:
         }
     }
     template<class Delete> void trim(size_t byteLimit,size_t countLimit,Delete remove){
-        while(!recent_.empty()&&(bytes_>byteLimit||recent_.size()>countLimit)){
+        trimWithOverhead(byteLimit,countLimit,[]{return size_t(0);},remove);
+    }
+    // Atlas holes still occupy GPU storage. Re-evaluate after each eviction:
+    // releasing a frame can increase slack or release its whole page.
+    template<class Overhead,class Delete> void trimWithOverhead(size_t byteLimit,size_t countLimit,Overhead overhead,Delete remove){
+        while(!recent_.empty()&&(bytes_+overhead()>byteLimit||recent_.size()>countLimit)){
             auto& old=recent_.back();
             // An unusually large visible working set is allowed to exceed the
             // budget: never churn textures still needed by this draw.

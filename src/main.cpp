@@ -127,6 +127,12 @@ struct App {
     // The worker only reads restartLevel; replacement actions wait until
     // completion. Declared after those snapshots so its destructor joins first.
     std::future<SaveResult> saveFuture;
+#if VYRUZ_GLES
+    // Destroy the producer before saveFuture: an interrupted render must release
+    // a worker waiting for optional pixels, including during stack unwinding.
+    std::unique_ptr<std::promise<std::vector<uint8_t>>> savePreviewPromise;
+    std::string savePreviewWritePath;
+#endif
     std::string saveCatalogProfile;
     std::vector<vyruz::SaveCatalogEntry> saveCatalog;
     GLuint savePreviewTexture=0;
@@ -561,7 +567,16 @@ bool startAsyncSave(App& a,int64_t cost,std::string& error) {
         if(cost<0||money<cost){error="Not enough credits to save.";return false;}
         money-=cost;current.world.message.clear();
         snapshot->levels.emplace(snapshot->currentLevel,std::move(current));
+#if VYRUZ_GLES
+        std::future<std::vector<uint8_t>> preview;
+        if(a.saveHistory && a.window && !a.menu.open())try{
+            auto producer=std::make_unique<std::promise<std::vector<uint8_t>>>();
+            preview=producer->get_future();a.savePreviewPromise=std::move(producer);
+            a.gfx.requestPreview();
+        }catch(...){cancelSavePreview(a);} // Optional pixels never prevent a save.
+#else
         auto preview=a.saveHistory?readSavePreview(a):std::vector<uint8_t>{};
+#endif
         const auto path=a.savePath,profile=a.options.storageProfile();
         const bool history=a.saveHistory;
         a.saveFuture=std::async(std::launch::async,[&a,snapshot=std::move(snapshot),preview=std::move(preview),path,profile,history]() mutable {
@@ -583,13 +598,19 @@ bool startAsyncSave(App& a,int64_t cost,std::string& error) {
                     if(result.ok)result.path=path;
                 }
                 // Optional preview failure must never undo a committed save.
-                if(result.ok)try{writeSavePreview(result.path,preview);}catch(...){}
+                if(result.ok)try{
+#if VYRUZ_GLES
+                    if(preview.valid())writeSavePreview(result.path,preview.get());
+#else
+                    writeSavePreview(result.path,preview);
+#endif
+                }catch(...){}
             }catch(const std::exception& e){result.error=e.what();}
             releaseUnusedPortMemory();
             return result;
         });
         error.clear();return true;
-    }catch(const std::exception& e){error=e.what();return false;}
+    }catch(const std::exception& e){cancelSavePreview(a);error=e.what();return false;}
 }
 bool startAsyncRetry(App& a,std::string& error) {
     try {
@@ -616,6 +637,7 @@ bool serviceSave(App& a,bool asynchronous=false) {
             if(!result.ok)std::fprintf(stderr,"Could not store default retry session: %s (in-memory retry retained)\n",result.error.c_str());
             return false;
         }
+        if(!result.ok)cancelSavePreview(a);
         a.world.finishSave(result.ok,result.error);
         if(result.ok){a.lastSavedPath=result.path;a.saveCatalogDirty=true;a.audio.speech("V-GAME-SAVED.WAV",500,1000,3000);}
         std::printf("save %s: %s\n",result.ok?"complete":"failed",result.ok?result.path.c_str():result.error.c_str());
@@ -1247,6 +1269,7 @@ void presentApplication(App& a) {
         glPopAttrib();glPopMatrix();
     }
     a.gfx.present();
+    finishSavePreview(a);
 }
 
 // Presentation only: stick aim remains the unchanged direction vector passed
@@ -1985,6 +2008,7 @@ int main(int argc, char** argv) {
                     renderHz,a.gfx.vsyncEnabled(),warmupTimes.size(),static_cast<size_t>(overruns),profileCatchups,profileDroppedTicks);
     }
 
+    cancelSavePreview(a);
     if(a.saveFuture.valid()){a.saveFuture.wait();serviceSave(a,true);}
     a.audio.device().close();
     a.loading.clear(a.gfx);

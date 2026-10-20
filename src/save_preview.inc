@@ -1,5 +1,6 @@
 // Native42b360 writes a224x168 TGA;427ef0 draws it at(8,150).
-// Capture the last presented gameplay frame. Preview failure must never turn a
+// GLES captures the requested save frame before swap; desktop reads the front
+// buffer on save. Preview failure must never turn a
 // successfully committed paid checkpoint into a reported save failure.
 std::vector<uint8_t> readSavePreview(App& a) {
     if(!a.window || a.menu.open())return {};
@@ -40,7 +41,30 @@ void writeSavePreview(std::filesystem::path path,const std::vector<uint8_t>& tga
     }
 }
 void captureSavePreview(App& a,std::filesystem::path path) {
+#if VYRUZ_GLES
+    if(!a.window || a.menu.open())return;
+    // Synchronous/tooling saves publish their optional thumbnail on next render.
+    try{a.savePreviewWritePath=path.string();a.gfx.requestPreview();}catch(...){}
+#else
     writeSavePreview(std::move(path),readSavePreview(a));
+#endif
+}
+void cancelSavePreview([[maybe_unused]] App& a) {
+#if VYRUZ_GLES
+    a.savePreviewPromise.reset(); // broken_promise is ignored by the save worker.
+    a.savePreviewWritePath.clear();a.gfx.cancelPreview();
+#endif
+}
+void finishSavePreview([[maybe_unused]] App& a) {
+#if VYRUZ_GLES
+    if(!a.savePreviewPromise && a.savePreviewWritePath.empty())return;
+    auto producer=std::move(a.savePreviewPromise);
+    auto path=std::move(a.savePreviewWritePath);a.savePreviewWritePath.clear();
+    std::vector<uint8_t> pixels;
+    try{pixels=readSavePreview(a);}catch(...){}
+    if(!path.empty())try{writeSavePreview(std::move(path),pixels);}catch(...){}
+    if(producer)try{producer->set_value(std::move(pixels));}catch(...){}
+#endif
 }
 void drawSavePreview(App& a) {
     if(a.menu.page!=vyruz::MenuPage::SavedSessions || a.menu.selected<0 || size_t(a.menu.selected)>=a.saveCatalog.size())return;

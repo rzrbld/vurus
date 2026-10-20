@@ -1280,13 +1280,26 @@ void SceneRenderer::draw(Gfx& gfx,const SceneContent& scene,const Level& level,f
         if(orbit.visible && (*actors)[orbit.object].alive)for(const auto& particle:orbit.state.particles)submit(orbit.config.sprite,particle,false);
         for(const auto& trail:orbit.state.trails)submit(orbit.config.trailSprite,trail,true);
     }
-    for (const auto& command:composeObjects(level,bounds,cameraX,cameraY,cameraX+gfx.viewport().width,cameraY+gfx.viewport().height)) {
+    const auto commands=composeObjects(level,bounds,cameraX,cameraY,cameraX+gfx.viewport().width,cameraY+gfx.viewport().height);
+#if VYRUZ_GLES
+    // Upload visible animation frames/filter copies before emitting any sprite
+    // draws. Interleaving page writes with reads can force driver backing copies.
+    for(const auto& command:commands)if(command.isSprite) {
+        const auto& sprite=sprites[command.sprite];
+        auto& texture=sprite.bank->textures[sprite.frame];
+        const auto& bitmap=sprite.bank->animation.frames[sprite.frame];
+        if(!texture)texture=gfx.uploadSpriteTexture(bitmap.image,true);
+        const auto opcode=sprite.flags&0xff;
+        gfx.prepareSpriteTexture(texture,opcode==1 || opcode==3 || opcode==5,&bitmap.image);
+    }
+#endif
+    for (const auto& command:commands) {
         if (!command.isSprite) { drawTile(command.tile); continue; }
         const auto& sprite=sprites[command.sprite];
         const auto& box=bounds[command.sprite];
         auto& texture=sprite.bank->textures[sprite.frame];
         const auto& bitmap=sprite.bank->animation.frames[sprite.frame];
-        if (!texture) texture=gfx.uploadTexture(bitmap.image,true);
+        if (!texture) texture=gfx.uploadSpriteTexture(bitmap.image,true);
         const auto opcode=sprite.flags&0xff;
         const bool shadow=opcode==8 || opcode==9;
         const bool additive=opcode==6 || opcode==7;
@@ -1330,6 +1343,6 @@ void SceneRenderer::draw(Gfx& gfx,const SceneContent& scene,const Level& level,f
         glDisable(GL_ALPHA_TEST);
         glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
     }
-    textureResidency_.trim(32u*1024*1024,1024,[&](auto texture){gfx.deleteTexture(texture);});
+    textureResidency_.trimWithOverhead(32u*1024*1024,1024,[&]{return gfx.spriteAtlasSlackBytes();},[&](auto texture){gfx.deleteTexture(texture);});
 }
 }
