@@ -1,0 +1,32 @@
+name: Publish verified desktop v0.1.5 packages
+'on':
+  push:
+    branches:
+    - publish-releases-20261021
+    paths:
+    - .github/workflows/finish-desktop-v015.yml
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: finish-desktop-v015
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BUILD_SHA: 56126f3cba053ef34c0e2c89b6f5487aa93519f0
+      RELEASE_STREAM: desktop
+    steps:
+    - uses: actions/checkout@v4
+    - name: Reuse passing desktop build and publish verified packages
+      run: python3 .github/scripts/finish-desktop-v015.py
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: release-receipt-desktop
+        path: release-receipt-desktop.json
+        if-no-files-found: warn
+        retention-days: 90
