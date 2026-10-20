@@ -1114,6 +1114,7 @@ void GameWorld::registerReferenceOwnerCandidate(size_t id) {
     if(at==referenceOwnerCandidates_.end() || *at!=id)referenceOwnerCandidates_.insert(at,id);
 }
 void GameWorld::registerTransientRecordCandidate(size_t id) {
+    if(id<actors_.size() && actors_[id].routeSearch)legacyRouteSearchSeen_=true;
     // Generic births can receive creator/explosion/AI state after returning.
     registerReferenceOwnerCandidate(id);
     // Factories may set effect only after spawn returns. Retain the slot even
@@ -1122,10 +1123,12 @@ void GameWorld::registerTransientRecordCandidate(size_t id) {
     if(at==transientRecordCandidates_.end() || *at!=id)transientRecordCandidates_.insert(at,id);
 }
 void GameWorld::rebuildTransientRecordCandidates() {
+    legacyRouteSearchSeen_=false;
     transientRecordCandidates_.clear();
     referenceOwnerCandidates_.clear();
     for(size_t i=0;i<actors_.size();++i) {
         const auto& a=actors_[i];
+        if(a.routeSearch)legacyRouteSearchSeen_=true;
         if(a.effect || a.hasAmmoAttribute || a.contactConfig.launchedThing)
             transientRecordCandidates_.push_back(i);
         // Include controllers before their first target/route is assigned.
@@ -2152,6 +2155,7 @@ bool GameWorld::advanceActorAI(size_t i,float seconds) {
                 if (a.routeRetryMs<=0 && (changed || a.routePoint>=a.route.size())) {
                     if (!a.routeSearch || changed) {
                         a.routeSearch.emplace(*level_,pos,*destination,a.radius,2048);
+                        legacyRouteSearchSeen_=true;
                         a.routeGoal=destination;
                     }
                 }
@@ -2366,6 +2370,10 @@ void GameWorld::tick(float seconds,const WorldInput& suppliedInput) {
     playerLocked_=false;
     bool& playerLocked=playerLocked_;
     size_t navigationBudget=worldTick && debugEnemyAI_?64:0;
+    if(navigationBudget && !legacyRouteSearchSeen_) {
+        // The empty scan still advances this persisted round-robin cursor.
+        navigationCursor_+=count;navigationBudget=0;
+    }
     for(size_t visited=0;visited<count && navigationBudget; ++visited) {
         const size_t id=navigationCursor_++%count;
         auto& actor=actors_[id];

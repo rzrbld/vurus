@@ -618,6 +618,8 @@ private:
     struct DamageRequest { size_t target;float value;std::optional<size_t> source;bool radial;bool ammoSource=false; };
     std::vector<DamageRequest> damageQueue_,contactDamage_;
     bool applyingDamage_=false;
+    // Conservative absence proof. Once seen, retain the original scheduler until rebuild.
+    bool legacyRouteSearchSeen_=false;
     std::optional<TransitionRequest> transition_;
     std::set<size_t> rejectedLifts_;
     std::vector<std::string> diagnostics_;
