@@ -1,0 +1,40 @@
+name: Publish desktop v0.1.5 and PortMaster alpha.4
+'on':
+  push:
+    branches:
+    - publish-releases-20261021
+    paths:
+    - .github/workflows/publish-releases-20261021.yml
+  workflow_dispatch: {}
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: publish-releases-20261021
+  cancel-in-progress: false
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        stream:
+        - desktop
+        - portmaster
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BUILD_SHA: 56126f3cba053ef34c0e2c89b6f5487aa93519f0
+      RELEASE_STREAM: ${{ matrix.stream }}
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build exact tagged source, validate packages and publish
+      run: python3 .github/scripts/publish-20261021.py
+    - name: Retain publication receipt
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-receipt-${{ matrix.stream }}
+        path: release-receipt-*.json
+        if-no-files-found: warn
+        retention-days: 90
