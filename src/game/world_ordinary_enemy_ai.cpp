@@ -305,10 +305,10 @@ bool GameWorld::advanceOrdinaryEnemyAI(size_t id,float seconds,std::span<const C
             actor.direction=actor.enemyTurn->logicalHeading;
         }
     }
-    // 441367..4413b8, after AI/idle and before motion: clear Roller's
+    // 441367..4413b8, after AI/idle and before motion: clear Burner/Roller
     // turn command for a small PREVIOUS surface displacement. The body pose
     // has already advanced; retain its heading and countdown.
-    if(actor.enemyTurn && actor.enemyTurnConfig.subtype==0x1c && actor.enemyTurn->turnCommand!=0){
+    if(actor.enemyTurn && (actor.enemyTurnConfig.subtype==0x1a||actor.enemyTurnConfig.subtype==0x1c) && actor.enemyTurn->turnCommand!=0){
         if(actor.enemyMoveCommand==0)motionCommand.lateral=0;
         else{
             const auto previous=actor.nativeMotion->previousSurface;
