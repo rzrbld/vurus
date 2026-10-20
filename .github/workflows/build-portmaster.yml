@@ -99,10 +99,16 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         shell: bash
         run: |
-          (cd release-assets && sha256sum --check SHA256SUMS.txt)
+          mapfile -d '' packages < <(find release-assets -type f -name 'vurus-portmaster.zip' -print0)
+          mapfile -d '' revisions < <(find release-assets -type f -name 'source-revision.txt' -print0)
+          test "${#packages[@]}" -eq 1
+          test "${#revisions[@]}" -eq 1
+          test "$(cat "${revisions[0]}")" = "$GITHUB_SHA"
+          package_dir=$(dirname "${packages[0]}")
+          (cd "$package_dir" && sha256sum --check SHA256SUMS.txt)
           cat > release-notes.txt <<'NOTES'
           PortMaster Alpha Preview — ARM64 / OpenGL ES 3.0, optimized Release build. Original game data is required and is not included.
 
-          User-tested on Anbernic RG40XX H with muOS: roughly 30–40 FPS with FX and terrain effects disabled, dipping into the low 20s in heavy battles. These are user observations, not guarantees. Long-session and repeated-transition validation continues. Use the normal firmware Ports launcher. Advanced video → FPS counter toggles FPS and RSS memory display. Existing imported data does not need re-importing; preserve saves and settings when updating.
+          Use the normal firmware Ports launcher. Advanced video → FPS counter toggles FPS and RSS memory display. See the repository README and performance report for measured H700 encounter results and settings; performance varies with the scene. Existing imported data does not need re-importing; preserve saves and settings when updating. This remains an alpha prerelease.
           NOTES
-          gh release create "$RELEASE_TAG" release-assets/vurus-portmaster.zip release-assets/SHA256SUMS.txt --draft --prerelease --title "Vurus PortMaster Alpha Preview $RELEASE_TAG" --notes-file release-notes.txt
+          gh release create "$RELEASE_TAG" "$package_dir/vurus-portmaster.zip" "$package_dir/SHA256SUMS.txt" --draft --prerelease --title "Vurus PortMaster Alpha Preview $RELEASE_TAG" --notes-file release-notes.txt
