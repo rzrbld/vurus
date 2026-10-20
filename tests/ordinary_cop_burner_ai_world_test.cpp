@@ -119,6 +119,35 @@ int main(){try{Level l;l.mapW=l.mapH=100;l.hasTerrainCollision=true;l.collisionM
   else {need(!route.target,"positive native Guardian center stays at birth despite actor motion");const auto goal=nativeEnemyGuardianGoal(config.guardianHome);need(route.sampledTarget.x==goal.sample.x&&route.sampledTarget.y==goal.sample.y&&route.sampledCellX==goal.cellX&&route.sampledCellY==goal.cellY,"Guardian fallback samples retained native Location as shipped");need(route.search->seen.front()==goal.destination,"Guardian fallback preserves original double transform");}
   continuation(w,authored,l,30);
  }
+ // Accepted preview behavior: retain Cop action markers across corridor exits.
+ // This intentionally differs from original441076, which clears each visit.
+ unsigned markerCases=0;
+ for(const std::string mode:{"Seeker","Tracker","Random","Patrol","Burner"}){
+  const bool base=mode=="Random"||mode=="Patrol",control=mode=="Burner";
+  auto scene=familyFixture(control?"Burner":"Cop",base?mode:"Fixed",mode=="Tracker"?"Tracker":"Seeker");
+  if(mode=="Patrol"){scene.classes[1].behaviours={mode};scene.objects[1].behaviours={mode};}
+  if(mode=="Random")scene.objects[0].position={5000,2500};
+  if(mode=="Patrol")scene.paths[0].points={{1200,1000},{1500,1100},{1300,1200}};
+  const auto authored=scene;GameWorld world;need(world.load(scene,l,e),e);
+  for(int tick=0;tick<3;++tick)world.tick(.017f,{});
+  auto saved=world.snapshot();need(saved.actors[1].ordinaryAI.has_value(),mode+" has native action state");auto& ai=*saved.actors[1].ordinaryAI;
+  auto& route=base?ai.base:ai.targeting;
+  const int marker=mode=="Random"?4:mode=="Patrol"?12:mode=="Tracker"?2:1;
+  need(route.clock.active&&ai.lastAction==marker,mode+" owns action before escape");
+  moveObject(saved,1,{3500,2200});
+  const auto position=saved.actors[1].nativeMotionHistory()->center;
+  need(!spiderInsideRouteCorridor(position.x,position.y,route.segmentStart.x,route.segmentStart.y,
+      route.segmentEnd.x,route.segmentEnd.y,saved.actors[1].radius*2,saved.actors[1].enemyMagnitude),mode+" is outside corridor");
+  need(world.restoreSnapshot(saved,e),e);world.tick(.017f,{});
+  const auto& actual=*world.actors()[1].ordinaryAI;
+  const auto& after=base?actual.base:actual.targeting;
+  need(!after.clock.active&&!after.clock.searching,mode+" performs real corridor escape");
+  const int expectedMarker=control?0:mode=="Random"?1:marker;
+  std::cout<<mode<<" expected="<<expectedMarker<<" actual="<<actual.lastAction<<'\n';
+  need(actual.lastAction==expectedMarker,mode+" accepted Cop marker retained (other-family control unchanged)");
+  continuation(world,authored,l,60);++markerCases;
+ }
+ need(markerCases==5,"all retained-marker and shared-family controls ran");
  // v31 pre-migration Cop checkpoints have no ordinary state; initialize their
  // native actions while retaining authored Patrol progress and momentum.
  auto oldScene=familyFixture("Cop","Patrol");GameWorld old;need(old.load(oldScene,l,e),e);auto legacy=old.snapshot();legacy.actors[1].ordinaryAI.reset();legacy.actors[1].brainState.initialized=true;legacy.actors[1].brainState.point=2;legacy.actors[1].brainState.reverse=true;legacy.actors[1].contactVelocity={2,3};need(old.restoreSnapshot(legacy,e),e);need(old.actors()[1].ordinaryAI->patrol.point==2&&old.actors()[1].ordinaryAI->patrol.reverse,"legacy native migration retains Patrol progress");need(old.actors()[1].contactVelocity.x==2&&old.actors()[1].contactVelocity.z==3,"legacy migration preserves accepted momentum");

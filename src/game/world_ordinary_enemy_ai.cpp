@@ -103,7 +103,10 @@ bool GameWorld::advanceOrdinaryEnemyAI(size_t id,float seconds,std::span<const C
     const int ms=static_cast<int>(std::floor(elapsedMs_)-std::floor(elapsedMs_-seconds*1000));
     actor.spiderPatrolTurning=false;actor.enemyMoveCommand=0;
     if(actor.enemyTurn){actor.enemyTurn->turnCommand=0;actor.enemyTurn->gunCommand=0;}
-    NativeEnemyActionActor commands{state.actorFlags,0,0};
+    // Preserve the user-accepted Cop preview marker across route exits.
+    // Original caller441076 clears it; other families keep that behavior.
+    NativeEnemyActionActor commands{state.actorFlags,0,
+        config.targeting.subtype==0x16?state.lastAction:0};
     EnemyMotionCommand motionCommand;EnemyFireAim firing;bool locked=false;
     const auto center=[&](size_t target){
         if(const auto* history=actors_[target].nativeMotionHistory())return history->center;
