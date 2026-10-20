@@ -13,11 +13,16 @@ namespace {
 constexpr uint64_t DecorBit=uint64_t(1)<<63,ProjectileBit=uint64_t(1)<<62;
 NativeNavPoint nativePoint(ContentPosition p){const auto n=spiderSurfaceToNative(p.x,p.y);return {n.x,n.y};}
 bool terminal(const NativeEnemyRouteCore& r){return r.cursor>=r.points.size()||r.cursor+1==r.points.size();}
-int heading(NativeNavPoint a,NativeNavPoint b){return spiderContactHeading({b.x-a.x,b.y-a.y});}
-bool nextSegment(NativeEnemyRouteCore& r){
+int heading(NativeNavPoint a,NativeNavPoint b,int subtype){
+    // 42c9d0 -> 4075c0: zero/zero reaches x87/__ftol and yields heading0.
+    // Heli/Dragon route shortcuts retain this without changing contact rules.
+    if(subtype==0x1d&&a==b)return 0;
+    return spiderContactHeading({b.x-a.x,b.y-a.y});
+}
+bool nextSegment(NativeEnemyRouteCore& r,int subtype){
     if(r.cursor>=r.points.size())return false;
     const auto from=r.points[r.cursor++];if(r.cursor>=r.points.size())return false;
-    r.segmentStart=from;r.segmentEnd=r.points[r.cursor];r.desiredHeading=heading(from,r.segmentEnd);
+    r.segmentStart=from;r.segmentEnd=r.points[r.cursor];r.desiredHeading=heading(from,r.segmentEnd,subtype);
     return r.desiredHeading!=24;
 }
 void release(NativeNavGraph& graph,const NativeEnemyRouteCore& route){
@@ -220,7 +225,7 @@ bool GameWorld::advanceOrdinaryEnemyAI(size_t id,float seconds,std::span<const C
             // Retain ALL seen points, including discarded alternatives, until
             // this action is replaced/disposed; native42c2c0 owns the array.
             route.ownedPoints=std::move(route.search->seen);route.search.reset();
-            return nextSegment(route);
+            return nextSegment(route,config.targeting.subtype);
         };
         hooks.rollback=[&]{
             release(*spiderNavigation_,route);
@@ -255,14 +260,14 @@ bool GameWorld::advanceOrdinaryEnemyAI(size_t id,float seconds,std::span<const C
             };
             firing={};
             if(!(route.status&4)){
-                const bool more=!(route.status&1)||nextSegment(route);turn(false);
+                const bool more=!(route.status&1)||nextSegment(route,config.targeting.subtype);turn(false);
                 motionCommand.routeCorrection=enemyRouteCorrection({native.x,native.y},{route.segmentStart.x,route.segmentStart.y},
                     {route.segmentEnd.x,route.segmentEnd.y},config.targeting.subtype==0x19||config.targeting.subtype==0x20);
                 if(more)commands.movementCommand=200;
             }else{
                 turn(true);
                 if(route.status&2){commands.movementCommand=208;actor.contactMotion=false;actor.enemyThrust=std::min(actor.enemyThrust,0.f);}
-                if(route.target){route.segmentEnd=center(*route.target);route.desiredHeading=heading(route.segmentStart,route.segmentEnd);}
+                if(route.target){route.segmentEnd=center(*route.target);route.desiredHeading=heading(route.segmentStart,route.segmentEnd,config.targeting.subtype);}
                 NativeEnemyWeaponAimInput aim;
                 aim.source=native;aim.targetPresent=route.target.has_value();if(route.target)aim.target=center(*route.target);
                 aim.bodyHeading=actor.direction;aim.gunHeading=actor.weaponHeading();aim.desiredHeading=route.desiredHeading;

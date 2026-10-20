@@ -42,6 +42,27 @@ int main(){try{
  auto missing=heli("Patrol","Tracker");missing.objects[0].flags.invisible=true;missing.paths.clear();const auto missingAuthored=missing;GameWorld noPath;need(noPath.load(missing,l,e),e);for(int tick=0;tick<60;++tick)noPath.tick(.017f,{});need(!noPath.actors()[1].ordinaryAI->base.clock.active&&!noPath.actors()[1].ordinaryAI->base.clock.searching&&noPath.actors()[1].enemyMoveCommand==0,"missing Heli Patrol route stays absent without A* fallback");continuation(noPath,missingAuthored,l,15);
  auto fixed=heli("Fixed");fixed.classes[1].behaviours={"Fixed"};fixed.objects[1].behaviours={"Fixed"};GameWorld inert;need(inert.load(fixed,l,e)&&!inert.actors()[1].ordinaryAI,"non-targeting Fixed-only Heli remains excluded");
 
- std::cout<<"Heli native pending/active/close reverse, nonzero coast/pursuit/turn, bases, memory/disk and legacy/death controls passed\n";
+ // Original42caa0 refreshes the route endpoint from the live target, then
+ //42c9d0/4075c0 maps a zero route vector to heading0. Use actual pursuit and
+ //player repositioning, without injecting a synthetic route or cursor.
+ for(const std::string mode:{"Seeker","Tracker"}){
+  auto returnedScene=heli("Fixed",mode);const auto authored=returnedScene;
+  GameWorld returned;need(returned.load(returnedScene,l,e),e);
+  for(int tick=0;tick<15;++tick)returned.tick(.017f,{});
+  need(returned.actors()[1].ordinaryAI->targeting.clock.active,"Heli route admitted before target return");
+  const auto start=returned.actors()[1].ordinaryAI->targeting.segmentStart;
+  returned.setPlayerPosition(1000,1000);const auto target=spiderSurfaceToNative(1000,1000);
+  need(start.x==target.x&&start.y==target.y,"target returns exactly to retained route start");
+  returned.tick(.017f,{});
+  const auto& route=returned.actors()[1].ordinaryAI->targeting;
+  need(route.clock.active&&(route.status&4)&&route.segmentStart==route.segmentEnd,"close-target refresh retains zero route vector");
+  need(route.desiredHeading==0,"original Heli zero route vector yields heading0 rather than sentinel24");
+  const int previousHeading=returned.actors()[1].direction;
+  for(int tick=0;tick<4;++tick)returned.tick(.017f,{});
+  need(returned.actors()[1].direction!=previousHeading,"Heli keeps turning after coincident route endpoint refresh");
+  continuation(returned,authored,l,60);
+ }
+ need(spiderContactHeading({0,0})==24,"route fix preserves the accepted contact zero-vector sentinel");
+ std::cout<<"Heli native actions, inertia, pursuit/turn, zero-route heading, bases and memory/disk continuation controls passed\n";
  return 0;
 }catch(const std::exception& ex){std::cerr<<ex.what()<<'\n';return 1;}}
