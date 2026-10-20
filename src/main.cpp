@@ -7,6 +7,7 @@
 #include <chrono>
 #include <thread>
 #include <future>
+#include <mutex>
 #include <cstdio>
 #include <cstdlib>
 #if defined(__GLIBC__)
@@ -82,6 +83,12 @@ constexpr int kPlayerDirections = 24;          // binary: Vyruz binds ANM indice
 constexpr float kMoveDt = 1.f / 60.f;
 
 struct SaveResult { bool ok=false,retry=false;std::string path,error; };
+struct SaveCatalogResult {
+    uint64_t generation=0;
+    std::string base,profile,error;
+    std::vector<vyruz::SaveCatalogEntry> entries;
+    std::vector<std::string> labels,help;
+};
 struct App {
     bool debugEnabled=false;
     bool profileTick=false;
@@ -124,6 +131,9 @@ struct App {
     bool retryPersistence=false; //Only actual interactive campaign entries write defaults.
     std::string savePath,lastSavedPath,loadError;
     bool saveHistory=false,saveCatalogDirty=true;
+    // Readers and history publication/pruning serialize on workers. Keep this
+    // before both futures so every worker joins before the mutex is destroyed.
+    std::mutex saveStorageMutex;
     // The worker only reads restartLevel; replacement actions wait until
     // completion. Declared after those snapshots so its destructor joins first.
     std::future<SaveResult> saveFuture;
@@ -133,7 +143,11 @@ struct App {
     std::unique_ptr<std::promise<std::vector<uint8_t>>> savePreviewPromise;
     std::string savePreviewWritePath;
 #endif
-    std::string saveCatalogProfile;
+    // Only paths/profile and the immutable VFS cross to this worker. Declared
+    // after VFS so destruction joins before its resource storage is released.
+    std::future<SaveCatalogResult> saveCatalogFuture;
+    uint64_t saveCatalogGeneration=0;
+    std::string saveCatalogBase,saveCatalogProfile;
     std::vector<vyruz::SaveCatalogEntry> saveCatalog;
     GLuint savePreviewTexture=0;
     std::string savePreviewPath;
@@ -535,6 +549,8 @@ bool captureLevel(App& a,vyruz::SavedLevel& saved,std::string& error) {
     saved={a.world.snapshot(),a.sceneRenderer.capture()};return true;
 }
 #include "save_preview.inc"
+void invalidateSaveCatalog(App& a);
+void refreshSaveCatalog(App& a,bool force=false);
 bool saveSession(App& a,int64_t cost,std::string& error) {
     if(a.demoActive){error="Demo playback cannot be saved.";return false;}
     vyruz::SaveGame save;save.currentLevel=levelKey(a.content.mapPath);save.restartLevel=a.restartLevel;
@@ -545,6 +561,7 @@ bool saveSession(App& a,int64_t cost,std::string& error) {
     money-=cost;
     if(a.world.saveRequest())current.world.message.clear();
     save.levels[save.currentLevel]=std::move(current);
+    std::lock_guard storage(a.saveStorageMutex); // Synchronous tooling path only.
     std::error_code ec;const auto parent=std::filesystem::path(a.savePath).parent_path();
     if(!parent.empty())std::filesystem::create_directories(parent,ec);
     if(ec){error="Cannot create save directory: "+ec.message();return false;}
@@ -554,7 +571,7 @@ bool saveSession(App& a,int64_t cost,std::string& error) {
             ok=true;a.lastSavedPath=path->string();captureSavePreview(a,*path);
         }
     } else {ok=vyruz::writeSaveFile(a.savePath,save,error);if(ok)a.lastSavedPath=a.savePath;}
-    if(ok)a.saveCatalogDirty=true;
+    if(ok)invalidateSaveCatalog(a);
     return ok;
 }
 bool startAsyncSave(App& a,int64_t cost,std::string& error) {
@@ -586,17 +603,22 @@ bool startAsyncSave(App& a,int64_t cost,std::string& error) {
                 // render thread. Only the small result crosses back.
                 auto save=std::move(*snapshot);snapshot.reset();
                 save.restartLevel=a.restartLevel;
-                std::error_code ec;const auto parent=std::filesystem::path(path).parent_path();
-                if(!parent.empty())std::filesystem::create_directories(parent,ec);
-                if(ec){result.error="Cannot create save directory: "+ec.message();return result;}
-                if(history) {
-                    if(auto written=vyruz::writeHistorySave(path,profile,std::move(save),result.error)){
-                        result.ok=true;result.path=written->string();
+                {
+                    std::lock_guard storage(a.saveStorageMutex);
+                    std::error_code ec;const auto parent=std::filesystem::path(path).parent_path();
+                    if(!parent.empty())std::filesystem::create_directories(parent,ec);
+                    if(ec){result.error="Cannot create save directory: "+ec.message();return result;}
+                    if(history) {
+                        if(auto written=vyruz::writeHistorySave(path,profile,std::move(save),result.error)){
+                            result.ok=true;result.path=written->string();
+                        }
+                    } else {
+                        result.ok=vyruz::writeSaveFile(path,std::move(save),result.error);
+                        if(result.ok)result.path=path;
                     }
-                } else {
-                    result.ok=vyruz::writeSaveFile(path,std::move(save),result.error);
-                    if(result.ok)result.path=path;
                 }
+                // Release the storage lock before waiting for renderer pixels:
+                // shutdown must be able to join a catalog reader independently.
                 // Optional preview failure must never undo a committed save.
                 if(result.ok)try{
 #if VYRUZ_GLES
@@ -639,7 +661,7 @@ bool serviceSave(App& a,bool asynchronous=false) {
         }
         if(!result.ok)cancelSavePreview(a);
         a.world.finishSave(result.ok,result.error);
-        if(result.ok){a.lastSavedPath=result.path;a.saveCatalogDirty=true;a.audio.speech("V-GAME-SAVED.WAV",500,1000,3000);}
+        if(result.ok){a.lastSavedPath=result.path;invalidateSaveCatalog(a);refreshSaveCatalog(a);a.audio.speech("V-GAME-SAVED.WAV",500,1000,3000);}
         std::printf("save %s: %s\n",result.ok?"complete":"failed",result.ok?result.path.c_str():result.error.c_str());
         return false; // Gameplay never stopped; no clock reset/catch-up.
     }
@@ -680,25 +702,21 @@ bool loadSession(App& a,const std::string& selectedPath={}) {
     a.sessionStarted=true;a.scoreRecorded=false;a.suppressFireUntilRelease=true;
     std::printf("loaded save: %s\n",source.c_str());return true;
 }
-void refreshSaveCatalog(App& a,bool force=false) {
-    if(a.saveFuture.valid())return; // Never decode history while a checkpoint is being committed.
-    if(!force && !a.saveCatalogDirty && a.saveCatalogProfile==a.options.storageProfile())return;
-    a.saveCatalog=vyruz::listSaveCatalog(a.savePath,a.options.storageProfile());
-    a.gfx.deleteTexture(a.savePreviewTexture);a.savePreviewTexture=0;a.savePreviewPath.clear();
-    a.saveCatalogProfile=a.options.storageProfile();a.saveCatalogDirty=false;
-    a.menu.savedSessions=int(a.saveCatalog.size());a.menu.saveLabels.clear();a.menu.saveHelp.clear();
+SaveCatalogResult readSaveCatalog(const vyruz::Vfs& vfs,std::string base,std::string profile,uint64_t generation) {
+    SaveCatalogResult result;result.base=std::move(base);result.profile=std::move(profile);result.generation=generation;
+    result.entries=vyruz::listSaveCatalog(result.base,result.profile);
     static const char* difficulty[]={"Easy","Normal","Hard","Insane"};
     std::map<std::string,std::string> names;
-    for(const auto& entry:a.saveCatalog) {
+    for(const auto& entry:result.entries) {
         if(!entry.valid()) {
-            a.menu.saveLabels.push_back(entry.path.filename().string()+" (unreadable)");
-            a.menu.saveHelp.push_back(entry.error);continue;
+            result.labels.push_back(entry.path.filename().string()+" (unreadable)");
+            result.help.push_back(entry.error);continue;
         }
         auto [name,inserted]=names.emplace(entry.map,entry.map);
         if(inserted) {
             auto path=entry.map;const auto dot=path.rfind('.');if(dot!=std::string::npos)path.replace(dot,std::string::npos,".3DO");
             std::vector<uint8_t> bytes;vyruz::TextDocument document;std::string error;
-            if(a.vfs.read(path,bytes) && vyruz::parseContentText(std::string_view(reinterpret_cast<const char*>(bytes.data()),bytes.size()),path,document,error))
+            if(vfs.read(path,bytes) && vyruz::parseContentText(std::string_view(reinterpret_cast<const char*>(bytes.data()),bytes.size()),path,document,error))
                 if(const auto* title=vyruz::contentProperty(document.nodes,"level-name")) {
                     if(!title->values.empty()) {
                         name->second.clear();for(const auto& word:title->values){if(!name->second.empty())name->second+=' ';name->second+=word;}
@@ -714,7 +732,53 @@ void refreshSaveCatalog(App& a,bool force=false) {
             static_cast<unsigned long long>(seconds/3600),static_cast<unsigned long long>(seconds/60%60),static_cast<unsigned long long>(seconds%60));
         std::snprintf(help,sizeof(help),"Energy : %d\nShield : %d\nDifficulty : %s ...\n",
             int(entry.energy),int(entry.shield),difficulty[std::clamp(entry.difficulty,0,3)]);
-        a.menu.saveLabels.push_back(name->second+time+(entry.legacy?"(legacy)":""));a.menu.saveHelp.push_back(help);
+        result.labels.push_back(name->second+time+(entry.legacy?"(legacy)":""));result.help.push_back(help);
+    }
+    return result;
+}
+void invalidateSaveCatalog(App& a) {
+    ++a.saveCatalogGeneration;a.saveCatalogDirty=true;
+    a.saveCatalog.clear();a.menu.saveLabels.clear();a.menu.saveHelp.clear();
+    a.menu.savedSessions=0;a.menu.savedSessionsLoading=true;
+    // A queued confirmation must never reuse an index from an older list.
+    a.menu.selectedSave=-1;
+    a.gfx.deleteTexture(a.savePreviewTexture);a.savePreviewTexture=0;a.savePreviewPath.clear();
+    if(a.menu.page==vyruz::MenuPage::SavedSessions)a.menu.selected=int(a.menu.entries().size())-1;
+}
+void refreshSaveCatalog(App& a,bool force) {
+    const auto base=a.savePath,profile=a.options.storageProfile();
+    if(a.saveCatalogBase!=base || a.saveCatalogProfile!=profile) {
+        invalidateSaveCatalog(a);a.saveCatalogBase=base;a.saveCatalogProfile=profile;
+    } else if(force && !a.saveCatalogDirty)invalidateSaveCatalog(a);
+    // Reads already in flight may finish, but never publish across a save write.
+    if(a.saveFuture.valid())return;
+    if(a.saveCatalogFuture.valid()) {
+        if(a.saveCatalogFuture.wait_for(std::chrono::seconds(0))!=std::future_status::ready)return;
+        auto result=a.saveCatalogFuture.get();
+        if(result.generation==a.saveCatalogGeneration && result.base==base && result.profile==profile) {
+            a.saveCatalog=std::move(result.entries);a.menu.saveLabels=std::move(result.labels);a.menu.saveHelp=std::move(result.help);
+            a.saveCatalogDirty=false;a.menu.savedSessionsLoading=false;a.menu.savedSessions=int(a.saveCatalog.size());
+            if(a.menu.page==vyruz::MenuPage::SavedSessions) {
+                a.menu.selected=int(a.menu.entries().size())-1;
+                if(!result.error.empty())a.menu.error="Cannot read saved sessions: "+result.error;
+                else if(a.saveCatalog.empty())a.menu.error="No saved session.";
+                else a.menu.error.clear();
+            }
+        }
+    }
+    if(base.empty()){a.saveCatalogDirty=false;a.menu.savedSessionsLoading=false;}
+    if(!a.saveCatalogDirty)return;
+    const auto generation=a.saveCatalogGeneration;
+    // No World, renderer, GL, options or menu access from the worker. Full save
+    // decode/validation, title reads and large temporary destruction stay here.
+    try {
+        a.saveCatalogFuture=std::async(std::launch::async,[vfs=&a.vfs,storage=&a.saveStorageMutex,base,profile,generation] {
+            try{std::lock_guard lock(*storage);return readSaveCatalog(*vfs,base,profile,generation);}
+            catch(const std::exception& error){SaveCatalogResult result;result.base=base;result.profile=profile;result.generation=generation;result.error=error.what();return result;}
+        });
+    } catch(const std::exception& error) {
+        a.saveCatalogDirty=false;a.menu.savedSessionsLoading=false;
+        if(a.menu.page==vyruz::MenuPage::SavedSessions)a.menu.error="Cannot start saved-session refresh: "+std::string(error.what());
     }
 }
 #include "retry_session.inc"
@@ -807,7 +871,7 @@ bool applyMenuAction(App& a) {
                 a.menu.close(a.paused);a.menu.show(a.paused,true);a.sessionStarted=false;a.menu.retryAvailable=a.restartLevel.has_value();a.audio.device().stopEffects();
             } else if(action==vyruz::MenuAction::LoadGame) {
                 refreshSaveCatalog(a,true);a.menu.showSavedSessions();
-                if(a.saveCatalog.empty())a.menu.error="No saved session.";
+                if(!a.menu.savedSessionsLoading && a.saveCatalog.empty())a.menu.error="No saved session.";
             } else if(action==vyruz::MenuAction::LoadSelected) {
                 const auto index=a.menu.selectedSave;
                 if(index>=0 && size_t(index)<a.saveCatalog.size())levelChanged=loadSession(a,a.saveCatalog[index].path.string());
@@ -1895,6 +1959,7 @@ int main(int argc, char** argv) {
         if(!a.saveFuture.valid())levelChanged=serviceAttractDemo(a,SDL_GetTicks64())||levelChanged;
         serviceGameOver(a);
         const bool savedThisFrame=a.saveFuture.valid()?serviceSave(a,true):(!a.demoActive&&!a.presentation.open()&&serviceSave(a,true));
+        if(a.saveCatalogFuture.valid())refreshSaveCatalog(a);
         if (!a.saveFuture.valid() && !a.demoActive && a.world.transition() && !a.menu.open() && !a.presentation.open()) {
             const auto request=*a.world.transition();
             levelChanged=changeLevel(a,request)||levelChanged;

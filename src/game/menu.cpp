@@ -6,14 +6,14 @@ std::string MenuView::selectedHelp() const {
     const auto rows=entries();
     if(selected<0 || size_t(selected)>=rows.size())return {};
     if(page==MenuPage::Options)return size_t(selected)<optionHelp.size()?optionHelp[selected]:std::string{};
-    if(page==MenuPage::SavedSessions)return size_t(selected)<saveHelp.size()?saveHelp[selected]:std::string{};
+    if(page==MenuPage::SavedSessions)return savedSessionsLoading?std::string{}:size_t(selected)<saveHelp.size()?saveHelp[selected]:std::string{};
     if(page!=MenuPage::Main && page!=MenuPage::Game && page!=MenuPage::Extras)return {};
     switch(rows[selected].action) {
     case MenuAction::NewGame:return newGameHelp;
     case MenuAction::Restart:return page==MenuPage::Main?retryHelp:std::string{};
     case MenuAction::Options:return "Video, Audio, Control, User settings, Language.";
     case MenuAction::Extras:return "Scores, Credits, Intro, Slide Show, Demo.";
-    case MenuAction::LoadGame:return savedSessions?std::to_string(savedSessions)+" saved session"+(savedSessions==1?"":"s")+" available.":"No saved session.";
+    case MenuAction::LoadGame:if(savedSessionsLoading)return "Reading saved sessions...";return savedSessions?std::to_string(savedSessions)+" saved session"+(savedSessions==1?"":"s")+" available.":"No saved session.";
     case MenuAction::Demo:return "Auto-playing game demo.";
     case MenuAction::Intro:return "Select to view intro animation.";
     default:return {};
@@ -57,7 +57,7 @@ std::vector<MenuEntry> MenuView::entries() const {
         if(debugEnabled)rows.push_back({"Debug / testing (F2)",MenuAction::Debug});
         return rows;}
     case MenuPage::Options:{std::vector<MenuEntry> rows;for(const auto& label:optionLabels)rows.push_back({label,MenuAction::None});return rows;}
-    case MenuPage::SavedSessions:{std::vector<MenuEntry> rows;for(const auto& label:saveLabels)rows.push_back({label,MenuAction::LoadSelected});if(rows.size()<7)rows.push_back({"",MenuAction::None});rows.push_back({"Back",MenuAction::None});return rows;}
+    case MenuPage::SavedSessions:{if(savedSessionsLoading)return {{"Reading saved sessions...",MenuAction::None},{"Back",MenuAction::None}};std::vector<MenuEntry> rows;for(const auto& label:saveLabels)rows.push_back({label,MenuAction::LoadSelected});if(rows.size()<7)rows.push_back({"",MenuAction::None});rows.push_back({"Back",MenuAction::None});return rows;}
     case MenuPage::Debug:return {{"Level select",MenuAction::DebugLevels},{debugAI?"Enemy AI: ON":"Enemy AI: OFF",MenuAction::DebugAI},{debugGod?"God mode: ON":"God mode: OFF",MenuAction::DebugGod},{"Fill all ammo",MenuAction::DebugAmmo},{"Add 1,000,000 money",MenuAction::DebugMoney},{"Surprises",MenuAction::DebugSurprises},{"Back",MenuAction::None}};
     case MenuPage::DebugLevels:{std::vector<MenuEntry> rows;for(const auto& path:debugLevels())rows.push_back({path.substr(0,path.size()-4),MenuAction::DebugSelectLevel});return rows;}
     case MenuPage::DebugSurprises:{std::vector<MenuEntry> rows={{"Clear active Surprise",MenuAction::DebugSelectSurprise}};for(int id=1;id<=int(SurpriseKind::Nop);++id)rows.push_back({surpriseName(static_cast<SurpriseKind>(id)),MenuAction::DebugSelectSurprise});return rows;}
@@ -154,6 +154,7 @@ MenuAction MenuView::activate(bool& paused) {
     const auto rows=entries();if(selected<0||static_cast<size_t>(selected)>=rows.size())return MenuAction::None;
     const auto action=rows[selected].action;error.clear();
     if(page==MenuPage::SavedSessions) {
+        if(savedSessionsLoading && selected==0)return MenuAction::None;
         if(action==MenuAction::None){back(paused);return MenuAction::None;}
         selectedSave=selected;
         if(saveParent_==MenuPage::Main)return action;

@@ -93,4 +93,11 @@ int main(){
  menu.page=MenuPage::Extras;check(menu.rowHeight()==30,"Extras uses compact spacing");
  menu.page=MenuPage::Game;check(menu.rowHeight()==45,"game spacing preserved");
 
+ // Catalog decoding never makes the browser modal: only Back is actionable.
+ menu.savedSessionsLoading=true;menu.showSavedSessions();
+ check(menu.entries().size()==2&&menu.entries()[menu.selected].label=="Back","loading browser defaults Back");
+ menu.selected=0;check(menu.activate(paused)==MenuAction::None&&menu.page==MenuPage::SavedSessions,"loading row cannot select stale save");
+ menu.selected=1;menu.activate(paused);check(menu.page!=MenuPage::SavedSessions,"Back stays usable during catalog refresh");
+ menu.savedSessionsLoading=false;
+
 }

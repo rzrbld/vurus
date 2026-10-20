@@ -25,6 +25,7 @@ public:
     bool debugEnabled=false;
     bool slidesAvailable=true,retryAvailable=false;
     int savedSessions=0;
+    bool savedSessionsLoading=false;
     bool debugAI=true,debugGod=false;
     bool paginated() const { return page==MenuPage::Options || page==MenuPage::DebugLevels || page==MenuPage::DebugSurprises; }
     int firstRow() const;
