@@ -38,6 +38,43 @@ int main(){try{
  auto oldScene=jeep("Patrol");GameWorld old;need(old.load(oldScene,l,e),e);auto legacy=old.snapshot();legacy.actors[1].ordinaryAI.reset();legacy.actors[1].brainState.initialized=true;legacy.actors[1].brainState.point=2;legacy.actors[1].brainState.reverse=true;legacy.actors[1].contactVelocity={2,3};need(old.restoreSnapshot(legacy,e),e);need(old.actors()[1].ordinaryAI->patrol.point==2&&old.actors()[1].ordinaryAI->patrol.reverse,"Jeep migration retains Patrol cursor/reverse");need(old.actors()[1].contactVelocity.x==2&&old.actors()[1].contactVelocity.z==3,"Jeep migration preserves current momentum");old.damage(1,1e9f,0);need(!old.actors()[1].alive&&!old.actors()[1].ordinaryAI,"Jeep terminal death releases native action ownership");need(old.restoreSnapshot(old.snapshot(),e)&&!old.actors()[1].ordinaryAI,"dead Jeep restoration cannot recreate action state");
  auto fixed=jeep("Fixed");fixed.classes[1].behaviours={"Fixed"};fixed.objects[1].behaviours={"Fixed"};GameWorld inert;need(inert.load(fixed,l,e)&&!inert.actors()[1].ordinaryAI,"non-targeting Fixed-only Jeep remains excluded");
 
+ // Accepted original route-heading and caller-reset regression.
+ {
+ for(const std::string mode:{"Seeker","Tracker"})for(bool canTurn:{false,true}){
+  auto scene=jeep("Fixed",mode);scene.objects[0].position={1020,1000};
+  set(scene.classes[1].properties,"Can-turn-on-place",canTurn?"1":"0");
+  scene.objects[1].properties=scene.classes[1].properties;
+  const auto authored=scene;GameWorld w;need(w.load(scene,l,e),e);
+  w.tick(.017f,{});w.tick(.017f,{});auto state=w.snapshot();auto& actor=state.actors[1];auto& route=actor.ordinaryAI->targeting;
+  need(route.clock.active,"native route admitted");
+  const auto target=spiderSurfaceToNative(scene.objects[0].position.x,scene.objects[0].position.y);
+  route.segmentStart={target.x,target.y};route.segmentEnd={target.x+100,target.y};route.desiredHeading=18;
+  route.clock.scanRemainingMs=1000;
+  const auto delta=spiderSurfaceToNative(target.x-actor.nativeMotion->center.x,target.y-actor.nativeMotion->center.y);
+  const int nearHeading=spiderContactHeading({delta.x,delta.y});
+  const int initialHeading=(nearHeading+21)%24;
+  actor.enemyTurn=initializeEnemyTurn(actor.enemyTurnConfig,initialHeading,initialHeading);actor.direction=initialHeading;
+  actor.enemyTurn->bodyRemainingMs=0;
+  // No-turn-on-place vehicles require a cached speed>=1 and a near-target
+  // direction within1 of orthogonalHeading; derive an admitted fixture heading.
+  if(!canTurn){actor.enemyMagnitude=2;actor.contactVelocity={2,0};}
+  need(w.restoreSnapshot(state,e),e);w.tick(.017f,{});
+  const auto& current=w.actors()[1].ordinaryAI->targeting;
+  need(current.status&4,"near target refresh admitted");
+  need(current.segmentStart==current.segmentEnd,"retained start equals live target center");
+  need(current.desiredHeading==0,"original42c9d0 zero route heading0");
+  continuation(w,authored,l,60);
+ }
+ need(spiderContactHeading({0,0})==24,"accepted contact sentinel unchanged");
+ // Full caller clears actor+194 before AI at441076. Corridor escape must
+ // retain this freshly cleared0, not the previous tick's marker.
+ auto scene=jeep("Fixed");const auto authored=scene;GameWorld w;need(w.load(scene,l,e),e);
+ w.tick(.017f,{});w.tick(.017f,{});auto state=w.snapshot();auto& ai=*state.actors[1].ordinaryAI;
+ ai.lastAction=1;ai.actorFlags=1;ai.targeting.segmentStart={10000,10000};ai.targeting.segmentEnd={10100,10000};
+ need(w.restoreSnapshot(state,e),e);w.tick(.017f,{});
+ need(w.actors()[1].ordinaryAI->lastAction==0,"original caller clears marker before corridor escape");
+ continuation(w,authored,l,60);
+ }
  std::cout<<"Jeep native pending/active/close reverse, nonzero coast/pursuit/turn, bases, memory/disk and legacy/death controls passed\n";
  return 0;
 }catch(const std::exception& ex){std::cerr<<ex.what()<<'\n';return 1;}}

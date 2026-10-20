@@ -15,8 +15,8 @@ NativeNavPoint nativePoint(ContentPosition p){const auto n=spiderSurfaceToNative
 bool terminal(const NativeEnemyRouteCore& r){return r.cursor>=r.points.size()||r.cursor+1==r.points.size();}
 int heading(NativeNavPoint a,NativeNavPoint b,int subtype){
     // 42c9d0 -> 4075c0: zero/zero reaches x87/__ftol and yields heading0.
-    // Heli/Dragon route shortcuts retain this without changing contact rules.
-    if(subtype==0x1d&&a==b)return 0;
+    // Jeep/Heli route shortcuts retain this without changing contact rules.
+    if((subtype==0x1b||subtype==0x1d)&&a==b)return 0;
     return spiderContactHeading({b.x-a.x,b.y-a.y});
 }
 bool nextSegment(NativeEnemyRouteCore& r,int subtype){
@@ -310,10 +310,10 @@ bool GameWorld::advanceOrdinaryEnemyAI(size_t id,float seconds,std::span<const C
             actor.direction=actor.enemyTurn->logicalHeading;
         }
     }
-    // 441367..4413b8, after AI/idle and before motion: clear Burner/Roller
+    // 441367..4413b8, after AI/idle and before motion: clear Burner/Jeep/Roller
     // turn command for a small PREVIOUS surface displacement. The body pose
     // has already advanced; retain its heading and countdown.
-    if(actor.enemyTurn && (actor.enemyTurnConfig.subtype==0x1a||actor.enemyTurnConfig.subtype==0x1c) && actor.enemyTurn->turnCommand!=0){
+    if(actor.enemyTurn && (actor.enemyTurnConfig.subtype==0x1a||actor.enemyTurnConfig.subtype==0x1b||actor.enemyTurnConfig.subtype==0x1c) && actor.enemyTurn->turnCommand!=0){
         if(actor.enemyMoveCommand==0)motionCommand.lateral=0;
         else{
             const auto previous=actor.nativeMotion->previousSurface;

@@ -29,8 +29,8 @@ int main(){try{
     // Current/previous SURFACE coordinates deliberately differ from the retained
     // native center. This catches native-space, >=, and post-motion substitutes.
     for(const std::string family:{"Burner","Jeep","Roller","Cop","Walker","Heli"}){
-        // Jeep remains separately staged; this commit adds only accepted Burner.
-        const bool admitted=family=="Burner"||family=="Roller";
+        // Original441367 family mask covers Burner, Jeep and Roller.
+        const bool admitted=family=="Burner"||family=="Jeep"||family=="Roller";
         for(const auto delta:std::array<ContentPosition,6>{{{0,0},{.25f,.25f},{.4999f,0},{.5f,0},{.5001f,0},{.5f,.5f}}}){
             auto scene=turnFixture(family);const auto authored=scene;GameWorld world;
             need(world.load(scene,l,e),e);auto state=following(world);
@@ -57,7 +57,7 @@ int main(){try{
         }
     }
     // The native branch covers reverse208 as well as forward200.
-    for(const std::string family:{"Burner","Roller"}){
+    for(const std::string family:{"Burner","Jeep","Roller"}){
         auto scene=turnFixture(family);scene.objects[0].position={1120,1000};const auto authored=scene;
         GameWorld world;need(world.load(scene,l,e),e);auto state=following(world);
         state.actors[1].nativeMotion->previousSurface=state.objects[1].position;
