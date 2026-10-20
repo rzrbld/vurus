@@ -1,6 +1,9 @@
 # A portable directory, not a system installer: data/settings stay beside vurus.
 if(WIN32 OR APPLE)
   install(TARGETS vurus RUNTIME DESTINATION .)
+  install(FILES "${CMAKE_SOURCE_DIR}/LICENSE" "${CMAKE_SOURCE_DIR}/LICENSE.md" DESTINATION .)
+  install(FILES "${CMAKE_SOURCE_DIR}/third_party/oxideav-indeo/LICENSE" DESTINATION LICENSES/oxideav-indeo)
+  install(DIRECTORY "${CMAKE_SOURCE_DIR}/third_party/oxideav-indeo/rust-licenses" DESTINATION LICENSES/oxideav-indeo)
   install(FILES "${CMAKE_SOURCE_DIR}/third_party/zlib/LICENSE" DESTINATION LICENSES RENAME zlib.txt)
   install(FILES "${CMAKE_SOURCE_DIR}/packaging/README-desktop.txt" DESTINATION . RENAME README.txt)
   install(FILES "${CMAKE_SOURCE_DIR}/third_party/smaa/LICENSE.txt" DESTINATION LICENSES RENAME SMAA.txt)
