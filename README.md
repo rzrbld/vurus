@@ -65,22 +65,38 @@ settings and command-line options.
 
 ## Performance
 
-Recent development-build tests on **Anbernic RG40XX H** (Allwinner H700,
-1 GB RAM, muOS, 640×480):
+Measured on **Anbernic RG40XX H / H700 / Mali-G31, 1 GB RAM**, muOS,
+640×480, development build `d23b515` (2026-10-21). Uncapped, VSync off,
+sprite filtering off, music off; shadows, reactor FX and vignette on.
 
-| Saved-scene test | Frame rate |
-| --- | ---: |
-| CAVE/T1C1 | ~31 FPS |
-| CAVE/T1C2 | ~32 FPS |
+| Map / position | FPS¹ | Enemies nearby² | Startup RSS³ |
+| --- | ---: | ---: | ---: |
+| UNDERGROUND/T2U1 · 4870,2180 | 49.8 | 39 | 116 MiB |
+| UNDERGROUND/T2U1 · 3968,348 | 60.0 | 8 | 118 MiB |
+| HITEK/T1H1 · 3670,2570 | 42.0 | 18 | 131 MiB |
+| HITEK/T1H1 · 2166,1107 | 33.8 | 19 | 131 MiB |
 
-Separate short on-device samples used approximately **131–140 MiB RSS**;
-longer user sessions reported around **190–210 MiB**. These are process-memory
-observations, not total device RAM or guaranteed peaks.
+Median timings in milliseconds; CPU columns are **per simulation tick**,
+rendering is **per frame**. CPU total includes World, animation, audio and input;
+frames can run multiple ticks.
 
-The FPS tests used stationary saved scenes, normal audio/music, shadows/reactor
-FX/vignette On, ground details Off and sprite filtering Off. Busy combat can
-run slower. See the [performance report](docs/performance_update_2026-10-19.md)
-for conditions and measurement details.
+| Map / position | World | Animation | CPU total | Render / present |
+| --- | ---: | ---: | ---: | ---: |
+| UNDERGROUND/T2U1 · 4870,2180 | 4.86 | 1.97 | 8.53 | 10.64 |
+| UNDERGROUND/T2U1 · 3968,348 | 3.12 | 1.59 | 6.10 | 9.63 |
+| HITEK/T1H1 · 3670,2570 | 6.55 | 1.82 | 9.79 | 9.63 |
+| HITEK/T1H1 · 2166,1107 | 6.83 | 1.97 | 10.32 | 10.16 |
+
+¹ Reciprocal of the mean run-median frame time; two 1,200-frame live runs per
+spot after warmup. ² Enemies within 1,000 world units at spawn, not all visible
+or active. ³ Separate startup captures, not timed-run peaks. These are encounter
+samples, not whole-level averages. See the [H700 performance report](docs/performance_update_2026-10-21.md)
+for conditions, percentile timings, memory provenance and before/after results.
+
+![H700 benchmark in CAVE/T1C2 with FPS and RSS overlay](docs/images/h700-cave-t1c2-benchmark.png)
+
+*CAVE/T1C2 on H700, 2026-10-21: a frame from the fixed-step combat probe;
+40.1 FPS is the momentary overlay reading, not the run average.*
 
 ## Screenshots
 
