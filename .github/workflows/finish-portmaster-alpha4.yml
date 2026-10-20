@@ -1,0 +1,32 @@
+name: Publish verified PortMaster alpha.4 package
+'on':
+  push:
+    branches:
+    - publish-releases-20261021
+    paths:
+    - .github/workflows/finish-portmaster-alpha4.yml
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: finish-portmaster-alpha4
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BUILD_SHA: 56126f3cba053ef34c0e2c89b6f5487aa93519f0
+      RELEASE_STREAM: portmaster
+    steps:
+    - uses: actions/checkout@v4
+    - name: Reuse passing build, verify and publish
+      run: python3 .github/scripts/finish-portmaster-alpha4.py
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: release-receipt-portmaster-recovered
+        path: release-receipt-portmaster.json
+        if-no-files-found: warn
+        retention-days: 90
