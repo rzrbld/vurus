@@ -1,4 +1,4 @@
-name: Publish verified PortMaster alpha.4 package with correct API headers
+name: Publish verified PortMaster alpha.4 package with safe redirects
 'on':
   push:
     branches:

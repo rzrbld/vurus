@@ -1,5 +1,5 @@
 """One-use release coordinator: build exact source, validate, publish existing draft."""
-import hashlib,io,json,os,struct,tarfile,time,urllib.request,urllib.error,zipfile
+import hashlib,io,json,os,struct,tarfile,time,urllib.request,urllib.error,urllib.parse,zipfile
 from pathlib import Path,PurePosixPath
 REPO=os.environ['GITHUB_REPOSITORY'];TOKEN=os.environ['GH_TOKEN'];SOURCE=os.environ['BUILD_SHA'];STREAM=os.environ['RELEASE_STREAM']
 CONFIG={
@@ -7,11 +7,18 @@ CONFIG={
  'portmaster':('portmaster-v0.1.0-alpha.4','build-portmaster.yml','Vurus PortMaster Alpha Preview alpha.4',True,['vurus-portmaster.zip'])}
 TAG,WORKFLOW,TITLE,PRE,PACKAGES=CONFIG[STREAM]
 API='https://api.github.com/repos/'+REPO+'/'
+class SafeRedirect(urllib.request.HTTPRedirectHandler):
+ def redirect_request(self,request,fp,code,message,headers,url):
+  redirected=super().redirect_request(request,fp,code,message,headers,url)
+  if redirected is not None and urllib.parse.urlsplit(request.full_url).netloc!=urllib.parse.urlsplit(url).netloc:
+   redirected.remove_header('Authorization')
+  return redirected
+opener=urllib.request.build_opener(SafeRedirect())
 def api(path,method='GET',data=None,binary=False):
  request=urllib.request.Request(API+path,data=None if data is None else json.dumps(data).encode(),method=method,headers={'Authorization':'Bearer '+TOKEN,'Accept':'application/octet-stream' if binary and path.startswith('releases/assets/') else 'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'vurus-release-validator','Content-Type':'application/json'})
  for attempt in range(5):
   try:
-   with urllib.request.urlopen(request,timeout=120) as response:
+   with opener.open(request,timeout=120) as response:
     body=response.read();return body if binary else (json.loads(body) if body else None)
   except urllib.error.HTTPError as error:
    if method!='GET' or error.code not in (429,500,502,503,504) or attempt==4:raise
@@ -124,7 +131,7 @@ for name,raw in upload_payloads.items():
   continue
  url='https://uploads.github.com/repos/'+REPO+'/releases/'+str(release['id'])+'/assets?name='+name
  request=urllib.request.Request(url,data=raw,method='POST',headers={'Authorization':'Bearer '+TOKEN,'Accept':'application/vnd.github+json','Content-Type':'application/zip' if name.endswith('.zip') else 'text/plain','User-Agent':'vurus-release-validator'})
- with urllib.request.urlopen(request,timeout=120) as response:asset=json.loads(response.read())
+ with opener.open(request,timeout=120) as response:asset=json.loads(response.read())
  assert asset['digest']==digest and asset['state']=='uploaded'
 release=api('releases/'+str(release['id']))
 assets={a['name']:a for a in release['assets']};assert set(assets)==set(PACKAGES+['SHA256SUMS.txt']),list(assets)
