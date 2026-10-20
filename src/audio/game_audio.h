@@ -36,7 +36,8 @@ public:
     const std::vector<std::string>& diagnostics() const { return diagnostics_; }
 private:
     struct WeaponSound {
-        std::string start,sound,end,dry;
+        // Resolved during load; weapon visits do not normalize/look up paths.
+        AudioClipPtr start,sound,end,dry;
         bool loop=false;
         uint32_t mask=0xff00;
         int priority=129;

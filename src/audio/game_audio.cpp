@@ -70,14 +70,15 @@ bool GameAudio::load(const SceneContent& scene,const ContentReader& read,const s
     for(const auto& cls:scene.classes) {
         if(const auto* weapon=attribute(cls.properties,"weapon")) {
             WeaponSound sound;
-            sound.start=soundPath(propertyText(weapon->children,"Fire-start-sound"));
-            sound.sound=soundPath(propertyText(weapon->children,"Fire-sound"));
-            sound.end=soundPath(propertyText(weapon->children,"Fire-end-sound"));
-            sound.dry=soundPath(propertyText(weapon->children,"No-ammo-sound"));
+            const auto start=soundPath(propertyText(weapon->children,"Fire-start-sound"));
+            const auto fire=soundPath(propertyText(weapon->children,"Fire-sound"));
+            const auto end=soundPath(propertyText(weapon->children,"Fire-end-sound"));
+            const auto dry=soundPath(propertyText(weapon->children,"No-ammo-sound"));
             sound.loop=propertyBool(weapon->children,"Fire-sound-loop");
             sound.mask=channelMask(cls.properties,0xff00);
             sound.priority=int(propertyNumber(cls.properties,"Sample-channel-priority",129));
-            for(const auto* path:{&sound.start,&sound.sound,&sound.end,&sound.dry})keepClip(*path,read);
+            sound.start=keepClip(start,read);sound.sound=keepClip(fire,read);
+            sound.end=keepClip(end,read);sound.dry=keepClip(dry,read);
             weapons_[folded(cls.name)]=std::move(sound);
         }
         if(!cls.sprite.path.empty())paths.insert(cls.sprite.path);
@@ -175,17 +176,17 @@ void GameAudio::consumeWeapons(const GameWorld& world,const SceneContent& scene)
         const bool held=nativeWeaponAudioHeld(actor.nativeFireRequested,player,invisible,
             world.surprise().active(SurpriseKind::Motor),false)&&!(player&&world.surprise().jammed);
         NativeWeaponAudioInput in;
-        in.startAvailable=bool(clip(sound.start));in.fireAvailable=bool(clip(sound.sound));
-        in.endAvailable=bool(clip(sound.end));in.dryAvailable=bool(clip(sound.dry));in.fireLoop=sound.loop;in.player=player;
+        in.startAvailable=bool(sound.start);in.fireAvailable=bool(sound.sound);
+        in.endAvailable=bool(sound.end);in.dryAvailable=bool(sound.dry);in.fireLoop=sound.loop;in.player=player;
         in.ammoPointerPresent=stock!=actor.ammo.end();in.ammoCount=in.ammoPointerPresent?stock->second.count:0;
         in.held=held;in.channelActive=device_.nativeChannelPlaying(route.channel);in.maskIsAll=route.mask==0xffff;
         const auto action=advanceNativeWeaponAudio(firing_[id],in);
         if(action.stopMask)device_.stopNativeChannels(route.mask);
         if(action.stopChannel)device_.stopNativeChannels(route.channelMask());
-        if(action.playStart)raw(sound.start,route.mask,route.priority);
-        if(action.playFire)raw(sound.sound,route.mask,route.priority,action.loop);
-        if(action.playEnd)raw(sound.end,route.mask,route.priority);
-        if(action.playDry)raw(sound.dry,route.mask,route.priority);
+        if(action.playStart)device_.playNative(sound.start,route.mask,route.priority);
+        if(action.playFire)device_.playNative(sound.sound,route.mask,route.priority,65535,0,action.loop);
+        if(action.playEnd)device_.playNative(sound.end,route.mask,route.priority);
+        if(action.playDry)device_.playNative(sound.dry,route.mask,route.priority);
     }
 }
 void GameAudio::consume(GameWorld& world,const SceneContent& scene,const std::vector<SceneAudioCue>& cues) {
@@ -221,7 +222,7 @@ void GameAudio::consume(GameWorld& world,const SceneContent& scene,const std::ve
     case AudioEventKind::WeaponFire:{
         //444ca0 clears stage flags on accepted start-only weapon firing.
         const auto sound=weapons_.find(folded(event.name));
-        if(sound!=weapons_.end()&&clip(sound->second.start)&&!clip(sound->second.sound))firing_[event.actor]={};
+        if(sound!=weapons_.end()&&sound->second.start&&!sound->second.sound)firing_[event.actor]={};
         break;
     }
     case AudioEventKind::WeaponStop:case AudioEventKind::DryFire:break; //43df70 owns held audio.

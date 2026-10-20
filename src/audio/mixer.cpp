@@ -282,7 +282,11 @@ uint64_t AudioDevice::playNative(AudioClipPtr clip,uint32_t mask,int priority,un
 }
 void AudioDevice::updateNative(uint64_t handle,unsigned volume,int pan){DeviceLock lock(device_);mixer_.updateNative(handle,volume,pan);}
 void AudioDevice::updateNativeChannel(unsigned channel,unsigned volume,int pan){DeviceLock lock(device_);mixer_.updateNativeChannel(channel,volume,pan);}
-bool AudioDevice::nativeChannelPlaying(unsigned channel)const{DeviceLock lock(device_);return mixer_.nativeChannelPlaying(channel);}
+bool AudioDevice::nativeChannelPlaying(unsigned channel)const{
+    // Invalid native channels have no state, including before open/after close.
+    if(channel==0 || channel>16)return false;
+    DeviceLock lock(device_);return mixer_.nativeChannelPlaying(channel);
+}
 void AudioDevice::stopNativeChannels(uint32_t mask){DeviceLock lock(device_);mixer_.stopNativeChannels(mask);}
 void AudioDevice::setMusicNativeChannel(bool native) { DeviceLock lock(device_);mixer_.setMusicNativeChannel(native); }
 void AudioDevice::playMusic(AudioClipPtr clip, float gain, bool loop) { DeviceLock lock(device_); mixer_.playMusic(std::move(clip), gain, loop); }
