@@ -8,7 +8,7 @@ CONFIG={
 TAG,WORKFLOW,TITLE,PRE,PACKAGES=CONFIG[STREAM]
 API='https://api.github.com/repos/'+REPO+'/'
 def api(path,method='GET',data=None,binary=False):
- request=urllib.request.Request(API+path,data=None if data is None else json.dumps(data).encode(),method=method,headers={'Authorization':'Bearer '+TOKEN,'Accept':'application/octet-stream' if binary else 'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'vurus-release-validator','Content-Type':'application/json'})
+ request=urllib.request.Request(API+path,data=None if data is None else json.dumps(data).encode(),method=method,headers={'Authorization':'Bearer '+TOKEN,'Accept':'application/octet-stream' if binary and path.startswith('releases/assets/') else 'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'vurus-release-validator','Content-Type':'application/json'})
  for attempt in range(5):
   try:
    with urllib.request.urlopen(request,timeout=120) as response:
