@@ -1,0 +1,93 @@
+name: Publish validated PortMaster alpha.3
+'on':
+  push:
+    branches:
+    - publish-portmaster-v0.1.0-alpha.3
+    paths:
+    - .github/workflows/publish-portmaster-alpha3.yml
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: publish-portmaster-alpha3
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_SHA: 547818773d03c1a56166cfc00b680b7955339fb3
+      RELEASE_TAG: portmaster-v0.1.0-alpha.3
+    steps:
+    - name: Verify exact successful source build
+      run: 'set -euo pipefail
+
+        gh api "repos/$GH_REPO/actions/runs/39346417314" > run.json
+
+        jq -e ''.status == "completed" and .conclusion == "success" and .head_sha == "547818773d03c1a56166cfc00b680b7955339fb3"
+        and .event == "workflow_dispatch" and .path == ".github/workflows/build-portmaster.yml"'' run.json
+
+        gh api "repos/$GH_REPO/actions/runs/39346417314/jobs?per_page=100" > jobs.json
+
+        jq -e ''[.jobs[] | select(.name == "build")] | length == 1 and all(.status == "completed" and .conclusion == "success")''
+        jobs.json
+
+        gh api "repos/$GH_REPO/actions/runs/39346417314/artifacts" > artifacts.json
+
+        jq -e ''[.artifacts[] | select(.id == 12231422446 and .name == "vurus-portmaster-aarch64-alpha-preview" and .expired
+        == false)] | length == 1'' artifacts.json
+
+        '
+    - name: Download exact validated package
+      uses: actions/download-artifact@v4
+      with:
+        artifact-ids: '12231422446'
+        run-id: 39346417314
+        repository: ${{ github.repository }}
+        github-token: ${{ github.token }}
+        path: artifacts
+        merge-multiple: true
+    - name: Validate source, checksum, architecture and package allowlist
+      run: "set -euo pipefail\ntest \"$(cat artifacts/work/portmaster-logs/source-revision.txt)\" = \"$BUILD_SHA\"\ncd artifacts/dist/portmaster\n\
+        test \"$(cat SHA256SUMS.txt)\" = 'cc1554c918976e409b6e757dd979b3f30574629c482bb243b6f77d67749a0c5e  vurus-portmaster.zip'\n\
+        sha256sum --check SHA256SUMS.txt\npython3 - <<'PY'\nimport zipfile,struct\nfrom pathlib import PurePosixPath\nwith\
+        \ zipfile.ZipFile('vurus-portmaster.zip') as z:\n assert z.testzip() is None\n for name in z.namelist():\n  p=PurePosixPath(name)\n\
+        \  assert not p.is_absolute() and '..' not in p.parts\n  assert name in ['Vurus.sh','vurus/','vurus/README.txt','vurus/engine-README.txt','vurus/LICENSE.md','vurus/vurus.aarch64']\
+        \ or name.startswith('vurus/LICENSES/')\n for name in ['vurus/LICENSE.md','vurus/LICENSES/oxideav-indeo.txt','vurus/LICENSES/MAME-PSGS-NOTICE.txt']:\n\
+        \  assert z.read(name)\n b=z.read('vurus/vurus.aarch64')\n assert b[:5]==b'\\x7fELF\\x02' and b[5]==1 and struct.unpack_from('<H',b,18)[0]==183\n\
+        PY\n"
+    - name: Publish verified prerelease without rebuilding
+      run: "set -euo pipefail\ncat > notes.md <<'NOTES'\nPortMaster Alpha Preview alpha.3 improves sustained handheld performance\
+        \ and rendering.\n\n- Reuse expired destruction debris records while preserving authored objects, inventory, reactivation\
+        \ and referenced identities.\n- Update the player hit-flash timer without scanning every world record.\n- Batch compatible\
+        \ GLES draws in their original order and pack animation frames and font glyphs into bounded texture atlases.\n- Capture\
+        \ save thumbnails only when saving, with safe asynchronous delivery and shutdown cancellation.\n\nPreserves accepted\
+        \ gameplay and save schema v35 with its existing compressed envelope and supported legacy readers. Trilinear filtering\
+        \ retains independent mip chains. Desktop OpenGL rendering remains on its existing path.\n\nValidated locally on H700\
+        \ / Mali at 640\xD7480. Repeated crowded-scene atlas comparisons improved reciprocal median FPS from 18.9 to 20.2,\
+        \ with smoother frame times; this is a scoped result, not a performance guarantee. The ARM64 CI build, tests and packaging\
+        \ passed.\n\nExtract Vurus.sh and the vurus directory into your firmware's Ports directory. Preserve your existing\
+        \ data, saves, settings and scores when updating. Original game data is required and is not included. Verify the package\
+        \ using SHA256SUMS.txt. This remains an alpha prerelease.\n\nBuilt and tested by [PortMaster CI](https://github.com/rzrbld/vurus/actions/runs/39346417314),\
+        \ source commit [5478187](https://github.com/rzrbld/vurus/commit/547818773d03c1a56166cfc00b680b7955339fb3). This release\
+        \ reuses that exact CI package.\nNOTES\n# Refuse to replace any existing tag or release.\ngh api \"repos/$GH_REPO/git/matching-refs/tags/$RELEASE_TAG\"\
+        \ > tag.json\njq -e 'length == 0' tag.json\ngh release create \"$RELEASE_TAG\" artifacts/dist/portmaster/vurus-portmaster.zip\
+        \ artifacts/dist/portmaster/SHA256SUMS.txt --repo \"$GH_REPO\" --target \"$BUILD_SHA\" --draft --prerelease --latest=false\
+        \ --title \"Vurus PortMaster Alpha Preview alpha.3\" --notes-file notes.md\ngh api \"repos/$GH_REPO/git/ref/tags/$RELEASE_TAG\"\
+        \ --jq '.object.sha' > tag-sha.txt\ntest \"$(cat tag-sha.txt)\" = \"$BUILD_SHA\"\ngh release edit \"$RELEASE_TAG\"\
+        \ --repo \"$GH_REPO\" --draft=false --prerelease --latest=false\ngh release view \"$RELEASE_TAG\" --repo \"$GH_REPO\"\
+        \ --json url,isDraft,isPrerelease,tagName,assets > published.json\njq -e '.isDraft == false and .isPrerelease == true\
+        \ and .tagName == \"portmaster-v0.1.0-alpha.3\" and ([.assets[].name] | sort == [\"SHA256SUMS.txt\",\"vurus-portmaster.zip\"\
+        ])' published.json\n"
+    - name: Retain publication receipt
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: portmaster-alpha3-publication-receipt
+        path: '*.json
+
+          tag-sha.txt'
+        if-no-files-found: warn
+        retention-days: 7
