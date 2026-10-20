@@ -125,15 +125,31 @@ void GameWorld::updateGenerator(size_t id,float ms) {
                 g.remainingMs-=ms*(g.stressable && actors_[id].vitals.energy<initial?2:1);continue;
             }
             if(!g.active && actors_[id].solid)continue;
-            if(generatorOccupied(id))continue;
-            if(!g.active) {g.remainingMs=g.durationMs;g.active=true;actors_[id].solid=actors_[id].radius>0;continue;}
+            //4373ae..437418 publishes enabled bounds during the inactive
+            //occupancy query, then restores the disabled phase. Keep a graph
+            //node even when the first query is blocked; later activation must
+            //be visible to AI/contact queries in this same manager pass.
+            const bool inactive=!g.active;
+            if(inactive){actors_[id].solid=actors_[id].radius>0;updateSpiderNavigation(id);}
+            const bool occupied=generatorOccupied(id);
+            if(inactive){actors_[id].solid=false;updateSpiderNavigation(id);}
+            if(occupied)continue;
+            if(inactive) {
+                g.remainingMs=g.durationMs;g.active=true;actors_[id].solid=actors_[id].radius>0;
+                updateSpiderNavigation(id); //43745a: publish appearance now.
+                continue;
+            }
             const auto product=*g.product;
             const size_t born=spawn(product,scene_->objects[id].position);
             if(born>=actors_.size())continue;
             actors_[born].generatorParent=id;
             if(actors_[born].hudEnemy)++bonusEnemies_; // 4372a0 successful hostile birth
+            //4374aa/4374b9: the product also belongs to the general creator
+            //chain, with the producer's captured UID, before later visits.
+            assignNativeCreator(born,id);
             auto& current=actors_[id].generators[slot];++current.birthCount;
             current.remainingMs=current.delayMs;current.active=false;actors_[id].solid=false;
+            updateSpiderNavigation(id); //43751f: publish disappearance now.
         }
 }
 }
