@@ -187,7 +187,7 @@ struct App {
     bool haveLevel = false;
 
     vyruz::SceneRenderer sceneRenderer;
-    double enemyDrawStepMs=0; // last native World101c fixed-step adapter
+    double enemyDrawStepMs=0; // last native slice pending one draw (43f07f–43fc42)
     int forcedDir = -1;      // dev: force a facing direction
     std::optional<SDL_Rect> windowedBounds;
     int forcedStep = -1;     // dev: select a raw bitmap (zero-based)
@@ -1481,7 +1481,10 @@ void render(App& a,float alpha=1) {
 
         // One native phase0 before composition, including its timed bank
         // updates. Darkness's second player-only draw must not repeat this.
-        a.sceneRenderer.advanceEnemyPhase(a.enemyDrawStepMs,a.world.actors(),
+        // Fixed-step simulation and presentation can run at different rates.
+        // Consume World101c time once; a redraw must not replay the last tick.
+        const double enemyDrawMs=a.enemyDrawStepMs;a.enemyDrawStepMs=0;
+        a.sceneRenderer.advanceEnemyPhase(enemyDrawMs,a.world.actors(),
             enemyAnimationView(a,a.camX,a.camY),vyruz::EnemyAnimationPhase::Draw);
         a.world.consumePlayerHitForRender();
         a.sceneRenderer.draw(a.gfx, a.content, L, a.camX, a.camY,

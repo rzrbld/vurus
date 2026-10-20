@@ -83,6 +83,12 @@ bool GameWorld::advanceSpiderAI(size_t id,float seconds,std::span<const ContentP
     EnemyMotionCommand command;bool firing=false,locked=false;
     const bool canTurn=propertyBool(object.properties,"Can-turn-on-place");
     const auto availableTarget=[&](std::optional<size_t> target){return target && *target<actors_.size() && actors_[*target].alive && !scene_->objects[*target].flags.invisible.value_or(false);};
+    // 42da80/42d8f0/42ce40 read actor+40/+44 directly. Surface sampling
+    // remains separate for the rescan checks at42c5a0.
+    const auto targetCenter=[&](size_t target){
+        if(const auto* history=actors_[target].nativeMotionHistory())return history->center;
+        return nativePoint(scene_->objects[target].position);
+    };
     const auto turn=[&](const SpiderRouteState& route){
         int desired=heading(route.segmentStart,route.segmentEnd);
         if(desired<24)desired=((desired+3)/6*6)%24;
@@ -113,7 +119,7 @@ bool GameWorld::advanceSpiderAI(size_t id,float seconds,std::span<const ContentP
             std::optional<size_t> selectedTarget;
             if(seeker){
                 // All shipped Spider variants target the single Vyruz class.
-                const auto target=playerPosition();const int direction=heading(native,nativePoint(target));
+                const auto target=playerPosition();const int direction=heading(native,targetCenter(player_));
                 int gap=direction==24?0:std::abs(direction-turning.logicalHeading);gap=std::min(gap,24-gap);
                 // 42da80 scans the projected native range rectangle before
                 // the exact circular/cone test, even for its sole Vyruz target.
@@ -125,7 +131,7 @@ bool GameWorld::advanceSpiderAI(size_t id,float seconds,std::span<const ContentP
                    !actor.brain.targetClass || *actor.brain.targetClass!=scene_->objects[player_].classId ||
                    tx<std::max(0,cx-rx) || tx>std::min(level_->mapW-1,cx+rx) ||
                    ty<std::max(0,cy-ry) || ty>std::min(level_->mapH-1,cy+ry) ||
-                   distance2(native,nativePoint(target))>actor.brain.sensorRange*actor.brain.sensorRange || gap>cone)return false;
+                   distance2(native,targetCenter(player_))>actor.brain.sensorRange*actor.brain.sensorRange || gap>cone)return false;
                 selectedTarget=player_;goal=target;
             }else{
                 const auto selected=selectSpiderPatrolWaypoint(state.patrol,path,position,actor.brain.reverse,actor.brain.closed,
@@ -137,12 +143,15 @@ bool GameWorld::advanceSpiderAI(size_t id,float seconds,std::span<const ContentP
             route.saved=static_cast<const SpiderRouteCore&>(route);
             route.target=selectedTarget;
             route.sampledTarget=goal;
-            route.search=beginNativeNavigation(native,nativePoint(goal),{actor.radius,actor.radius},seeker?actor.brain.sensorRange:0,createPoint);
+            // 42d8f0 uses the target's native center;42e740 projects
+            // the authored surface waypoint only for Patrol.
+            const auto destination=selectedTarget?targetCenter(*selectedTarget):nativePoint(goal);
+            route.search=beginNativeNavigation(native,destination,{actor.radius,actor.radius},seeker?actor.brain.sensorRange:0,createPoint);
             return true;
         };
         callbacks.searchStep=[&]{
             if(!route.search)return SpiderSearchResult::Failure;
-            const auto result=advanceNativeNavigation(*route.search,query,createPoint);
+            const auto result=advanceNativeNavigation(*route.search,query,createPoint,true);
             if(result==NativeNavProgress::Working)return SpiderSearchResult::Pending;
             if(result==NativeNavProgress::Failed)return SpiderSearchResult::Failure;
             auto selected=selectNativeNavigation(*route.search,query);
@@ -180,13 +189,16 @@ bool GameWorld::advanceSpiderAI(size_t id,float seconds,std::span<const ContentP
         };
         callbacks.steer=[&]{
             const auto& attack=state.seekerRoute;
-            const bool hasTarget=attack.target && *attack.target<actors_.size() && actors_[*attack.target].alive && terminal(attack);
-            const float targetDistance=hasTarget?distance2(native,nativePoint(scene_->objects[*attack.target].position)):0;
-            // 42ce40 searches the retained seeker even when the base Patrol
-            // invokes steering. Its terminal-cursor gate belongs to that seeker.
+            const bool hasTarget=seeker && attack.target && *attack.target<actors_.size() && actors_[*attack.target].alive && terminal(attack);
+            const float targetDistance=hasTarget?distance2(native,targetCenter(*attack.target)):0;
+            //42ce40 admits a directly supplied Seeker (mode2), but its fallback
+            //lookup during Patrol only admits node types2/1. Spider Seeker
+            //is type7 (42c510), so Patrol must not reuse its near result.
             const auto nearStatus=hasTarget?spiderRouteStatus({0,targetDistance,0,actor.brain.minimumDistance,
                 true,true,canTurn,true}):0;
-            route.status=(nearStatus&4)?nearStatus:spiderRouteStatus({distance2(native,route.segmentEnd),targetDistance,4,actor.brain.minimumDistance,
+            // 42cd30 reads action+28: Seeker Min-distance, Patrol4.
+            const float arrivalRadius=seeker?actor.brain.minimumDistance:4.f;
+            route.status=(nearStatus&4)?nearStatus:spiderRouteStatus({distance2(native,route.segmentEnd),targetDistance,arrivalRadius,actor.brain.minimumDistance,
                 terminal(route),false,canTurn,true});
             if(!(route.status&4)){
                 const bool more=!(route.status&1) || nextSegment(route);
@@ -195,7 +207,7 @@ bool GameWorld::advanceSpiderAI(size_t id,float seconds,std::span<const ContentP
             }else{
                 turn(route);
                 if(route.status&2){command.throttle=EnemyThrottle::Reverse;actor.contactMotion=false;actor.enemyThrust=std::min(actor.enemyThrust,0.f);}
-                if(route.target && *route.target<actors_.size() && actors_[*route.target].alive)route.segmentEnd=nativePoint(scene_->objects[*route.target].position);
+                if(route.target && *route.target<actors_.size() && actors_[*route.target].alive)route.segmentEnd=targetCenter(*route.target);
                 const int aim=heading(route.segmentStart,route.segmentEnd);
                 const int desired=aim<24?((aim+3)/6*6)%24:24;
                 if(route.target && *route.target<actors_.size() && actors_[*route.target].alive && !actor.weapons.empty() && terminal(route) &&
