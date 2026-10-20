@@ -155,6 +155,7 @@ bool GameWorld::restoreSnapshot(const WorldSnapshot& saved,std::string& error) {
         if(o.id.value!=i || o.classId.value>=scene_->classes.size() || (o.owner&&o.owner->value>=count) || !position(o.position))return fail("invalid checkpoint object reference");
         a.nativeSubtype=nativeObjectSubtype(o,i==saved.player);
         a.hasAmmoAttribute=attribute(o.properties,"ammo")!=nullptr;
+        a.visibleWhenFiring=propertyBool(o.properties,"Visible-when-firing");
         if((a.enemyMoveCommand!=0 && a.enemyMoveCommand!=200 && a.enemyMoveCommand!=208) || a.direction<0 || a.direction>=24 || (a.weapons.empty()?a.selectedWeapon!=0:a.selectedWeapon>=a.weapons.size()) ||
            a.routePoint>a.route.size() || (b.targetClass&&b.targetClass->value>=scene_->classes.size()) ||
            static_cast<unsigned>(b.base)>static_cast<unsigned>(BrainBase::Unsupported))return fail("invalid checkpoint actor reference");

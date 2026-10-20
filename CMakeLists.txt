@@ -520,6 +520,10 @@ if(BUILD_TESTING)
   add_executable(sprite_filter_test tests/sprite_filter_test.cpp)
   target_include_directories(sprite_filter_test PRIVATE src)
   add_test(NAME sprite_filter COMMAND sprite_filter_test)
+  add_executable(sprite_properties_test tests/sprite_properties_test.cpp
+    src/game/content.cpp src/assets/content_text.cpp)
+  target_include_directories(sprite_properties_test PRIVATE src)
+  add_test(NAME sprite_properties COMMAND sprite_properties_test)
   add_executable(sprite_reachability_test tests/sprite_reachability_test.cpp
     src/game/content.cpp src/assets/content_text.cpp)
   target_include_directories(sprite_reachability_test PRIVATE src)

@@ -172,6 +172,7 @@ struct ActorState {
     // Native actor+e4 is mutable (difficulty, Surprise and upper-piece death).
     // Absent in pre-v30 saves; reconstructed once on restore, never per tick.
     std::optional<float> shieldUpStep;
+    bool visibleWhenFiring=false; // Resolved placement flag; rebuilt on construction/restore.
     bool shieldRegenerates=false; // class-derived subtype admission
     PickupEffect pickupEffect;
     BrainConfig brain;
@@ -497,6 +498,11 @@ private:
     std::map<uint32_t,std::vector<size_t>> freeTransientRecords_;
     // Conservative, sorted slot IDs; never a cached free/pinned decision.
     std::vector<size_t> transientRecordCandidates_;
+    // Slots that can own actor references. Conservative membership survives
+    // death/reuse; the collector still reads current references and admission.
+    // Owned by World so move/rebind and checkpoint replacement retain it.
+    std::vector<size_t> referenceOwnerCandidates_;
+    void registerReferenceOwnerCandidate(size_t);
     void registerTransientRecordCandidate(size_t);
     void rebuildTransientRecordCandidates();
     void collectReleasedTransientRecords();

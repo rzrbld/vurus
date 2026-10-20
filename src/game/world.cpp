@@ -331,6 +331,7 @@ ActorState GameWorld::makeActor(const ObjectPlacement& object) {
     actor.nativeSubtype=nativeObjectSubtype(object,object.id.value==player_);
     const auto& p=object.properties;
     actor.hasAmmoAttribute=attribute(p,"ammo")!=nullptr;
+    actor.visibleWhenFiring=propertyBool(p,"Visible-when-firing");
     const auto& cls=scene_->classes[object.classId.value];
     const auto& energy=children(cls.properties,"Energy"); const auto& shield=children(cls.properties,"Shield");
     actor.vitals.energy=propertyNumber(energy,"Initial",1);
@@ -443,7 +444,7 @@ bool GameWorld::load(SceneContent& scene,const Level& level,std::string& error,i
     spiderNavigation_.reset();spiderNavigationActors_.clear();
     scene_=&scene;level_=&level;player_=scene.player->value;elapsedMs_=0;playerKills_=0;ammoHits_=ammoMisses_=0;motion_={};map_={};
     catalogHash_=contentFingerprint();savePlot_.reset();saveDwellMs_=0;saveAttempted_=false;saveRequest_.reset();
-    effectSequences_.clear();attachedProtectionActors_.clear();actors_.clear();transientRecordCandidates_.clear();projectiles_.clear();transition_.reset();rejectedLifts_.clear();diagnostics_.clear();message_.clear();
+    effectSequences_.clear();attachedProtectionActors_.clear();actors_.clear();transientRecordCandidates_.clear();referenceOwnerCandidates_.clear();projectiles_.clear();transition_.reset();rejectedLifts_.clear();diagnostics_.clear();message_.clear();
     damageQueue_.clear();contactDamage_.clear();applyingDamage_=false;surprise_={};touchVictims_.clear();heldItems_.clear();
     actorCells_={};bareAmmoCells_={};bareAmmoIndex_.clear();visualAmmoIndex_.clear();
     awakeManager_.entries.clear();awakeVisitIndex_.reset();deferActorFire_=false;deferredActorFire_.reset();
@@ -636,7 +637,7 @@ TerrainDisplacement GameWorld::move(size_t actor,float dx,float dy,bool physical
     TerrainContacts terrain;
     std::optional<ContentPosition> pinballBouncePoint;
     ContentPosition pinballBounceSource{};
-    const bool nativeSpider=physical && objectSubtype(scene_->objects[actor])=="spider";
+    const bool nativeSpider=physical && nativeDamageSubtype(actor)==0x1f;
     const bool nativePlayerPinball=actor==player_ && surprise_.active(SurpriseKind::Pinball);
     // Keep the accepted continuous player wall sweep. Native endpoint body
     // queries can miss a thin wall entirely under amplified Pinball momentum.
@@ -1108,7 +1109,13 @@ void GameWorld::movePlayer(float dx,float dy) { if (player().alive) { move(playe
 // unchanged so renderer channels and retained audio-bank bindings remain valid.
 // Build once at the tick boundary, never while factory/manager callbacks hold
 // references. Native pool allocation and manager insertion order are unchanged.
+void GameWorld::registerReferenceOwnerCandidate(size_t id) {
+    const auto at=std::lower_bound(referenceOwnerCandidates_.begin(),referenceOwnerCandidates_.end(),id);
+    if(at==referenceOwnerCandidates_.end() || *at!=id)referenceOwnerCandidates_.insert(at,id);
+}
 void GameWorld::registerTransientRecordCandidate(size_t id) {
+    // Generic births can receive creator/explosion/AI state after returning.
+    registerReferenceOwnerCandidate(id);
     // Factories may set effect only after spawn returns. Retain the slot even
     // if its role later changes; the collector rechecks all dynamic conditions.
     const auto at=std::lower_bound(transientRecordCandidates_.begin(),transientRecordCandidates_.end(),id);
@@ -1116,9 +1123,18 @@ void GameWorld::registerTransientRecordCandidate(size_t id) {
 }
 void GameWorld::rebuildTransientRecordCandidates() {
     transientRecordCandidates_.clear();
-    for(size_t i=0;i<actors_.size();++i)
-        if(actors_[i].effect || actors_[i].hasAmmoAttribute || actors_[i].contactConfig.launchedThing)
+    referenceOwnerCandidates_.clear();
+    for(size_t i=0;i<actors_.size();++i) {
+        const auto& a=actors_[i];
+        if(a.effect || a.hasAmmoAttribute || a.contactConfig.launchedThing)
             transientRecordCandidates_.push_back(i);
+        // Include controllers before their first target/route is assigned.
+        // Authored inert objects with no reference fields need no pin visit.
+        if(a.enemy || a.contactConfig.nativeEnemy || a.ordinaryAIConfig.enabled ||
+           a.ordinaryAI || a.spiderAI || a.effect || a.hasAmmoAttribute ||
+           a.contactConfig.launchedThing || scene_->objects[i].owner ||
+           a.generatorParent || a.explosion)referenceOwnerCandidates_.push_back(i);
+    }
 }
 void GameWorld::collectReleasedTransientRecords() {
     freeTransientRecords_.clear();
@@ -1136,7 +1152,7 @@ void GameWorld::collectReleasedTransientRecords() {
     for(const auto& e:contactDamage_){pin(e.target);optional(e.source);}
     for(const auto& shot:projectiles_){pin(shot.owner);optional(shot.visual);optional(shot.guidanceTarget);}
     for(const auto& held:heldItems_){pin(held.holder);pin(held.object.id.value);}
-    for(size_t i=0;i<actors_.size();++i){
+    for(const size_t i:referenceOwnerCandidates_){
         const auto& a=actors_[i];
         if(!a.alive && a.reactivateMs<0 && !a.nativeHeldOriginal)continue;
         if(scene_->objects[i].owner)pin(scene_->objects[i].owner->value);
@@ -2079,8 +2095,8 @@ bool GameWorld::advanceActorAI(size_t i,float seconds) {
         const auto pos=scene_->objects[i].position,target=playerPosition();
         std::span<const ContentPosition> path;
         for (const auto& candidate:scene_->paths) if (candidate.id.value==a.brain.pathId) path=candidate.points;
-        const auto subtype=objectSubtype(scene_->objects[i]);
-        const bool spider=subtype=="spider",walker=subtype=="walker";
+        const auto subtype=nativeDamageSubtype(i);
+        const bool spider=subtype==0x1f,walker=subtype==0x19;
         if(spider)return advanceSpiderAI(i,seconds,path);
         if(a.ordinaryAIConfig.enabled)return advanceOrdinaryEnemyAI(i,seconds,path);
         if(a.enemyTurn) { // 440fe1: clear both commands before AI dispatch.
@@ -2143,7 +2159,7 @@ bool GameWorld::advanceActorAI(size_t i,float seconds) {
                 if(a.routePoint<a.route.size())destination=a.route[a.routePoint];else destination.reset();
             } else {a.route.clear();a.routePoint=0;a.routeGoal.reset();a.routeSearch.reset();}
         }
-        const bool smallFamily=spider || walker || subtype=="tank";
+        const bool smallFamily=spider || walker || subtype==0x20;
         if(destination && (!a.driveSegmentEnd || nativeDistanceSquared(*a.driveSegmentEnd,*destination)>.0001f)) {
             a.driveSegmentStart=pos;a.driveSegmentEnd=destination;
         }
@@ -2251,7 +2267,7 @@ bool GameWorld::advanceActorAI(size_t i,float seconds) {
         if(walker)a.walkingCommand=a.enemyMoveCommand==200;
         a.locomoting=nativeDistanceSquared(pos,scene_->objects[i].position)>.0001f;
         if(moved.constrained){a.route.clear();a.routePoint=0;}
-        a.enemyRevealed=firing.inRange && propertyBool(scene_->objects[i].properties,"Visible-when-firing");
+        a.enemyRevealed=firing.inRange && a.visibleWhenFiring;
         // Native reveal/spin-up follows the in-range return, even when actual
         // target-heading alignment declines a shot. Emit after movement as before.
         fire(i,firing.fire,false,{},firing.inRange); // may append actors
@@ -2355,9 +2371,10 @@ void GameWorld::tick(float seconds,const WorldInput& suppliedInput) {
         auto& actor=actors_[id];
         if(!actor.alive || !actor.routeSearch || !actorUpdateAdmitted(id))continue;
         constexpr size_t slice=16;
-        const bool ignorePlayer=actor.brainState.acquired && objectSubtype(scene_->objects[id])!="spider";
+        const bool spider=nativeDamageSubtype(id)==0x1f;
+        const bool ignorePlayer=actor.brainState.acquired && !spider;
         auto route=actor.routeSearch->advance(*level_,
-            [&](ContentPosition from,ContentPosition to,float radius){return dynamicBlocked(id,from,to,radius,ignorePlayer,objectSubtype(scene_->objects[id])=="spider");},slice);
+            [&](ContentPosition from,ContentPosition to,float radius){return dynamicBlocked(id,from,to,radius,ignorePlayer,spider);},slice);
         navigationBudget-=slice;
         if(route.status!=RouteStatus::Pending) {
             actor.route=std::move(route.points);actor.routePoint=0;

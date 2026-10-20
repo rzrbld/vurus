@@ -39,14 +39,17 @@ int main(){try{
  auto roles=w.snapshot();
  roles.objects[2].properties.push_back(block("TyPe",{},"AmMo"));
  roles.actors[2].effect=false;roles.actors[2].hasAmmoAttribute=false;
+ roles.objects[2].properties.push_back(value("Visible-when-firing","1"));
+ roles.actors[2].visibleWhenFiring=false;roles.actors[3].visibleWhenFiring=true;
  roles.actors[3].effect=false;roles.actors[3].hasAmmoAttribute=true;
  need(w.restoreSnapshot(roles,e),e.c_str());
  need(w.actors()[2].hasAmmoAttribute&&!w.actors()[3].hasAmmoAttribute,"restore derives Ammo role from resolved instance, not cached flag or class");
+ need(w.actors()[2].visibleWhenFiring&&!w.actors()[3].visibleWhenFiring,"restore derives reveal flags from each resolved placement");
  w.takeAudioEvents();w.tick(.014f,{});
  need(w.spawn({1},{1100,1100})==2,"released non-FX Ammo placement retains lowest-slot recycling");
  need(!w.actors()[2].hasAmmoAttribute,"reuse reconstructs the new instance role");
  auto unchanged=disk(w,s.mapPath);auto stale=w.snapshot();
- for(auto& actor:stale.actors)actor.hasAmmoAttribute=!actor.hasAmmoAttribute;
+ for(auto& actor:stale.actors){actor.hasAmmoAttribute=!actor.hasAmmoAttribute;actor.visibleWhenFiring=!actor.visibleWhenFiring;}
  SaveGame derived;derived.currentLevel=s.mapPath;derived.levels[s.mapPath].world=stale;
  std::vector<uint8_t> encoded;need(encodeSave(derived,encoded,e),e.c_str());
  need(encoded==unchanged,"derived Ammo role never changes serialized layout or bytes");
@@ -76,6 +79,18 @@ int main(){try{
  const_cast<ActorState&>(w.actors()[deferred]).effect=true;
  w.expireVisual(deferred);w.takeAudioEvents();w.tick(.014f,{});
  need(w.spawn({1},{1100,1100})==deferred,"rejected restore preserves candidate reuse");
+ // The application moves a validated World, then rebinds the scene. Derived
+ // reference-owner membership must travel with it, including authored owners.
+ auto moveScene=fixture();GameWorld moveSource;
+ need(moveSource.load(moveScene,l,e),e.c_str());
+ for(int i=0;i<1100;++i)moveSource.expireVisual(emit(moveSource,{1000,1000}));
+ auto moveState=moveSource.snapshot();moveState.objects[0].owner=ObjectId{1};
+ need(moveSource.restoreSnapshot(moveState,e),e.c_str());
+ GameWorld moved=std::move(moveSource);moved.rebind(moveScene,l);
+ const auto movedSize=moved.actors().size();
+ moved.takeAudioEvents();moved.tick(.014f,{});
+ need(moved.spawn({1},{1100,1100})==2,"authored owner still pins its target after World move/rebind");
+ need(moved.actors().size()==movedSize,"move retains usable free slots alongside pinned identities");
  // Moving debris uses ordinary Thing lifetime, not renderer FX expiry.
  // Preserve authored dead structures and live references while reusing only
  // released runtime products of the audited class, including after disk load.

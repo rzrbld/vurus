@@ -43,6 +43,7 @@ void GameWorld::initializeNativeIdentity(size_t id) {
 void GameWorld::assignNativeCreator(size_t id,std::optional<size_t> creator) {
     if(id>=actors_.size())return;
     if(creator && *creator<actors_.size()) {
+        registerReferenceOwnerCandidate(id);
         scene_->objects[id].owner=ObjectId{static_cast<std::uint32_t>(*creator)};
         actors_[id].nativeCreatorGeneration=actors_[*creator].nativeGeneration;
     } else {scene_->objects[id].owner.reset();actors_[id].nativeCreatorGeneration=0;}

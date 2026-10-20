@@ -522,7 +522,7 @@ bool SceneRenderer::sync(const SceneContent& scene,std::string& error) {
         channels_[i].flightPosition=scene.objects[channelScan_[i].object].position;
     for(auto& orbit:enemyOrbits_) {
         const auto& object=scene.objects[orbit.object];orbit.parent=object.position;
-        orbit.altitude=propertyNumber(object.properties,"Altitude");
+        orbit.altitude=spriteProperties(object).orbitAltitude;
     }
     const bool newObjects=objectCount_!=scene.objects.size();
     const bool shrank=scene.objects.size()<objectCount_;
@@ -545,6 +545,7 @@ void SceneRenderer::releaseTextures(Gfx& gfx) {
     for(auto& [path,bank]:banks_)for(auto& texture:bank.textures){gfx.deleteTexture(texture);texture=0;}
 }
 void SceneRenderer::clear(Gfx& gfx) {
+    spriteProperties_.clear();
     sequenceUses_.clear();
     releaseTextures(gfx);
     channelScan_.clear();workingChannels_.clear();
@@ -988,6 +989,7 @@ void SceneRenderer::draw(Gfx& gfx,const SceneContent& scene,const Level& level,f
         // Consume it after all three origins, not after the center flash.
         if (actors && (channel.object>=actors->size() || !(*actors)[channel.object].alive)) continue;
         const auto& object=scene.objects[channel.object];
+        const auto& properties=spriteProperties(object);
         // 431ae0 Only-base hides the gun/muzzle, retaining Turret sequence25
         // or Tank's directional ground hull, plus the secondary shadow.
         if(actors && (*actors)[channel.object].turretOnlyBase &&
@@ -1055,8 +1057,7 @@ void SceneRenderer::draw(Gfx& gfx,const SceneContent& scene,const Level& level,f
             if(overlay==3 || overlay==4) {
                 if(!reactorFx)continue;
                 if(!actor || actor->engineGlowMs<=0 || actor->visualThrust<=0)continue;
-                const auto* thrust=contentProperty(object.properties,"Thrust");
-                const float maximum=thrust?propertyNumber(thrust->children,"Max"):0;
+                const float maximum=properties.thrustMax;
                 if(maximum<=0)continue;
                 // 432f19 / 4331d8: positive signed thrust, converted to an
                 // eight-bit diffuse intensity. The presentation model bounds it.
@@ -1131,8 +1132,7 @@ void SceneRenderer::draw(Gfx& gfx,const SceneContent& scene,const Level& level,f
         float altitude=0;
         if (!channel.shadow && actor && actor->projectileAltitude)
             altitude=*actor->projectileAltitude;
-        else if (!channel.shadow) if (const auto* property=contentProperty(object.properties,"Altitude"); property && !property->values.empty())
-            altitude=std::strtof(property->values.front().c_str(),nullptr);
+        else if (!channel.shadow)altitude=properties.altitude;
         if(overlay==8 || overlay==9)altitude=0; // Turret base / Tank hull stay on ground.
         // 431ae0 case19 lifts Walker artwork32px, preserving its ground depth.
         if(channel.walker)altitude+=32;
@@ -1190,7 +1190,7 @@ void SceneRenderer::draw(Gfx& gfx,const SceneContent& scene,const Level& level,f
             // The base image has its own bounds and can remain visible when
             // the current delta frame is blank/offscreen. Test those bounds
             // before scanning the authored flag, without suppressing the base.
-            if(deltaBase && !propertyBool(object.properties,"Use-delta-packing"))return;
+            if(deltaBase && !properties.useDeltaPacking)return;
             bounds.push_back({static_cast<int>(sortY)*4+subtype,left,top,left+bitmap.image.width,top+bitmap.image.height});
             sprites.push_back({drawBank,frame,opacity<1?((layer->flags&~0xffU)|3U):(overlay==3 || overlay==4)?((layer->flags&~0xffU)|7U):(red>0 || green>0)?((layer->flags&~0xffU)|1U):layer->flags,intensity,red,opacity,green});
         };
@@ -1230,7 +1230,7 @@ void SceneRenderer::draw(Gfx& gfx,const SceneContent& scene,const Level& level,f
                 const auto& heightConfig=orbitAltitudes_[slot];
                 const auto& player=(*actors)[scene.player->value];
                 const float parentAltitude=player.projectileAltitude.value_or(
-                    propertyNumber(scene.objects[scene.player->value].properties,"Altitude"));
+                    spriteProperties(scene.objects[scene.player->value]).orbitAltitude);
                 const float retained=surprise->orbitAltitudeInitialized?surprise->orbitAttachmentAltitudes[group]:
                     initialAttachedFxAltitude(heightConfig,parentAltitude);
                 // Retain accepted orbit phase; native integer height and

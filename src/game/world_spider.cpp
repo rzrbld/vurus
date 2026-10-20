@@ -252,7 +252,7 @@ bool GameWorld::advanceSpiderAI(size_t id,float seconds,std::span<const ContentP
     // Terrain response may clear command200 (4367d0 return0) after steering.
     actor.walkingCommand=actor.enemyMoveCommand==200&&actor.direction%6==0;
     actor.locomoting=nativeDistanceSquared(position,scene_->objects[id].position)>.0001f;
-    actor.enemyRevealed=firing&&propertyBool(object.properties,"Visible-when-firing");
+    actor.enemyRevealed=firing&&actor.visibleWhenFiring;
     fire(id,firing);
     return locked;
 }

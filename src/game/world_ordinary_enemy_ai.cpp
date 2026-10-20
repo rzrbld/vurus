@@ -321,7 +321,7 @@ bool GameWorld::advanceOrdinaryEnemyAI(size_t id,float seconds,std::span<const C
     if(smallFamily&&!moved.constrained&&!((step.x!=0||step.y!=0)&&lastSpiderSeparated_))actor.contactVelocity={};
     actor.walkingCommand=config.targeting.subtype==0x19&&actor.enemyMoveCommand==200;
     actor.locomoting=nativeDistanceSquared(position,scene_->objects[id].position)>.0001f;
-    actor.enemyRevealed=firing.inRange&&propertyBool(object.properties,"Visible-when-firing");
+    actor.enemyRevealed=firing.inRange&&actor.visibleWhenFiring;
     fire(id,firing.fire,false,{},firing.inRange);
     return locked;
 }

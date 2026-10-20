@@ -1,4 +1,5 @@
 #pragma once
+#include "render/sprite_properties.h"
 #include "render/texture_residency.h"
 #include "render/sprite_sequences.h"
 #include "render/animation.h"
@@ -69,6 +70,14 @@ public:
               const std::vector<ActorState>* actors=nullptr,
               const std::vector<ContentPosition>* previous=nullptr,float alpha=1,const SurpriseState* surprise=nullptr,bool playerOnly=false);
 private:
+    // Indexed by placement, refreshed lazily when its shared snapshot changes.
+    // No pointers into the growable scene.objects vector or saved cache state.
+    std::vector<SpritePropertyCache> spriteProperties_;
+    const SpritePropertyCache::Values& spriteProperties(const ObjectPlacement& object) {
+        const auto id=object.id.value;
+        if(id>=spriteProperties_.size())spriteProperties_.resize(size_t(id)+1);
+        return spriteProperties_[id].resolve(object.properties);
+    }
     SpriteSequenceUses sequenceUses_;
     bool decodeBank(const std::string&,GafAnimation&);
     PlayerTurnPresentation playerTurn_;
