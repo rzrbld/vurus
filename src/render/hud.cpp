@@ -141,10 +141,12 @@ void HudRenderer::drawDeathPrompt(Gfx& gfx) {
     glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
 }
 void HudRenderer::setLevel(const Level& level) {
+    radarClassifications_.clear();
     markersReady_=false;markers_={};
     levelMap_=makeLevelMap(level);mapWidth_=level.mapW*level.tileW;mapHeight_=level.mapH*level.tileH;
 }
 void HudRenderer::clear(Gfx& gfx) {
+    radarClassifications_.clear();
     gfx.deleteTexture(mapTexture_);mapTexture_=0;levelMap_={};
     for (auto* b:{&coins_,&score_,&panel_,&vPanel_,&pause_,&failed_,&inventory_,&menu_,&vMenu_,&cursor_,&bonus_,&surprise_,&darkness_,&surpriseFx_}) {for(auto t:b->textures)gfx.deleteTexture(t);*b={};}
     for(auto& b:weaponIcons_) {for(auto t:b.textures)gfx.deleteTexture(t);b={};}
@@ -498,13 +500,14 @@ void HudRenderer::draw(Gfx& gfx,const GameWorld& world,const SceneContent& scene
     glBegin(GL_QUADS);
     const auto& actors=world.actors();
     const auto& cells=world.nativeActorCells();
+    radarClassifications_.resize(scene.objects.size());
     const auto center=world.playerPosition();
     const int x0=std::clamp(int(std::floor((center.x-960)/64)),0,cells.width),x1=std::clamp(int(std::floor((center.x+960)/64))+1,0,cells.width);
     const int y0=std::clamp(int(std::floor((center.y-960)/32)),0,cells.height),y1=std::clamp(int(std::floor((center.y+960)/32))+1,0,cells.height);
     for(int x=x0;x<x1;++x)for(int y=y0;y<y1;++y)
     for(size_t i=cells.heads[size_t(x)*cells.height+y];i!=NativeActorCells::Missing;i=cells.next[i]) {
         if(i>=actors.size() || i>=scene.objects.size())continue;
-        const auto blip=radarBlip(scene.objects[i],actors[i].alive,i==world.playerIndex(),world.playerPosition(),h);
+        const auto blip=radarBlip(scene.objects[i],actors[i].alive,i==world.playerIndex(),world.playerPosition(),h,&radarClassifications_[i]);
         if(!blip)continue;
         switch(blip->kind) {
             case RadarKind::Enemy:glColor3ub(255,0,0);break;

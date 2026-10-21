@@ -5,6 +5,7 @@
 #include "game/inventory.h"
 #include "game/menu.h"
 #include "game/map_markers.h"
+#include "game/radar.h"
 #include <map>
 #include "game/high_scores.h"
 #include "game/presentation.h"
@@ -52,6 +53,7 @@ private:
     int language_=1;
     ContentReader read_;
     MapMarkers markers_;bool markersReady_=false;
+    std::vector<RadarClassificationCache> radarClassifications_;
     std::array<AnimationCursor,26> panelCursors_;
     std::array<AnimationCursor,2> arrowCursors_;
     struct Bank { GafAnimation animation;std::vector<GLuint> textures; };
