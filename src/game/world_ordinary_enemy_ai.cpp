@@ -97,6 +97,10 @@ void GameWorld::clearOrdinaryEnemyRoutes(size_t id){
     }
     actors_[id].ordinaryAI.reset();
 }
+bool GameWorld::navigationItemOnlyForPlayer(size_t id) {
+    if(navigationItemMetadata_.size()<=id)navigationItemMetadata_.resize(actors_.size());
+    return navigationItemMetadata_[id].resolve(scene_->objects[id].properties);
+}
 bool GameWorld::advanceOrdinaryEnemyAI(size_t id,float seconds,std::span<const ContentPosition> path){
     auto& actor=actors_[id];const auto& object=scene_->objects[id];
     if(!actor.ordinaryAI)configureOrdinaryEnemyAI(actor,object,true);
@@ -179,8 +183,7 @@ bool GameWorld::advanceOrdinaryEnemyAI(size_t id,float seconds,std::span<const C
                 if(ref&ProjectileBit)return nativeNavigationAnimatedActorAdmitted(3,0x10);
                 if(ref>=actors_.size()||ref==id||ref==route.target||!bboxEnabled(ref))return false;
                 if(!nativeNavigationAnimatedActorAdmitted(3,nativeDamageSubtype(ref)))return false;
-                if(nativeDamageSubtype(ref)==0x12)if(const auto* item=attribute(scene_->objects[ref].properties,"item"))
-                    if(propertyBool(item->children,"Only-for-player"))return false;
+                if(nativeDamageSubtype(ref)==0x12&&navigationItemOnlyForPlayer(ref))return false;
                 return true;
             },config.targeting.subtype==0x16);
         };

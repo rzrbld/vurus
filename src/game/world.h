@@ -8,6 +8,7 @@
 #include "game/player_facing_native.h"
 #include "game/native_actor_cells.h"
 #include "game/native_projection_cache.h"
+#include "game/navigation_item_cache.h"
 #include "game/generator_occupancy_native.h"
 #include "game/native_ammo_cells.h"
 #include "game/world_pool_state.h"
@@ -326,7 +327,7 @@ public:
     bool restoreNativePool(const std::optional<NativeWorldPoolState>&,std::string& error);
     bool reconstructNativePoolForReplacement(const NativeWorldPoolState&,std::string& error,bool checkpoint=false);
     bool reconstructNativePoolForReplacement(const NativePoolReplacementContext&,std::string& error,bool checkpoint=false);
-    void rebind(SceneContent& scene,const Level& level) { scene_=&scene;level_=&level; }
+    void rebind(SceneContent& scene,const Level& level) { scene_=&scene;level_=&level;navigationItemMetadata_.clear(); }
     const std::optional<SaveRequest>& saveRequest() const { return saveRequest_; }
     void finishSave(bool success,const std::string& error={});
     void tick(float seconds,const WorldInput&);
@@ -387,6 +388,7 @@ public:
     uint64_t shotsFired=0, pickupsTaken=0, actorsDestroyed=0;
 private:
     friend struct AmmoImpactNativeTestAccess;
+    friend struct NavigationItemMetadataTestAccess;
     NativeAwakeManager awakeManager_;
     std::optional<std::size_t> awakeVisitIndex_;
     bool constructingScene_=false;
@@ -503,6 +505,10 @@ private:
     // death/reuse; the collector still reads current references and admission.
     // Owned by World so move/rebind and checkpoint replacement retain it.
     std::vector<size_t> referenceOwnerCandidates_;
+    // Nonpersistent authored query metadata; retained property identity handles
+    // COW edits/recycled slots. Load, accepted restore and rebind discard it.
+    std::vector<NavigationItemCache> navigationItemMetadata_;
+    bool navigationItemOnlyForPlayer(size_t actor);
     void registerReferenceOwnerCandidate(size_t);
     void registerTransientRecordCandidate(size_t);
     void rebuildTransientRecordCandidates();
