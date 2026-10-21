@@ -49,6 +49,31 @@ int main(){
  updateNativeNavigationObject(headGraph,head,{2,0,102,100});
  assert(headGraph.xEdges.front().object==head);
  assert(validNativeNavigationGraph(headGraph));
+ // Original40f840/40f9b0/40fce0 follow neighbours from the source point.
+ // A moved head-min or tail-max can stay unordered under40e630. Scanning
+ // from an axis end would stop before the source and miss this obstruction.
+ for(bool x:{true,false})for(bool forward:{true,false}){
+  NativeNavGraph g;
+  const auto envelope=insertNativeNavigationObject(g,1,{-256,-256,256,256});
+  const auto a=insertNativeNavigationPoint(g,{0,0});
+  const auto b=insertNativeNavigationPoint(g,x?NativeNavPoint{forward?100.f:-100.f,0}:NativeNavPoint{0,forward?100.f:-100.f});
+  const auto obstacle=x?(forward?NativeNavObstacle{40,-5,60,5}:NativeNavObstacle{-60,-5,-40,5}):
+      (forward?NativeNavObstacle{-5,40,5,60}:NativeNavObstacle{-5,-60,5,-40});
+  insertNativeNavigationObject(g,2,obstacle);
+  auto bounds=g.objects[envelope].bounds;
+  if(x){if(forward)bounds.minX=200;else bounds.maxX=-200;}
+  else {if(forward)bounds.minY=200;else bounds.maxY=-200;}
+  updateNativeNavigationObject(g,envelope,bounds);
+  assert(validNativeNavigationGraph(g));
+  const auto hit=queryNativeNavigation(g,a,b,{1,1},false,{});
+  assert(hit&&hit->minX==obstacle.minX&&hit->minY==obstacle.minY);
+  const auto overlapping=queryNativeNavigation(g,a,b,{50,50},true,{});
+  assert(overlapping&&overlapping->minX==obstacle.minX&&overlapping->minY==obstacle.minY);
+  assert(!queryNativeNavigation(g,a,b,{1,1},false,[](uint64_t reference){return reference!=2;}));
+  assert(!queryNativeNavigation(g,a,b,{50,50},true,[](uint64_t reference){return reference!=2;}));
+  const auto restored=g;
+  assert(queryNativeNavigation(restored,a,b,{1,1},false,{}));
+ }
  NativeNavGraph pointGraph;
  auto p0=insertNativeNavigationPoint(pointGraph,{0,0});
  insertNativeNavigationObject(pointGraph,3,{0,-10,0,10});
