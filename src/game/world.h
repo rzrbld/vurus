@@ -9,6 +9,7 @@
 #include "game/native_actor_cells.h"
 #include "game/native_projection_cache.h"
 #include "game/navigation_item_cache.h"
+#include "game/class_name_index.h"
 #include "game/generator_occupancy_native.h"
 #include "game/native_ammo_cells.h"
 #include "game/world_pool_state.h"
@@ -327,7 +328,7 @@ public:
     bool restoreNativePool(const std::optional<NativeWorldPoolState>&,std::string& error);
     bool reconstructNativePoolForReplacement(const NativeWorldPoolState&,std::string& error,bool checkpoint=false);
     bool reconstructNativePoolForReplacement(const NativePoolReplacementContext&,std::string& error,bool checkpoint=false);
-    void rebind(SceneContent& scene,const Level& level) { scene_=&scene;level_=&level;navigationItemMetadata_.clear(); }
+    void rebind(SceneContent& scene,const Level& level) { scene_=&scene;level_=&level;navigationItemMetadata_.clear();classNames_.clear(); }
     const std::optional<SaveRequest>& saveRequest() const { return saveRequest_; }
     void finishSave(bool success,const std::string& error={});
     void tick(float seconds,const WorldInput&);
@@ -389,6 +390,7 @@ public:
 private:
     friend struct AmmoImpactNativeTestAccess;
     friend struct NavigationItemMetadataTestAccess;
+    friend struct ClassNameIndexTestAccess;
     NativeAwakeManager awakeManager_;
     std::optional<std::size_t> awakeVisitIndex_;
     bool constructingScene_=false;
@@ -509,6 +511,10 @@ private:
     // COW edits/recycled slots. Load, accepted restore and rebind discard it.
     std::vector<NavigationItemCache> navigationItemMetadata_;
     bool navigationItemOnlyForPlayer(size_t actor);
+    // Catalog names are authored and immutable while bound. Rebind after
+    // replacing a catalog; property edits are still read from current classes.
+    ClassNameIndex classNames_;
+    const ObjectClass* classByName(std::string_view name) { return classNames_.find(scene_->classes,name); }
     void registerReferenceOwnerCandidate(size_t);
     void registerTransientRecordCandidate(size_t);
     void rebuildTransientRecordCandidates();

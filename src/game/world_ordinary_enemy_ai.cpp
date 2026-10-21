@@ -171,7 +171,7 @@ bool GameWorld::advanceOrdinaryEnemyAI(size_t id,float seconds,std::span<const C
             });
     };
     bool guided=false;
-    if(!actor.weapons.empty())if(const auto* ammo=findClass(*scene_,actor.weapons[actor.selectedWeapon].ammo))
+    if(!actor.weapons.empty())if(const auto* ammo=classByName(actor.weapons[actor.selectedWeapon].ammo))
         guided=std::any_of(ammo->behaviours.begin(),ammo->behaviours.end(),[](const auto& b){return contentNameIs(b,"tracker");});
     const auto run=[&](NativeEnemyRouteState& route,bool targeting){
         const NativeNavQuery query=[&](NativeNavPoint from,NativeNavPoint to,NativeNavPoint extent,bool overlap){

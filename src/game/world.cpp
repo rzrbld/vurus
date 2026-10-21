@@ -126,7 +126,7 @@ void GameWorld::notifyWeapon() {
     line(std::string(french?"ARME        ":"WEAPON      ")+uppercase(gun?propertyText(gun->properties,"Name",gun->name):weapon.name),140);
     line(std::string(french?"PORTEE DE TIR  ":"FIRE-RANGE  ")+std::to_string(static_cast<int>(weapon.range)),150);
     line(std::string(french?"DELAI DE TIR  ":"FIRE-DELAY  ")+std::to_string(weapon.config.delayMs),160);
-    const auto* ammo=findClass(*scene_,weapon.ammo);if(!ammo)return;
+    const auto* ammo=classByName(weapon.ammo);if(!ammo)return;
     const auto* metadata=attribute(ammo->properties,"ammo");if(!metadata)return;
     float damage=propertyNumber(metadata->children,"Damage"),radius=propertyNumber(metadata->children,"Damage-zone");
     if(damage==0 || radius==0)for(const auto& type:ammo->properties) {
@@ -444,7 +444,7 @@ bool GameWorld::load(SceneContent& scene,const Level& level,std::string& error,i
     spiderNavigation_.reset();spiderNavigationActors_.clear();
     scene_=&scene;level_=&level;player_=scene.player->value;elapsedMs_=0;playerKills_=0;ammoHits_=ammoMisses_=0;motion_={};map_={};
     catalogHash_=contentFingerprint();savePlot_.reset();saveDwellMs_=0;saveAttempted_=false;saveRequest_.reset();
-    effectSequences_.clear();attachedProtectionActors_.clear();navigationItemMetadata_.clear();actors_.clear();transientRecordCandidates_.clear();referenceOwnerCandidates_.clear();projectiles_.clear();transition_.reset();rejectedLifts_.clear();diagnostics_.clear();message_.clear();
+    effectSequences_.clear();attachedProtectionActors_.clear();navigationItemMetadata_.clear();classNames_.clear();actors_.clear();transientRecordCandidates_.clear();referenceOwnerCandidates_.clear();projectiles_.clear();transition_.reset();rejectedLifts_.clear();diagnostics_.clear();message_.clear();
     damageQueue_.clear();contactDamage_.clear();applyingDamage_=false;surprise_={};touchVictims_.clear();heldItems_.clear();
     actorCells_={};bareAmmoCells_={};bareAmmoIndex_.clear();visualAmmoIndex_.clear();
     awakeManager_.entries.clear();awakeVisitIndex_.reset();deferActorFire_=false;deferredActorFire_.reset();
@@ -1526,7 +1526,7 @@ void GameWorld::fire(size_t id,bool held,bool sweep,std::optional<ContentPositio
     auto& actor=actors_[id];
     if (!actor.alive || actor.weapons.empty() || std::find(touchVictims_.begin(),touchVictims_.end(),id)!=touchVictims_.end()) return;
     if(id==player_ && held) {
-        const auto* selectedClass=findClass(*scene_,actor.weapons[actor.selectedWeapon].ammo);
+        const auto* selectedClass=classByName(actor.weapons[actor.selectedWeapon].ammo);
         const auto* selectedAmmo=selectedClass?attribute(selectedClass->properties,"ammo"):nullptr;
         // 443bd0 checks Invisible/Usable-when-invisible before444450.
         if(!surprise_.active(SurpriseKind::Drone) ||
@@ -1540,7 +1540,7 @@ void GameWorld::fire(size_t id,bool held,bool sweep,std::optional<ContentPositio
         stock=weaponStock(actor,weapon);
     }
     if (stock==actor.ammo.end()) return;
-    const auto* cls=findClass(*scene_,weapon.ammo);
+    const auto* cls=classByName(weapon.ammo);
     const auto* ammo=cls?attribute(cls->properties,"ammo"):nullptr;
     if (!ammo) return;
     if(id==player_ && surprise_.active(SurpriseKind::Drone) && !propertyBool(ammo->children,"Usable-when-invisible")) {
