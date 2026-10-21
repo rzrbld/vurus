@@ -517,7 +517,7 @@ bool SceneRenderer::sync(const SceneContent& scene,std::string& error) {
         fire.derivedInvisible=object.flags.invisible.value_or(false);
         enemyFire_.push_back(std::move(fire));
     }
-    refreshChannelScan(previousChannels);
+    if(channels_.size()!=previousChannels)refreshChannelScan(previousChannels);
     for(size_t i=0;i<channelScan_.size();++i)if(channelScan_[i].helicopter)
         channels_[i].flightPosition=scene.objects[channelScan_[i].object].position;
     for(auto& orbit:enemyOrbits_) {
@@ -548,7 +548,7 @@ void SceneRenderer::clear(Gfx& gfx) {
     spriteProperties_.clear();
     sequenceUses_.clear();
     releaseTextures(gfx);
-    channelScan_.clear();workingChannels_.clear();
+    channelScan_.clear();workingChannels_.clear();workingOrderDirty_=true;
     playerTurn_={};playerObject_.reset();
     terrain_.clear();terrainCells_.clear();terrainWidth_=terrainHeight_=0;
     terrainClockMs_=0;
@@ -562,6 +562,7 @@ void SceneRenderer::rebuildEnemyObjectChannels() {
         enemyObjectChannels_[channels_[index].object].push_back(index);
 }
 void SceneRenderer::refreshChannelScan(size_t first) {
+    workingOrderDirty_=true;
     if(first>channelScan_.size())first=channelScan_.size();
     channelScan_.resize(first);
     for(size_t i=first;i<channels_.size();++i) {
@@ -578,43 +579,37 @@ void SceneRenderer::syncActors(const std::vector<ActorState>& actors) {
         for(auto& c:enemyFire_)if(c.object<actors.size())c.fireRevision=actors[c.object].fireRevision;
         resetEnemyFire_=false;
     }
-    workingChannels_.clear();
     for(size_t i=0;i<channelScan_.size();++i) {
         auto& scan=channelScan_[i];
-        if(scan.object<actors.size()) {
-            const auto& actor=actors[scan.object];
-            if(scan.passive&&!actor.gate&&!actor.lift&&scan.visualRevision==actor.visualRevision) {
-                if(!actor.alive) {
-                    if(!scan.inactive)channels_[i].pendingAudio.clear();
-                    scan.inactive=true;
-                } else {
-                    // syncActorChannel has no work for this unchanged policy.
-                    scan.inactive=false;workingChannels_.push_back(i);
-                }
-                continue;
-            }
+        const bool wasInactive=scan.inactive;
+        const auto* actor=scan.object<actors.size()?&actors[scan.object]:nullptr;
+        if(actor && scan.passive&&!actor->gate&&!actor->lift&&scan.visualRevision==actor->visualRevision) {
+            if(!actor->alive && !scan.inactive)channels_[i].pendingAudio.clear();
+            scan.inactive=!actor->alive;
+        } else {
             // Keep the ordering key current even for firing/native channels
             // whose pose synchronization is admitted in a separate phase.
-            scan.visualRevision=actor.visualRevision;
+            if(actor)scan.visualRevision=actor->visualRevision;
+            scan.inactive=false;
+            auto& c=channels_[i];
+            if(!c.firing && c.object<actors.size() && !(nativeEnemyPhases_&&c.nativeEnemy)) {
+                syncActorChannel(c,actors[c.object]);
+                scan.visualRevision=c.visualRevision;
+            }
         }
-        scan.inactive=false;
-        workingChannels_.push_back(i);
-        auto& c=channels_[i];
-        if(c.firing||c.object>=actors.size())continue;
-        const auto& actor=actors[c.object];
-        if(nativeEnemyPhases_&&c.nativeEnemy)continue;
-        syncActorChannel(c,actor);
-        scan.visualRevision=c.visualRevision;
-    }
-    // Stable birth ordering uses the current compact scan key, including
-    // native/firing channels whose Channel revision synchronizes elsewhere.
-    const auto order=[&](size_t index) {
-        const auto& scan=channelScan_[index];
-        if(scan.object>=actors.size())return uint64_t(scan.object);
         const auto birth=scan.visualRevision>>32;
-        return birth?birth-1:uint64_t(scan.object);
-    };
-    std::stable_sort(workingChannels_.begin(),workingChannels_.end(),[&](size_t a,size_t b){return order(a)<order(b);});
+        const uint64_t key=actor?(birth?birth-1:uint64_t(scan.object)):uint64_t(scan.object);
+        if(wasInactive!=scan.inactive || scan.orderKey!=key)workingOrderDirty_=true;
+        scan.orderKey=key;
+    }
+    if(workingOrderDirty_) {
+        // Rebuild ascending channel indices before the stable sort so equal
+        // births retain the original channel-index tie order after reuse.
+        workingChannels_.clear();
+        for(size_t i=0;i<channelScan_.size();++i)if(!channelScan_[i].inactive)workingChannels_.push_back(i);
+        std::stable_sort(workingChannels_.begin(),workingChannels_.end(),[&](size_t a,size_t b){return channelScan_[a].orderKey<channelScan_[b].orderKey;});
+        workingOrderDirty_=false;
+    }
 }
 void SceneRenderer::syncActorChannel(Channel& c,const ActorState& actor) {
         if(c.visualRevision!=actor.visualRevision) {

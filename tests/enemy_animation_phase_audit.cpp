@@ -58,10 +58,30 @@ unsigned syncTraversalControls(Gfx& gfx) {
  renderer.clear(gfx);restored.clear(gfx);return checks;
 }
 
+unsigned cachedOrderControls(Gfx& gfx) {
+ SceneRenderer renderer;SceneContent scene;scene.objects.resize(48);std::vector<ActorState> actors(48);std::string error;
+ for(size_t i=0;i<actors.size();++i){auto& o=scene.objects[i];o.id={uint32_t(i)};o.sprite={"test/sync.gaf",{1}};o.position={float(i*3),100};replace(o.properties,"Sub-type","FX");actors[i].alive=true;}
+ const auto bank=syncSoundBank();ContentReader read=[&](const auto& path,auto& bytes){if(path!="test/sync.gaf")return false;bytes=bank;return true;};need(renderer.load(scene,read,error),error);
+ Level level;level.mapW=level.mapH=64;uint32_t random=8141;unsigned controls=0;
+ for(unsigned step=0;step<200;++step){
+  std::vector<size_t> expected;
+  for(size_t i=0;i<actors.size();++i){random=random*1664525u+1013904223u;actors[i].alive=(random%7)!=0;actors[i].visualRevision=(uint64_t((random>>8)%8)<<32)|(step+1);if(actors[i].alive)expected.push_back(i);}
+  const auto key=[&](size_t i){const auto birth=actors[i].visualRevision>>32;return birth?birth-1:uint64_t(i);};std::stable_sort(expected.begin(),expected.end(),[&](size_t a,size_t b){return key(a)<key(b);});
+  renderer.syncActors(actors);renderer.advance(1,&actors);renderer.takeAudioCues();
+  for(int repeat=0;repeat<3;++repeat){need(renderer.sync(scene,error),error);renderer.syncActors(actors);}
+  if(step%10==0){const auto saved=renderer.capture();need(renderer.restore(saved,error),error);++controls;}
+  if(step%20==0){gfx.beginFrame(640,480);renderer.draw(gfx,scene,level,0,0,0,0,0,-1,[](const ForegroundTile&){},&actors);renderer.draw(gfx,scene,level,0,0,0,0,0,-1,[](const ForegroundTile&){},&actors,nullptr,1,nullptr,true);++controls;}
+  renderer.advance(14,&actors);std::vector<size_t> actual;for(auto& cue:renderer.takeAudioCues())if(cue.kind==SceneAudioCueKind::Play)actual.push_back(cue.object);
+  need(actual==expected,"random birth/death/tie order survives unchanged sync, repeated draws and restore");++controls;
+ }
+ renderer.advance(1,nullptr);renderer.takeAudioCues();renderer.syncActors(actors);renderer.advance(14,&actors);renderer.takeAudioCues();++controls;
+ renderer.clear(gfx);return controls;
+}
+
 }
 int main(int argc,char**argv){try{need(argc==3,"usage: enemy_animation_phase_audit DATA OUTPUT");std::filesystem::path out=argv[2];std::filesystem::create_directories(out);need(SDL_Init(SDL_INIT_VIDEO)==0,"SDL");App a;a.window=SDL_CreateWindow("Enemy native phases",0,0,640,480,SDL_WINDOW_OPENGL|SDL_WINDOW_HIDDEN);need(a.window&&a.gfx.init(a.window),"GL");need(a.vfs.init(argv[1]),a.vfs.error());ContentReader read=[&](const auto&p,auto&b){return a.vfs.read(p,b);};std::string error;std::map<std::string,std::pair<ObjectPlacement,SceneContent>> fixtures;
  for(const auto&map:debugLevels()){SceneContent s;need(loadSceneContent(read,map,s,error),error);for(const auto&o:s.objects){const auto f=objectSubtype(o);if(f=="spider"||f=="staticgen"||f=="heli"||f=="cop"||f=="burner")fixtures.try_emplace(f,std::pair{o,s});if(f=="cop"&&o.flags.invisible.value_or(false))fixtures.try_emplace("invisible-cop",std::pair{o,s});}}
- need(fixtures.size()==6,"six real original resource fixtures");std::ofstream report(out/"phases.tsv");report<<"fixture\tcontrols\tresult\n";unsigned controls=syncTraversalControls(a.gfx);
+ need(fixtures.size()==6,"six real original resource fixtures");std::ofstream report(out/"phases.tsv");report<<"fixture\tcontrols\tresult\n";unsigned controls=syncTraversalControls(a.gfx)+cachedOrderControls(a.gfx);
  for(const auto&[name,fixture]:fixtures){auto scene=fixture.second;auto o=fixture.first;o.id={0};o.position={320,280};std::erase_if(o.properties.write(),[](const auto&n){return contentNameIs(n.key,"add")&&!n.arguments.empty()&&contentNameIs(n.arguments[0],"fx");});scene.objects={o};scene.player.reset();scene.paths.clear();std::vector<ActorState>actors(1);auto&actor=actors[0];actor.alive=actor.solid=actor.enemy=actor.hudEnemy=actor.directional=actor.enemyRevealed=true;actor.walkingCommand=name=="spider";actor.direction=0;actor.enemyMagnitude=2.0001f;
   const int subtype=name=="heli"?0x1d:name=="burner"?0x1a:0x16;if(name!="spider"&&name!="staticgen"){actor.enemyTurnConfig={subtype,false,true,35,50};actor.enemyTurn=initializeEnemyTurn(actor.enemyTurnConfig,0,0);actor.enemyTurn->turnCommand=203;}
   a.sceneRenderer.clear(a.gfx);a.sceneRenderer.setNativeEnemyPhases();need(a.sceneRenderer.load(scene,read,error),error);NativeActorCells cells;cells.reset(64,64);cells.relocate(0,cells.coordinate(320,280));EnemyAnimationView view{0,0,640,480,64,64,&cells};view.visibilityStep=true;const auto initial=a.sceneRenderer.capture();

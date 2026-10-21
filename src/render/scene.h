@@ -120,9 +120,10 @@ private:
     std::vector<Channel> channels_;
     // Compact traversal metadata keeps expired FX history out of hot cursor
     // scans without changing channel indices or persisted animation state.
-    struct ChannelScan { size_t object; uint64_t visualRevision; bool passive,helicopter,inactive=false; };
+    struct ChannelScan { size_t object; uint64_t visualRevision; bool passive,helicopter,inactive=false; uint64_t orderKey=0; };
     std::vector<ChannelScan> channelScan_;
     std::vector<size_t> workingChannels_;
+    bool workingOrderDirty_=true;
     void refreshChannelScan(size_t first=0);
     // Enemy firing is derived presentation state, excluded from old save layouts.
     std::vector<Channel> enemyFire_;
