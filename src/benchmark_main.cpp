@@ -164,7 +164,7 @@ void initialize(Session& session, const std::string& data, bench::Report& report
     a.controller.scan();
 }
 bool runScene(Session& session, const bench::Scene& spec, size_t index, bench::Report& report) {
-    auto& a = session.app; benchProgress = "LOADING " + std::to_string(index + 1) + "/6 " + spec.map;
+    auto& a = session.app; benchProgress = "LOADING " + std::to_string(index + 1) + "/" + std::to_string(bench::scenes.size()) + " " + spec.map;
     require(loadLevelData(a, spec.map, nullptr, false, false, false, 1), a.loadError);
     a.presentation.close(); a.menu.close(a.paused); a.paused = false; a.sessionStarted = true;
     a.world.setDebugGodMode(true); a.world.debugFillAmmo();
@@ -175,7 +175,16 @@ bool runScene(Session& session, const bench::Scene& spec, size_t index, bench::R
         require(stations.size() == 35, "Generator workload requires the original 35 stations");
         a.world.setPlayerPosition(stations[0].x + 100, stations[0].y + 50);
     } else a.world.setPlayerPosition(spec.x, spec.y);
+    if (spec.burnerCrossfire) {
+        // Keep the authored attackers alive for sustained flame load. This is
+        // benchmark setup only; their normal AI, weapons and cadence are used.
+        auto snapshot = a.world.snapshot();
+        for (auto& actor : snapshot.actors) if (actor.enemy) actor.indestructible = true;
+        std::string error; require(a.world.restoreSnapshot(snapshot, error), error);
+        a.world.setDebugGodMode(true); a.world.setPlayerDirection(0);
+    }
     bench::Result result; result.id = spec.id; result.map = spec.map;
+    result.burnerCrossfire = spec.burnerCrossfire;
     result.mapFingerprint = fingerprint(a, spec.map);
     const auto startPosition = a.world.playerPosition(); result.x = startPosition.x; result.y = startPosition.y;
     result.initialRows = a.world.actors().size(); result.startupRssMiB = rss(); result.sampledPeakRssMiB = result.startupRssMiB;
@@ -196,9 +205,10 @@ bool runScene(Session& session, const bench::Scene& spec, size_t index, bench::R
                 const auto p = stations[(tick / 600) % stations.size()]; a.world.setPlayerPosition(p.x + 100, p.y + 50);
             }
         }
-        a.world.setPlayerDirection((tick / 120) % 24);
-        vyruz::WorldInput input; input.fire = true; input.weaponDelta = tick > 0 && tick % 600 == 0 ? 1 : 0;
-        benchProgress = std::to_string(index + 1) + "/6 " + spec.map + (tick < report.warmup ? " WARMUP " : " TEST ") + std::to_string(100 * tick / steps) + "%  B: CANCEL";
+        if (!spec.burnerCrossfire) a.world.setPlayerDirection((tick / 120) % 24);
+        vyruz::WorldInput input; input.fire = !spec.burnerCrossfire;
+        input.weaponDelta = !spec.burnerCrossfire && tick > 0 && tick % 600 == 0 ? 1 : 0;
+        benchProgress = std::to_string(index + 1) + "/" + std::to_string(bench::scenes.size()) + " " + spec.map + (tick < report.warmup ? " WARMUP " : " TEST ") + std::to_string(100 * tick / steps) + "%  B: CANCEL";
         const auto begin = Clock::now();
         a.previousPositions.clear(); for (const auto& object : a.content.objects) a.previousPositions.push_back(object.position);
         bindEffectCamera(a);
@@ -218,6 +228,15 @@ bool runScene(Session& session, const bench::Scene& spec, size_t index, bench::R
                 milliseconds(animationEnd, audioEnd), milliseconds(begin, renderStart), milliseconds(renderStart, end), milliseconds(begin, end)};
             for (size_t i = 0; i < values.size(); ++i) samples[i].push_back(values[i]);
             result.maxProjectiles = std::max(result.maxProjectiles, a.world.projectiles().size());
+            if (spec.burnerCrossfire) {
+                size_t firing = 0;
+                for (const auto& actor : a.world.actors()) if (actor.alive && actor.nativeSubtype == 0x1a)
+                    for (const auto& weapon : actor.weapons)
+                        if (weapon.state.lastFireMs && a.world.elapsedMilliseconds() >= *weapon.state.lastFireMs &&
+                            a.world.elapsedMilliseconds() - *weapon.state.lastFireMs < 100) { ++firing; break; }
+                result.maxBurnersFiring = std::max(result.maxBurnersFiring, firing);
+                if (firing >= 2) ++result.burnerCrossfireSteps;
+            }
         }
         if (tick % 120 == 0) sampleMemory(result);
     }
@@ -226,6 +245,8 @@ bool runScene(Session& session, const bench::Scene& spec, size_t index, bench::R
     result.world = bench::summarize(std::move(samples[0])); result.animation = bench::summarize(std::move(samples[1]));
     result.audio = bench::summarize(std::move(samples[2])); result.update = bench::summarize(std::move(samples[3]));
     result.render = bench::summarize(std::move(samples[4])); result.frame = bench::summarize(std::move(samples[5]));
+    if (spec.burnerCrossfire && !result.burnerCrossfireSteps)
+        nonstandard(report, "Burner encounter produced no overlapping fire");
     std::printf("BENCH scene=%s fps=%.2f world=%.3f render=%.3f rows=%zu live=%zu\n", spec.id, 1000 / result.frame.mean,
         result.world.mean, result.render.mean, result.finalRows, result.finalLive); std::fflush(stdout);
     report.results.push_back(std::move(result)); return true;
@@ -243,7 +264,7 @@ void resultsScreen(App& a, const bench::Report& report, const std::filesystem::p
     benchProgress.clear(); a.audio.device().setPaused(true);
     a.gfx.beginFrame(640, 480); a.gfx.clear(.035f, .06f, .055f);
     const auto text = [&](const std::string& s, float x, float y, float width = 600) { a.hud.drawMenuText(a.gfx, s, x, y, 4, width); };
-    text("VURUS BENCH 1 - " + std::string(report.settingsPreset == "default" ? "DEFAULT" : "MENU") + " " +
+    text("VURUS BENCH 2 - " + std::string(report.settingsPreset == "default" ? "DEFAULT" : "MENU") + " " +
         std::to_string(report.drawableWidth) + "X" + std::to_string(report.drawableHeight), 20, 28);
     text(report.score() ? "SCORE: " + std::to_string(*report.score()) + " POINTS" : "UNSCORED RUN", 20, 62);
     text(!report.complete ? "INCOMPLETE - NO COMPARABLE SCORE" : report.score() ? "COMPLETE - 1000 POINTS = 60 BENCH STEPS/S" : report.nonstandardReason, 20, 88);
@@ -255,7 +276,7 @@ void resultsScreen(App& a, const bench::Report& report, const std::filesystem::p
         char number[64]; std::snprintf(number, sizeof(number), "%.1f", 1000 / result.frame.mean); text(number, 290, y);
         text(std::to_string(result.nearbyEnemies), 375, y);
         if (result.sampledPeakRssMiB) std::snprintf(number, sizeof(number), "%.1f", *result.sampledPeakRssMiB); else std::snprintf(number, sizeof(number), "N/A");
-        text(number, 470, y); y += 27;
+        text(number, 470, y); y += 25;
     }
     text("FIXED-STEP THROUGHPUT, NOT GAMEPLAY FPS", 20, 344);
     text("REPORT.HTML + REPORT.JSON SAVED", 20, 376);
@@ -274,7 +295,7 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         const std::string argument = argv[i];
         if (argument == "--help") {
-            std::puts("Vurus benchmark - separate scripted six-scene performance test\nUsage: vurus-bench [--data RESOURCE_DIRECTORY] [--default-settings] [--options-file FILE] [--output DIRECTORY] [--no-wait] [--frames N] [--shot RESULT.ppm]\nDefault: read video settings saved by the game menu in options.cfg beside this binary.\nAlways uncapped, VSync off; fixed benchmark audio/difficulty and scripted workload.\n--default-settings ignores menu settings: original 640x480 nearest benchmark preset.\n--options-file reads another game's options.cfg (video fields only; never writes it).\n120 warmup + 1200 measured steps/scene; 1000 points = 60 complete benchmark steps/s.\nCompare scores only at matching effective video settings/output resolution.\n--frames changes the workload and produces an unscored test run (1..36000).\nResults: benchmark-results/RUN/report.html and report.json beside this binary.\nUses existing imported data; never reads/writes game saves or leaderboard.\nEsc or controller B cancels; results remain on screen until a button is pressed."); return 0;
+            std::puts("Vurus benchmark - separate scripted seven-scene performance test\nUsage: vurus-bench [--data RESOURCE_DIRECTORY] [--default-settings] [--options-file FILE] [--output DIRECTORY] [--no-wait] [--frames N] [--shot RESULT.ppm]\nDefault: read video settings saved by the game menu in options.cfg beside this binary.\nAlways uncapped, VSync off; fixed benchmark audio/difficulty and scripted workload.\n--default-settings ignores menu settings: original 640x480 nearest benchmark preset.\n--options-file reads another game's options.cfg (video fields only; never writes it).\n120 warmup + 1200 measured steps/scene; 1000 points = 60 complete benchmark steps/s.\nCompare scores only at matching effective video settings/output resolution.\n--frames changes the workload and produces an unscored test run (1..36000).\nResults: benchmark-results/RUN/report.html and report.json beside this binary.\nUses existing imported data; never reads/writes game saves or leaderboard.\nEsc or controller B cancels; results remain on screen until a button is pressed."); return 0;
         }
         if (argument == "--licenses") return vurusUnusedApplicationMain(argc, argv);
         if ((argument == "--data" || argument == "--output" || argument == "--frames" || argument == "--shot" || argument == "--options-file") && i + 1 < argc) {

@@ -152,7 +152,7 @@ ctest --test-dir build -C Release --output-on-failure --parallel 2
 ```
 
 After importing your game data, run `./build/vurus-bench --data /path/to/existing/resources`
-to check performance across six scenes and produce a score plus HTML/JSON reports.
+to check performance across seven scenes and produce a score plus HTML/JSON reports.
 It uses your in-game video settings with VSync off and FPS uncapped; add
 `--default-settings` for the fixed preset. See the [benchmark manual](docs/benchmark.md)
 for Windows/PortMaster commands, report locations and comparisons.

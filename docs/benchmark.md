@@ -1,7 +1,7 @@
 # Standalone Vurus benchmark
 
 `vurus-bench` is a separate executable using the game's World, animation,
-audio and renderer. It runs six scripted encounters automatically and ends with
+audio and renderer. It runs seven scripted encounters automatically and ends with
 a score and a small map/FPS/nearby-enemy/RSS table. Game saves and the
 leaderboard are never read or written. Video preferences saved by the in-game menus
 are read only. Players supply their own existing game data.
@@ -79,8 +79,8 @@ settings file fails with an error; `--default-settings` bypasses it.
 Both modes receive scores when the workload completes normally. The final screen
 labels **MENU** or **DEFAULT** plus the actual output resolution. Reports record
 all effective visual settings, requested/actual size and the preset; compare
-scores only when those settings and actual resolution match. JSON schema2 adds
-these fields; the workload/score protocol remains `vurus-bench-1`.
+scores only when those settings and actual resolution match. JSON schema3 records
+these fields plus the Burner crossfire workload and overlapping-fire counters.
 
 ## Score and workload
 
@@ -90,7 +90,7 @@ scene's mean measured frame time. A step is one fixed 1/60-second World update,
 animation/audio maintenance and one full rendered/presented frame. This is
 benchmark throughput, not the normal application's catch-up-scheduled gameplay FPS.
 
-Protocol `vurus-bench-1`: 120 warmup + 1,200 measured steps per scene,
+Protocol `vurus-bench-2`: 120 warmup + 1,200 measured steps per scene,
 Normal difficulty, uncapped/VSync off, music off, real effects/voices at 70%
 master volume. Visual settings come from the game menu unless `--default-settings`
 is supplied. Player invulnerability, held fire, facing changes every 120 steps and ammo/weapon changes
@@ -104,11 +104,16 @@ every 600 steps are benchmark controls only. CPU/T3P2 also visits generator stat
 | UNDERGROUND/T2U1 start | 3968,348 |
 | HITEK/T1H1 Burner area | 3670,2570 |
 | HITEK/T1H1 crowd | 2166,1107 |
+| HITEK/T2H2 Burner crossfire | 4571,2841 |
 
-These names identify mixed encounters, not which enemy class causes a cost.
-The last four starts now use the same fixed-step firing protocol as the first
-two, rather than the earlier stationary ordinary-App profiling windows. The new
-six-scene score has no historical H700 baseline implied by the README figures.
+The added Burner crossfire keeps the player stationary without firing; enemy
+indestructibility sustains the authored attackers, using their normal AI and
+weapons. Two Burners fire together for most of this encounter, with brief periods
+of three. These are benchmark-only controls. JSON records the maximum number of
+Burners firing in the preceding100ms and measured steps with at least two;
+missing crossfire makes a run unscored. The other six workloads are unchanged.
+Protocol2 scores include this seventh scene and must not be compared directly
+with the earlier six-scene `vurus-bench-1` scores.
 
 Loading, scripted controls, event polling, separate population/RSS sampling and
 report output are outside timed frames. The progress/FPS overlay is included in
@@ -136,8 +141,8 @@ sh tools/package_benchmark.sh build dist/benchmark linux
 For the existing ARM64 PortMaster builder, also set `-DVYRUZ_GLES=ON
 -DVYRUZ_PORTMASTER=ON`; package inside that builder with
 `sh tools/package_benchmark.sh BUILD_DIR OUTPUT_DIR portmaster` to include its
-static runtime notices and glibc check. The benchmark is opt-in and has its own
-package; normal game launch and package contents stay unchanged.
+static runtime notices and glibc check. The benchmark remains opt-in for source builds and has a standalone add-on
+package; configured game-release builds include it beside the normal engine.
 
 `--output DIR` selects the report-parent directory; defaults are independent of
 the working directory. `--frames N` shortens validation runs (unscored unless the

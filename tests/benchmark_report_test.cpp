@@ -45,10 +45,17 @@ int main() {
     Report report; report.complete = true;
     for (const auto& scene : scenes) {
         Result result; result.id = scene.id; result.map = scene.map;
+        result.burnerCrossfire = scene.burnerCrossfire;
+        if (scene.burnerCrossfire) { result.maxBurnersFiring = 3; result.burnerCrossfireSteps = 1100; }
         result.frame = summarize(std::vector<double>(measuredSteps, 1000.0 / 60));
         report.results.push_back(result);
     }
     assert(report.score() == 1000);
+    // A score must include the expanded workload and actual overlapping fire.
+    report.results.back().burnerCrossfireSteps = 0; assert(!report.score());
+    report.results.back().burnerCrossfireSteps = 1100;
+    auto last = report.results.back(); report.results.pop_back(); assert(!report.score());
+    report.results.push_back(last);
     report.settingsPreset = "user"; report.settingsSource = "game-menu"; report.options = user;
     assert(report.score() == 1000); // User resolution/effects runs still get a score.
     const auto customJson = jsonReport(report), customHtml = htmlReport(report);
@@ -57,6 +64,10 @@ int main() {
     assert(customJson.find("\"smaa\":true,\"bloom\":true,\"sharpen\":true") != std::string::npos);
     assert(customJson.find("\"settings_preset\":\"user\"") != std::string::npos);
     assert(customHtml.find("Game-menu video settings") != std::string::npos);
+    assert(customHtml.find("7/7 scenes") != std::string::npos);
+    assert(customJson.find("\"protocol\":\"vurus-bench-2\"") != std::string::npos);
+    assert(customJson.find("\"schema_version\":3") != std::string::npos);
+    assert(customJson.find("\"steps_with_two_burners_firing\":1100") != std::string::npos);
     assert(customHtml.find("1920×1080") != std::string::npos && customHtml.find("SMAA on") != std::string::npos);
     report.complete = false; assert(!report.score()); report.complete = true;
     report.standard = false; assert(!report.score()); report.standard = true;

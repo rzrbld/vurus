@@ -7,21 +7,23 @@
 #include "benchmark/settings.h"
 
 namespace vyruz::benchmark {
-inline constexpr char protocol[] = "vurus-bench-1";
+inline constexpr char protocol[] = "vurus-bench-2";
 inline constexpr int warmupSteps = 120, measuredSteps = 1200;
 struct Scene {
     const char* id;
     const char* map;
     float x, y;
     bool generatorTour = false;
+    bool burnerCrossfire = false;
 };
-inline constexpr std::array<Scene, 6> scenes{{
+inline constexpr std::array<Scene, 7> scenes{{
     {"cave", "CAVE/T1C2.3DG", 5230, 1080},
     {"generators", "CPU/T3P2.3DG", 0, 0, true},
     {"underground-crowd", "UNDERGROUND/T2U1.3DG", 4870, 2180},
     {"underground-start", "UNDERGROUND/T2U1.3DG", 3968, 348},
     {"hitek-burner", "HITEK/T1H1.3DG", 3670, 2570},
     {"hitek-crowd", "HITEK/T1H1.3DG", 2166, 1107},
+    {"burner-crossfire", "HITEK/T2H2.3DG", 4571, 2841, false, true},
 }};
 struct Stats {
     size_t count = 0;
@@ -36,6 +38,8 @@ struct Result {
     float x = 0, y = 0;
     size_t nearbyEnemies = 0, initialRows = 0, finalRows = 0, finalLive = 0;
     size_t maxProjectiles = 0;
+    bool burnerCrossfire = false;
+    size_t maxBurnersFiring = 0, burnerCrossfireSteps = 0;
     std::optional<double> startupRssMiB, sampledPeakRssMiB;
     Stats world, animation, audio, update, render, frame;
 };

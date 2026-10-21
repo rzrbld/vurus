@@ -42,7 +42,9 @@ std::optional<unsigned> Report::score() const {
         warmup != warmupSteps || measured != measuredSteps) return std::nullopt;
     std::vector<double> means;
     for (size_t i = 0; i < scenes.size(); ++i) {
-        if (results[i].id != scenes[i].id || results[i].frame.count != size_t(measured))
+        if (results[i].id != scenes[i].id || results[i].frame.count != size_t(measured) ||
+            results[i].burnerCrossfire != scenes[i].burnerCrossfire ||
+            (scenes[i].burnerCrossfire && (results[i].maxBurnersFiring < 2 || !results[i].burnerCrossfireSteps)))
             return std::nullopt;
         means.push_back(results[i].frame.mean);
     }
@@ -93,7 +95,7 @@ std::string label(const Result& r) {
 }
 std::string jsonReport(const Report& r) {
     std::ostringstream out; out.imbue(std::locale::classic()); out << std::setprecision(10);
-    out << "{\n\"schema_version\":2,\"protocol\":" << jsonString(protocol)
+    out << "{\n\"schema_version\":3,\"protocol\":" << jsonString(protocol)
         << ",\"started_utc\":" << jsonString(r.startedUtc) << ",\"build\":" << jsonString(r.build)
         << ",\"complete\":" << (r.complete ? "true" : "false")
         << ",\"standard\":" << (r.standard ? "true" : "false") << ",\"score\":";
@@ -120,7 +122,7 @@ std::string jsonReport(const Report& r) {
     flag("crt", r.options.crt); flag("crt_retro", r.options.crtRetro); flag("crt_bright", r.options.crtBright);
     flag("fxaa", r.options.fxaa); flag("smaa", r.options.smaa);
     flag("bloom", r.options.bloom); flag("sharpen", r.options.sharpen);
-    out << ",\"music\":false,\"god_mode\":true,\"held_fire\":true},\n\"scenes\":[\n";
+    out << ",\"music\":false,\"god_mode\":true,\"player_fire\":\"held except Burner crossfire\"},\n\"scenes\":[\n";
     for (size_t i = 0; i < r.results.size(); ++i) {
         const auto& s = r.results[i]; if (i) out << ",\n";
         out << "{\"id\":" << jsonString(s.id) << ",\"map\":" << jsonString(s.map)
@@ -128,7 +130,10 @@ std::string jsonReport(const Report& r) {
             << ",\"x\":" << s.x << ",\"y\":" << s.y << ",\"nearby_enemies_at_start\":" << s.nearbyEnemies
             << ",\"nearby_radius\":1000,\"initial_rows\":" << s.initialRows
             << ",\"final_rows\":" << s.finalRows << ",\"final_live\":" << s.finalLive
-            << ",\"max_projectiles\":" << s.maxProjectiles << ",\"startup_rss_mib\":";
+            << ",\"max_projectiles\":" << s.maxProjectiles
+            << ",\"burner_crossfire\":" << (s.burnerCrossfire ? "true" : "false")
+            << ",\"max_burners_firing_recent_100ms\":" << s.maxBurnersFiring
+            << ",\"steps_with_two_burners_firing\":" << s.burnerCrossfireSteps << ",\"startup_rss_mib\":";
         optionalNumber(out, s.startupRssMiB); out << ",\"sampled_peak_rss_mib\":"; optionalNumber(out, s.sampledPeakRssMiB);
         out << ",\"benchmark_fps\":"; optionalNumber(out, s.frame.mean > 0 ? std::optional<double>(1000 / s.frame.mean) : std::nullopt);
         for (const auto& [name, stats] : std::array<std::pair<const char*, const Stats*>, 6>{{
@@ -148,7 +153,7 @@ std::string htmlReport(const Report& r) {
         << "th,td{padding:10px;text-align:right;border-bottom:1px solid #35403c}th:first-child,td:first-child{text-align:left}small,.note{color:#b3c2ba}a{color:#a2ed8c}</style>"
         << "<h1>Vurus benchmark</h1><p class=\"note\">" << htmlString(protocol) << " · " << htmlString(r.startedUtc) << "</p><div class=\"score\">";
     if (auto score = r.score()) out << *score << " points"; else out << "Unscored run";
-    out << "</div><p>" << (r.complete ? "Completed" : "Incomplete") << " · " << r.results.size() << "/6 scenes";
+    out << "</div><p>" << (r.complete ? "Completed" : "Incomplete") << " · " << r.results.size() << '/' << scenes.size() << " scenes";
     if (!r.nonstandardReason.empty()) out << " · " << htmlString(r.nonstandardReason);
     if (!r.error.empty()) out << " · " << htmlString(r.error);
     out << "</p><p>1,000 points = 60 benchmark steps/second. Equal scene weighting using the geometric mean of each scene's mean throughput. Higher is faster.</p>"
@@ -176,7 +181,7 @@ std::string htmlReport(const Report& r) {
     effect("CRT", r.options.crt); effect("CRT retro", r.options.crtRetro); effect("CRT bright", r.options.crtBright);
     effect("FXAA", r.options.fxaa); effect("SMAA", r.options.smaa);
     effect("bloom", r.options.bloom); effect("sharpen", r.options.sharpen);
-    out << "</p><p>VSync off · uncapped · music off · Normal difficulty · invulnerable player, held fire";
+    out << "</p><p>VSync off · uncapped · music off · Normal difficulty · invulnerable player; held fire except Burner crossfire";
     if (r.settingsSource == "game-defaults") out << " · no options.cfg found; game video defaults used";
     out << "</p><p>" << htmlString(r.platform) << " · " << htmlString(r.cpu) << " · " << htmlString(r.gpu) << "<br>" << htmlString(r.glVersion)
         << "<br>Audio: " << htmlString(r.audioBackend) << " · Build: " << htmlString(r.build) << "</p>"
