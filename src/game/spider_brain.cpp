@@ -10,7 +10,9 @@ void advanceSpiderAction(SpiderActionState& s,uint8_t& flags,
     if(s.active) {
         if(!in.routeInBounds) {
             flags&=~uint8_t(1);s.active=s.searching=false;
-            if(!in.seeker)call(cb.dropRoute); // Patrol 42e030; seeker retains route.
+            // 42e539 clears action flags, then42e030 resets only action+24.
+            // Both controllers retain their owned route; Patrol retries next visit.
+            if(!in.seeker)s.scanRemainingMs=0;
             return;
         }
         flags|=1;

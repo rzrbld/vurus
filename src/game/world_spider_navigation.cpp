@@ -119,7 +119,9 @@ std::optional<NativeNavObstacle> GameWorld::spiderNavigationObstacle(size_t acto
     return queryNativeNavigation(*spiderNavigation_,from,to,extent,overlap,[&](uint64_t ref){
         if(ref&DecorBit){const auto n=ref&~DecorBit;return n<level_->nativeNavigationDecor.size()&&!level_->nativeNavigationDecor[n].water;}
         if(ref&ProjectileBit)return nativeNavigationAnimatedActorAdmitted(3,0x10);
-        if(ref>=actors_.size()||ref==actor||ref==player_||(target&&ref==*target))return false;
+        // 42c5a0/42e400 disable self and the current route target only.
+        // The player remains an obstacle for targetless Patrol navigation.
+        if(ref>=actors_.size()||ref==actor||(target&&ref==*target))return false;
         const auto& object=scene_->objects[ref];
         if(!nativeNavigationAnimatedActorAdmitted(3,nativeDamageSubtype(ref)))return false;
         if(!actorNavigationEnabled(actors_[ref],object,nativeDamageSubtype(ref)))return false;

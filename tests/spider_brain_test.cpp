@@ -25,9 +25,11 @@ int main() {
     result=SpiderSearchResult::Rejected;advanceSpiderAction(s,flags,in,cb);
     assert(!s.active && !s.searching && flags==2 && drops==1);
     s={false,true,3,0};in.routeInBounds=false;advanceSpiderAction(s,flags,in,cb);
-    assert(!s.active && flags==2 && drops==1); // seeker retains escaped route
+    assert(!s.active && !s.searching && flags==2 && drops==1 && s.scanRemainingMs==3); // seeker retains route/countdown
     in.seeker=false;s={false,true,3,0};advanceSpiderAction(s,flags,in,cb);
-    assert(drops==2 && !s.active); // patrol drops escaped route
+    assert(drops==1 && !s.active && !s.searching && flags==2 && s.scanRemainingMs==0); // Patrol retains route and resets scan
+    advanceSpiderAction(s,flags,in,cb);
+    assert(s.searching && !s.active && begins==3 && drops==1 && flags==2 && s.scanRemainingMs==500); // retry next visit
     in.routeInBounds=true;s={false,true,0,0};flags=3;
     advanceSpiderAction(s,flags,in,cb);assert(!s.active && flags==3 && steers==1);
     s={true,false,-4,0};result=SpiderSearchResult::Pending;
