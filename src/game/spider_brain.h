@@ -47,5 +47,5 @@ struct SpiderSteeringInput {
 unsigned spiderRouteStatus(const SpiderSteeringInput&);
 // 42d820 native bounds span is maxX-minX, not a circular radius.
 bool spiderInsideRouteCorridor(float x,float z,float fromX,float fromZ,
-    float toX,float toZ,float actorBoundsSpan,float cachedMagnitude);
+    float toX,float toZ,float actorBoundsSpan,float cachedMagnitude,bool nativeBoundaryPrecision=false);
 } // namespace vyruz

@@ -15,8 +15,8 @@ NativeNavPoint nativePoint(ContentPosition p){const auto n=spiderSurfaceToNative
 bool terminal(const NativeEnemyRouteCore& r){return r.cursor>=r.points.size()||r.cursor+1==r.points.size();}
 int heading(NativeNavPoint a,NativeNavPoint b,int subtype){
     // 42c9d0 -> 4075c0: zero/zero reaches x87/__ftol and yields heading0.
-    // Walker/Burner/Jeep/Roller/Heli/Tank route shortcuts retain this without changing contact rules.
-    if((subtype==0x19||subtype==0x1a||subtype==0x1b||subtype==0x1c||subtype==0x1d||subtype==0x20)&&a==b)return 0;
+    // Cop/Walker/Burner/Jeep/Roller/Heli/Tank route shortcuts retain this without changing contact rules.
+    if((subtype==0x16||subtype==0x19||subtype==0x1a||subtype==0x1b||subtype==0x1c||subtype==0x1d||subtype==0x20)&&a==b)return 0;
     return spiderContactHeading({b.x-a.x,b.y-a.y});
 }
 bool nextSegment(NativeEnemyRouteCore& r,int subtype){
@@ -182,11 +182,11 @@ bool GameWorld::advanceOrdinaryEnemyAI(size_t id,float seconds,std::span<const C
                 if(nativeDamageSubtype(ref)==0x12)if(const auto* item=attribute(scene_->objects[ref].properties,"item"))
                     if(propertyBool(item->children,"Only-for-player"))return false;
                 return true;
-            });
+            },config.targeting.subtype==0x16);
         };
         const NativeNavPointFactory create=[&](NativeNavPoint p){return insertNativeNavigationPoint(*spiderNavigation_,p);};
         const bool inCorridor=spiderInsideRouteCorridor(native.x,native.y,route.segmentStart.x,route.segmentStart.y,
-            route.segmentEnd.x,route.segmentEnd.y,actor.radius*2,actor.enemyMagnitude);
+            route.segmentEnd.x,route.segmentEnd.y,actor.radius*2,actor.enemyMagnitude,config.targeting.subtype==0x16);
         bool unchanged=false;
         if(route.target&&*route.target<actors_.size()){
             const auto& target=scene_->objects[*route.target];

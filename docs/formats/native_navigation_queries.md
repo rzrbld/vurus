@@ -13,9 +13,23 @@ extended subtraction and division. It stores a float slope with FST, retaining
 the extended quotient to calculate the intercept. The intercept is then stored
 as float.40fc21..40fc2d multiplies the stored slope by the edge coordinate and
 adds the stored intercept in extended precision before storing the final float
-intersection.40fce0/40ff00 transpose the axes. Do not round the quotient before
-calculating the intercept, or round the multiplication before the final sum.
-The implementation calculates the two coefficients once per axis scan.
+intersection. Do not round the X quotient before calculating the intercept,
+or round the multiplication before the final sum. The implementation calculates
+the two coefficients once per axis scan.
+
+The Y query differs:40fdcf stores and pops the slope, then40fdd5 reloads that
+rounded float before40fdd9/40fddd computes the intercept. Cop subtype16 opts
+into this stored-slope intercept through `nativeIntersectionPrecision` on the
+graph query. Other callers and the vector overload preserve their accepted
+coefficient behavior. The Cop rebase retains the newer shared source-adjacent
+traversal rather than restoring the older preview's global scan.
+
+Cop also opts into42d820 corridor comparisons: bounds span plus cached movement
+magnitude is rounded once to float; endpoint plus/minus this padding stays
+extended until comparison with the actor center. Other families keep their
+existing corridor comparisons. Coincident retained route start/target uses
+heading0 through42c9d0/4075c0, while physical contact still uses sentinel24.
+The accepted Cop action-marker retention remains an intentional deviation.
 
 This rounding affects inclusive obstacle-boundary tests. A false obstruction can
 change wave status and branch populations. In particular, native Seeker kind6
@@ -42,3 +56,12 @@ decision instructions. Synthetic flags/static bodies omit allocation reuse,
 moving contacts and the Windows host clock. They are original instruction probes,
 not an original Windows gameplay session. Natural campaign frequency and complete
 moving/contact equivalence remain unproven. Tests require no proprietary assets.
+
+`cop_navigation_world_test` adds query/corridor/heading groups, including a
+retained original Y-query counterexample at (1152,221) to (1280,236), controls
+for accepted X arithmetic and other families, and540exact memory/disk
+continuation ticks. Each group rejects the parent World caller. The rebased
+Cop query matches316,872retained original-instruction outcomes across four
+overlapping synthetic corpora. These checks establish bounded arithmetic and
+live integration, not campaign-wide or Windows-runtime parity. Extended
+arithmetic comparisons were run on Linux x86_64, not ARM hardware.

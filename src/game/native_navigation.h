@@ -51,7 +51,7 @@ NativeNavPoint insertNativeNavigationPoint(NativeNavGraph&,NativeNavPoint);
 size_t insertNativeNavigationObject(NativeNavGraph&,uint64_t reference,NativeNavObstacle);
 void updateNativeNavigationObject(NativeNavGraph&,size_t index,NativeNavObstacle);
 void removeNativeNavigationObject(NativeNavGraph&,size_t index);
-std::optional<NativeNavObstacle> queryNativeNavigation(const NativeNavGraph&,NativeNavPoint from,NativeNavPoint to,NativeNavPoint halfExtent,bool overlap,const NativeNavEligible&);
+std::optional<NativeNavObstacle> queryNativeNavigation(const NativeNavGraph&,NativeNavPoint from,NativeNavPoint to,NativeNavPoint halfExtent,bool overlap,const NativeNavEligible&,bool nativeIntersectionPrecision=false);
 }
 
 namespace vyruz {

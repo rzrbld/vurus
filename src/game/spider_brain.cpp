@@ -104,8 +104,15 @@ unsigned spiderRouteStatus(const SpiderSteeringInput& in) {
     return in.endpointDistanceSquared<=64?1:0;
 }
 bool spiderInsideRouteCorridor(float x,float z,float fromX,float fromZ,
-    float toX,float toZ,float span,float magnitude) {
+    float toX,float toZ,float span,float magnitude,bool nativeBoundaryPrecision) {
     const float padding=span+magnitude;
+    if(nativeBoundaryPrecision){
+        // 42d820 spills padding once, then compares extended endpoint bounds.
+        return static_cast<long double>(x)>=static_cast<long double>(std::min(fromX,toX))-padding &&
+               static_cast<long double>(x)<=static_cast<long double>(std::max(fromX,toX))+padding &&
+               static_cast<long double>(z)>=static_cast<long double>(std::min(fromZ,toZ))-padding &&
+               static_cast<long double>(z)<=static_cast<long double>(std::max(fromZ,toZ))+padding;
+    }
     return x>=std::min(fromX,toX)-padding && x<=std::max(fromX,toX)+padding &&
            z>=std::min(fromZ,toZ)-padding && z<=std::max(fromZ,toZ)+padding;
 }
