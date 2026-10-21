@@ -62,7 +62,64 @@ int main(){try{
   need(returned.actors()[1].direction!=previousHeading,"Heli keeps turning after coincident route endpoint refresh");
   continuation(returned,authored,l,60);
  }
+ // Helicopter and Dragon share subtype0x1d. Original40e630 can retain a
+ // moved minimum at the graph head;40f9b0/40fce0 still find a blocker by
+ // walking from the retained route source. Exercise both targeting modes.
+ for(const std::string mode:{"Seeker","Tracker"}){
+  auto graphScene=heli("Fixed",mode);
+  const auto origin=spiderSurfaceToNative(1000,1000);
+  const auto surface=[](float x,float y){
+   const auto p=spiderNativeToSurface(x,y);return ContentPosition{p.x,p.y};
+  };
+  graphScene.objects[0].position=surface(origin.x+45,origin.y);
+  for(int radius:{100,4}){
+   ObjectClass c;c.id={uint32_t(graphScene.classes.size())};c.name="GraphThing"+std::to_string(radius);
+   c.behaviours={"Fixed"};
+   c.properties={value("Sub-type","Thing"),value("Managed","0"),
+    value("Bounding-box-size",std::to_string(radius)),
+    block("Energy",{value("Initial","1000"),value("Max","1000")})};
+   graphScene.classes.push_back(c);
+  }
+  const auto authored=graphScene;GameWorld graphWorld;need(graphWorld.load(graphScene,l,e),e);
+  need(graphWorld.actors()[1].ordinaryAIConfig.targeting.subtype==0x1d,"Heli/Dragon native family");
+  graphWorld.tick(.017f,{});
+  need(graphWorld.actors()[1].ordinaryAI->targeting.clock.searching,"Heli/Dragon search begins before graph movement");
+  const auto moved=graphWorld.spawn({2},surface(origin.x,origin.y+200));
+  const auto blocker=graphWorld.spawn({3},surface(origin.x+15,origin.y));
+  auto pending=graphWorld.snapshot();auto& graph=*pending.spiderNavigation;
+  const auto node=[&](size_t actor){
+   for(size_t n=0;n<graph.objects.size();++n){const auto& o=graph.objects[n];
+    if(o.alive&&!o.point&&o.reference==actor)return n;
+   }
+   throw std::runtime_error("missing actor graph object");
+  };
+  // Explicit synthetic pending-search edit: route endpoints remain enrolled
+  // at their old positions. Synchronize bodies, cell order and motion history.
+  const auto moveActor=[&](size_t id,float x,float y){
+   pending.objects[id].position=surface(x,y);
+   pending.actorCells->relocate(id,pending.actorCells->coordinate(
+    pending.objects[id].position.x,pending.objects[id].position.y),pending.nextNativeCellOrder++);
+   pending.actors[id].nativeMotion=SpiderMotionHistory{{x,y},pending.objects[id].position};
+   const float r=pending.actors[id].radius;
+   updateNativeNavigationObject(graph,node(id),{x-r,y-r,x+r,y+r});
+  };
+  moveActor(1,origin.x+300,origin.y);moveActor(moved,origin.x+160,origin.y+200);
+  const auto expected=graph.objects[node(blocker)].bounds;
+  need(validNativeNavigationGraph(graph),"Heli/Dragon retained native graph history is valid");
+  need(graphWorld.restoreSnapshot(pending,e),e);
+  const auto restored=graphWorld.snapshot();const auto& route=restored.actors[1].ordinaryAI->targeting;
+  const auto& points=route.search->candidates.front().points;
+  const auto hit=queryNativeNavigation(*restored.spiderNavigation,points.front(),points.back(),
+   {30,30},false,[&](uint64_t ref){return ref!=1&&ref!=0;});
+  need(hit&&hit->minX==expected.minX&&hit->minY==expected.minY&&
+   hit->maxX==expected.maxX&&hit->maxY==expected.maxY,
+   "original Heli/Dragon query must find retained blocker");
+  graphWorld.tick(.017f,{});
+  const auto& result=graphWorld.actors()[1].ordinaryAI->targeting;
+  need(!(result.clock.active&&result.points.size()==2),"Heli/Dragon must not admit obstructed direct route");
+  continuation(graphWorld,authored,l,30);
+ }
  need(spiderContactHeading({0,0})==24,"route fix preserves the accepted contact zero-vector sentinel");
- std::cout<<"Heli native actions, inertia, pursuit/turn, zero-route heading, bases and memory/disk continuation controls passed\n";
+ std::cout<<"Heli native actions, inertia, pursuit/turn, zero-route heading, navigation blockers, bases and memory/disk continuation controls passed\n";
  return 0;
 }catch(const std::exception& ex){std::cerr<<ex.what()<<'\n';return 1;}}

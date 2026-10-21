@@ -65,3 +65,24 @@ Cop query matches316,872retained original-instruction outcomes across four
 overlapping synthetic corpora. These checks establish bounded arithmetic and
 live integration, not campaign-wide or Windows-runtime parity. Extended
 arithmetic comparisons were run on Linux x86_64, not ARM hardware.
+
+## Helicopter and Dragon navigation integration
+
+Helicopter and Dragon both use ordinary subtype0x1d with radius30. Their World
+regression in `ordinary_heli_ai_world_test` begins an actual targeting search,
+then arranges a synthetic pending-search graph with a moved head minimum and
+retained route endpoints. Both Seeker and Tracker must find the intervening
+Thing body and must not admit the obstructed two-point direct route. Actor-cell
+arrival ordering, motion centers and graph bounds are synchronized; normal
+snapshot validators remain enabled. Each mode checks30 exact memory/disk
+continuation ticks. Reverting only source-local traversal makes the blocker
+assertion fail; the accepted movement and zero-route heading fixes remain intact.
+
+The original40e630/40f9b0/40fce0 instruction probe reproduces the same boundary
+history. Of12 focused cases, the old global-prefix scan differs in4 and the
+source-local query matches all12. Replaying the exact exported World graph with
+self and target disabled makes both original axis queries identify the blocker.
+An additional460 radius30 graph-wave/order/selection records and13,122 query
+controls match the repaired helper. These are synthetic instruction and port
+World checks; they do not measure natural campaign frequency, original Windows
+runtime behavior, or Helicopter/Dragon performance.
