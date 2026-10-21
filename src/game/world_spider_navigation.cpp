@@ -75,6 +75,7 @@ void GameWorld::restoreSpiderNavigationIndex(){
     actorNavigationProjections_.clear();
     spiderNavigationActors_.assign(actors_.size(),Missing);
     if(!spiderNavigation_)return;
+    spiderNavigation_->xEdges.invalidateInsertionHint();spiderNavigation_->yEdges.invalidateInsertionHint();
     for(size_t n=0;n<spiderNavigation_->objects.size();++n){const auto& o=spiderNavigation_->objects[n];
         if(o.alive&&!o.point&&!(o.reference&(DecorBit|ProjectileBit))&&o.reference<actors_.size())spiderNavigationActors_[o.reference]=n;}
 }

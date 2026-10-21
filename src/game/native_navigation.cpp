@@ -142,9 +142,9 @@ size_t allocateGraphObject(NativeNavGraph& g,NativeNavGraphObject object){
  return id;
 }
 void insertGraphEdge(NativeNavGraph& g,NativeNavGraphAxis& edges,bool x,NativeNavGraphEdge e){
- const float c=graphCoordinate(g,e,x);auto n=edges.first();
+ const float c=graphCoordinate(g,e,x);auto n=edges.insertionStart(c);
  while(n!=NativeNavGraphAxis::none&&!(c<=graphCoordinate(g,edges.edge(n),x)))n=edges.next(n);
- edges.insertBefore(n,e);
+ const auto inserted=edges.insertBefore(n,e);edges.rememberInsertion(inserted,c);
 }
 }
 NativeNavPoint insertNativeNavigationPoint(NativeNavGraph& g,NativeNavPoint p){
@@ -160,6 +160,7 @@ void updateNativeNavigationObject(NativeNavGraph& g,size_t id,NativeNavObstacle 
  if(id>=g.objects.size()||!g.objects[id].alive)return;
  const auto old=g.objects[id].bounds;
  if(old.minX==b.minX&&old.minY==b.minY&&old.maxX==b.maxX&&old.maxY==b.maxY)return;
+ g.xEdges.invalidateInsertionHint();g.yEdges.invalidateInsertionHint();
  g.objects[id].bounds=b;
  // Write all four coordinates first; retain40e630's endpoint selection and
  // its unordered head-min/tail-max histories.

@@ -27,6 +27,8 @@ private:
  std::vector<Node> nodes_;
  std::vector<uint32_t> free_;
  uint32_t head_=none,tail_=none;size_t count_=0;
+ uint32_t insertionHint_=none;
+ float insertionLowerBound_=0;
  mutable std::vector<uint32_t> endpoints_;
  mutable bool dirty_=false;
  static size_t key(NativeNavGraphEdge e) {
@@ -67,7 +69,7 @@ public:
   using reference=std::conditional_t<Const,const value_type&,value_type&>;
   using pointer=std::conditional_t<Const,const value_type*,value_type*>;
   Iterator()=default;
-  reference operator*()const{if constexpr(!Const)axis_->dirty_=true;return axis_->nodes_[node_].edge;}
+  reference operator*()const{if constexpr(!Const){axis_->dirty_=true;axis_->invalidateInsertionHint();}return axis_->nodes_[node_].edge;}
   pointer operator->()const{return &**this;}
   Iterator& operator++(){node_=axis_->nodes_[node_].next;++rank_;return *this;}
   Iterator operator++(int){auto r=*this;++*this;return r;}
@@ -81,6 +83,11 @@ public:
  NativeNavGraphAxis(std::initializer_list<NativeNavGraphEdge> edges){for(auto e:edges)push_back(e);}
  NativeNavGraphAxis& operator=(std::initializer_list<NativeNavGraphEdge> edges){clear();for(auto e:edges)push_back(e);return *this;}
  size_t size()const{return count_;}bool empty()const{return count_==0;}
+ // The prefix before the last insertion was inspected and cannot stop a
+ // later insertion with an equal/higher coordinate. No sortedness assumed.
+ void invalidateInsertionHint(){insertionHint_=none;}
+ size_t insertionStart(float coordinate)const{return insertionHint_!=none&&coordinate>=insertionLowerBound_?insertionHint_:head_;}
+ void rememberInsertion(size_t node,float coordinate){insertionHint_=static_cast<uint32_t>(node);insertionLowerBound_=coordinate;}
  size_t first()const{return head_;}size_t last()const{return tail_;}
  size_t next(size_t n)const{return nodes_[n].next;}size_t previous(size_t n)const{return nodes_[n].previous;}
  const NativeNavGraphEdge& edge(size_t n)const{return nodes_[n].edge;}
@@ -90,6 +97,7 @@ public:
   const auto k=object*2+size_t(maximum);return k<endpoints_.size()?endpoints_[k]:none;
  }
  size_t insertBefore(size_t before,NativeNavGraphEdge e){
+  invalidateInsertionHint();
   if(dirty_)rebuildLookup();
   size_t n;if(free_.empty()){n=nodes_.size();if(n>=none)throw std::length_error("Graph endpoint pool overflow");nodes_.push_back({e});}else{n=free_.back();free_.pop_back();nodes_[n]={e};}
   linkBefore(n,before);++count_;
@@ -97,11 +105,12 @@ public:
  }
  void eraseNode(size_t n){
   if(n==none)return;
+  invalidateInsertionHint();
   if(dirty_)rebuildLookup();
   endpoints_[key(nodes_[n].edge)]=none;unlink(n);free_.push_back(n);--count_;
  }
- void moveBefore(size_t n,size_t before){if(n==before||nodes_[n].next==before)return;unlink(n);linkBefore(n,before);}
- void clear(){nodes_.clear();free_.clear();endpoints_.clear();head_=tail_=none;count_=0;dirty_=false;}
+ void moveBefore(size_t n,size_t before){invalidateInsertionHint();if(n==before||nodes_[n].next==before)return;unlink(n);linkBefore(n,before);}
+ void clear(){invalidateInsertionHint();nodes_.clear();free_.clear();endpoints_.clear();head_=tail_=none;count_=0;dirty_=false;}
  void push_back(NativeNavGraphEdge e){insertBefore(none,e);}
  template<class It>void assign(It first,It last){clear();for(;first!=last;++first)push_back(*first);}
  void resize(size_t n){while(count_>n)eraseNode(tail_);while(count_<n)push_back({});dirty_=true;}
@@ -109,7 +118,7 @@ public:
  const_iterator begin()const{return {this,head_,0};}const_iterator end()const{return {this,none,count_};}
  auto rbegin()const{return std::reverse_iterator(end());}auto rend()const{return std::reverse_iterator(begin());}
  // Rank access is only for fixtures/inspection; runtime traversal uses handles.
- NativeNavGraphEdge& operator[](size_t n){dirty_=true;return nodes_[atRank(n)].edge;}
+ NativeNavGraphEdge& operator[](size_t n){invalidateInsertionHint();dirty_=true;return nodes_[atRank(n)].edge;}
  const NativeNavGraphEdge& operator[](size_t n)const{return nodes_[atRank(n)].edge;}
  NativeNavGraphEdge& front(){return (*this)[0];}const NativeNavGraphEdge& front()const{return (*this)[0];}
  iterator insert(iterator pos,NativeNavGraphEdge e){return {this,insertBefore(pos.node_,e),pos.rank_};}
