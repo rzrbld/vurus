@@ -40,14 +40,13 @@ inline std::vector<uint64_t> spiderPhysicalContactOrder(const NativeNavGraph& gr
         const auto& edges=axis?graph.yEdges:graph.xEdges;
         const auto coordinate=[&](const NativeNavGraphEdge& edge){const auto& b=graph.objects[edge.object].bounds;
             return axis?(edge.maximum?b.maxY:b.minY):(edge.maximum?b.maxX:b.minX);};
-        size_t start=edges.size();
-        for(size_t n=0;n<edges.size();++n)if(edges[n].object==source && edges[n].maximum==!forward){start=n;break;}
-        if(start==edges.size())continue;
+        const auto start=edges.endpoint(source,!forward);
+        if(start==NativeNavGraphAxis::none)continue;
         const float goal=axis?proposed.y:proposed.x;
         const float cutoff=goal+(forward?2*radius:-2*radius);
         size_t previous=source;
-        for(std::ptrdiff_t n=static_cast<std::ptrdiff_t>(start)+(forward?1:-1);n>=0&&n<static_cast<std::ptrdiff_t>(edges.size());n+=forward?1:-1) {
-            const auto& edge=edges[static_cast<size_t>(n)];const float c=coordinate(edge);
+        for(size_t n=forward?edges.next(start):edges.previous(start);n!=NativeNavGraphAxis::none;n=forward?edges.next(n):edges.previous(n)) {
+            const auto& edge=edges.edge(n);const float c=coordinate(edge);
             if(forward?c>cutoff:c<cutoff)break;
             if(edge.object==previous || edge.object==source)continue;
             const auto& object=graph.objects[edge.object];if(!object.alive || object.point)continue;

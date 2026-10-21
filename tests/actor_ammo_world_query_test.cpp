@@ -35,7 +35,7 @@ struct AmmoImpactNativeTestAccess {
   for(unsigned axis=0;axis<2;++axis){auto& edges=axis?graph.yEdges:graph.xEdges;
    for(unsigned n=0;n<3;++n)for(bool maximum:{false,true})edges.push_back({n,maximum});
    const auto coordinate=[&](auto e){auto b=graph.objects[e.object].bounds;return axis?(e.maximum?b.maxY:b.minY):(e.maximum?b.maxX:b.minX);};
-   std::sort(edges.begin(),edges.end(),[&](auto a,auto b){const float x=coordinate(a),y=coordinate(b);const unsigned ai=a.object*4+axis+(a.maximum?2:0),bi=b.object*4+axis+(b.maximum?2:0);return x!=y?x<y:r.reverseOrder?ai>bi:ai<bi;});
+   std::vector<NativeNavGraphEdge> ordered(edges.begin(),edges.end());std::sort(ordered.begin(),ordered.end(),[&](auto a,auto b){const float x=coordinate(a),y=coordinate(b);const unsigned ai=a.object*4+axis+(a.maximum?2:0),bi=b.object*4+axis+(b.maximum?2:0);return x!=y?x<y:r.reverseOrder?ai>bi:ai<bi;});edges.assign(ordered.begin(),ordered.end());
   }
   world.spiderNavigation_=std::move(graph);world.spiderNavigationActors_={SIZE_MAX,0,1,2};
   return world.queryNativeBodyContacts(1,{},proposed,8);

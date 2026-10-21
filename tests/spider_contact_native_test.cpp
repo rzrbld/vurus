@@ -20,8 +20,8 @@ int main(){
     assert(order.size()==2 && order[0]==2 && order[1]==1);
     auto withPoint=graph;
     withPoint.objects.push_back({0,{15,0,15,0},true,true});
-    withPoint.xEdges.insert(withPoint.xEdges.begin()+3,{3,false});
-    withPoint.yEdges.insert(withPoint.yEdges.begin()+3,{3,false});
+    withPoint.xEdges.insert(std::next(withPoint.xEdges.begin(),3),{3,false});
+    withPoint.yEdges.insert(std::next(withPoint.yEdges.begin(),3),{3,false});
     assert(spiderPhysicalContactOrder(withPoint,0,{5,0},10)==order);
     // Endpoint distance minus two accepts a visible gap; no swept-path contact.
     auto p=spiderCircleContact({0,0},10,{22,0},10);

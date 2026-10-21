@@ -17,22 +17,18 @@ inline void updateNativeContactGraphObject(NativeNavGraph& graph,size_t source,
     for(bool x:{true,false}){
         auto& edges=x?graph.xEdges:graph.yEdges;
         const auto coordinate=[&](auto edge){auto b=graph.objects[edge.object].bounds;return x?(edge.maximum?b.maxX:b.minX):(edge.maximum?b.maxY:b.minY);};
-        const auto position=[&](size_t object,bool maximum){return size_t(std::find_if(edges.begin(),edges.end(),[&](auto e){return e.object==object&&e.maximum==maximum;})-edges.begin());};
-        const auto ordered=[&](size_t n){const auto c=coordinate(edges[n]);return (!n||coordinate(edges[n-1])<=c)&&(n+1==edges.size()||c<=coordinate(edges[n+1]));};
+        const auto ordered=[&](size_t n){const auto p=edges.previous(n),q=edges.next(n);const auto c=coordinate(edges.edge(n));return(p==NativeNavGraphAxis::none||coordinate(edges.edge(p))<=c)&&(q==NativeNavGraphAxis::none||c<=coordinate(edges.edge(q)));};
         const auto relocate=[&](bool maximum){
-            const auto n=position(source,maximum);if(n>=edges.size())return;
-            const auto edge=edges[n];edges.erase(edges.begin()+n);
-            auto anchor=position(*hint,maximum);if(anchor>=edges.size()){edges.insert(edges.begin()+std::min(n,edges.size()),edge);return;}
-            if(coordinate(edge)>coordinate(edges[anchor]))++anchor;
-            edges.insert(edges.begin()+anchor,edge);
-            // 40e790's strict adjacent swaps do not cross equal coordinates.
-            while(anchor&&coordinate(edges[anchor-1])>coordinate(edge)){std::swap(edges[anchor],edges[anchor-1]);--anchor;}
-            while(anchor+1<edges.size()&&coordinate(edges[anchor+1])<coordinate(edge)){std::swap(edges[anchor],edges[anchor+1]);++anchor;}
+            const auto n=edges.endpoint(source,maximum),anchor=edges.endpoint(*hint,maximum);if(n==NativeNavGraphAxis::none||anchor==NativeNavGraphAxis::none)return;
+            const auto c=coordinate(edges.edge(n));
+            edges.moveBefore(n,c>coordinate(edges.edge(anchor))?edges.next(anchor):anchor);
+            for(auto prev=edges.previous(n);prev!=NativeNavGraphAxis::none&&coordinate(edges.edge(prev))>c;prev=edges.previous(n))edges.moveBefore(n,prev);
+            for(auto next=edges.next(n);next!=NativeNavGraphAxis::none&&coordinate(edges.edge(next))<c;next=edges.next(n))edges.moveBefore(next,n);
         };
-        const auto lo=position(source,false),hi=position(source,true);
-        if(lo>=edges.size()||hi>=edges.size())continue;
-        if(lo&&!ordered(lo)){relocate(false);relocate(true);}
-        else if(hi+1!=edges.size()&&!ordered(hi)){relocate(true);relocate(false);}
+        const auto lo=edges.endpoint(source,false),hi=edges.endpoint(source,true);
+        if(lo==NativeNavGraphAxis::none||hi==NativeNavGraphAxis::none)continue;
+        if(lo!=edges.first()&&!ordered(lo)){relocate(false);relocate(true);}
+        else if(hi!=edges.last()&&!ordered(hi)){relocate(true);relocate(false);}
     }
 }
 }

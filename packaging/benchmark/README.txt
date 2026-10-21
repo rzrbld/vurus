@@ -16,7 +16,7 @@ Linux desktop:
 Run ./vurus-bench --data /path/to/existing/game/resources
 Or place vurus-bench beside the game's executable and existing data/ import.
 
-The default suite runs automatically: six scenes, each with 120 warmup and
+The default suite runs automatically: seven scenes, each with 120 warmup and
 1,200 measured fixed steps. Allow a few minutes on an H700. Esc/controller B
 cancels. At the final screen press A, B, Start or Enter to exit.
 
@@ -54,11 +54,16 @@ the game's menu settings. Invalid files fail; --default-settings bypasses them.
 The final screen labels MENU/DEFAULT and actual output size. HTML/JSON record all
 effective video settings: only compare scores with matching settings/resolution.
 
-vurus-bench-1 workload (both modes):
+vurus-bench-2 workload (both modes):
 Normal difficulty, music off, real effects/voices, volume70%, VSync/cap off.
 Player invulnerable, held firing, facing changes every120steps; ammo refill
 and weapon change every600steps. CPU/T3P2 moves through generator stations.
-Scenes: CAVE/T1C2, CPU/T3P2, two UNDERGROUND/T2U1 and two HITEK/T1H1 starts.
+Scenes: CAVE/T1C2, CPU/T3P2, two UNDERGROUND/T2U1 and two HITEK/T1H1 starts,
+plus HITEK/T2H2 Burner crossfire at4571,2841. This seventh scene keeps the
+player stationary without firing and enemies invulnerable, sustaining2-3
+Burners with normal AI/weapons. JSON records overlapping-fire counters; no
+crossfire means no score. Protocol2 scores include the extra scene and cannot
+be compared directly with previous six-scene protocol1 scores.
 Briefings are skipped directly by the benchmark; resources remain unmodified.
 
 Timing excludes loading, scripted control changes, event polling, separate

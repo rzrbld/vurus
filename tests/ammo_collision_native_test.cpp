@@ -36,7 +36,7 @@ int main(int argc,char**argv){try{
  for(unsigned a=0;a<3;++a){auto p=positions[a];const float radius=radii[a];g.objects.push_back({a,{p.x-radius,p.z-radius,p.x+radius,p.z+radius}});}
  for(unsigned axis=0;axis<2;++axis){auto& edges=axis?g.yEdges:g.xEdges;for(unsigned a=0;a<3;++a)for(bool max:{false,true})edges.push_back({a,max});
   auto value=[&](const auto& e){auto b=g.objects[e.object].bounds;return axis?(e.maximum?b.maxY:b.minY):(e.maximum?b.maxX:b.minX);};
-  std::sort(edges.begin(),edges.end(),[&](const auto&a,const auto&b){float x=value(a),y=value(b);unsigned ai=a.object*4+axis+(a.maximum?2:0),bi=b.object*4+axis+(b.maximum?2:0);return x!=y?x<y:r.reverseOrder?ai>bi:ai<bi;});
+  std::vector<NativeNavGraphEdge> ordered(edges.begin(),edges.end());std::sort(ordered.begin(),ordered.end(),[&](const auto&a,const auto&b){float x=value(a),y=value(b);unsigned ai=a.object*4+axis+(a.maximum?2:0),bi=b.object*4+axis+(b.maximum?2:0);return x!=y?x<y:r.reverseOrder?ai>bi:ai<bi;});edges.assign(ordered.begin(),ordered.end());
  }
  NativeAmmoContactObject source;source.identity=1;source.subtype=16;source.ageMs=1000;
  const auto result=queryNativeAmmoCircles(g,0,source,{},proposed,8,[&](uint64_t id)->std::optional<NativeAmmoCircleTarget>{

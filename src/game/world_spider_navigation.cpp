@@ -34,18 +34,22 @@ bool actorNavigationEnabled(const ActorState& a,const ObjectPlacement& o,uint32_
        (a.gate||a.lift||!a.generators.empty())&&!a.solid)return false;
     return true;
 }
-NativeNavObstacle actorNavigationBounds(const ActorState& a,const ObjectPlacement& o,uint32_t subtype){
+}
+NativeNavObstacle GameWorld::actorNavigationBounds(size_t id,uint32_t subtype){
+    const auto& a=actors_[id];const auto& o=scene_->objects[id];
     //41a5d0/41b4b0 use the same x87 projection for every native BBOX.
     //A different rounded center can invent an axis crossing at zero motion.
-    auto p=spiderSurfaceToNative(o.position.x,o.position.y);
-    if(const auto* h=a.nativeMotionHistory())p={h->center.x,h->center.y};
+    const auto* history=a.nativeMotionHistory();
+    if(!history && actorNavigationProjections_.size()<=id)
+        actorNavigationProjections_.resize(actors_.size());
+    const auto p=history?Displacement{history->center.x,history->center.y}:
+        actorNavigationProjections_[id].resolve(o.position.x,o.position.y,spiderSurfaceToNative);
     const auto shape=nativeBodyContactShape(subtype,a.radius);
     const float r=shape==2?0.f:shape==4?a.radius*.7071067690849304f:a.radius;
     return {p.x-r,p.y-r,p.x+r,p.y+r};
 }
-}
 void GameWorld::initializeSpiderNavigation(bool projectileNeeded){
-    spiderNavigation_.reset();spiderNavigationActors_.clear();
+    spiderNavigation_.reset();spiderNavigationActors_.clear();actorNavigationProjections_.clear();
     if(!projectileNeeded && !std::any_of(actors_.begin(),actors_.end(),[](const auto& a){return a.contactConfig.nativeEnemy;}))return;
     spiderNavigation_.emplace();spiderNavigationActors_.assign(actors_.size(),Missing);
     struct Entry{int x,y;bool decor;size_t id;};std::vector<Entry> entries;
@@ -62,12 +66,13 @@ void GameWorld::initializeSpiderNavigation(bool projectileNeeded){
     });
     for(const auto& e:entries)if(e.decor){const auto& d=level_->nativeNavigationDecor[e.id];
         insertNativeNavigationObject(*spiderNavigation_,DecorBit|e.id,{d.minX,d.minY,d.maxX,d.maxY});
-    }else spiderNavigationActors_[e.id]=insertNativeNavigationObject(*spiderNavigation_,e.id,actorNavigationBounds(actors_[e.id],scene_->objects[e.id],nativeDamageSubtype(e.id)));
+    }else spiderNavigationActors_[e.id]=insertNativeNavigationObject(*spiderNavigation_,e.id,actorNavigationBounds(e.id,nativeDamageSubtype(e.id)));
     // A producer rebuild must include already-existing bare Ammo immediately;
     //waiting for its next projectile visit loses actor->Ammo candidates.
     for(auto& shot:projectiles_){shot.spiderGraphNode=Missing;updateSpiderProjectileNavigation(shot);}
 }
 void GameWorld::restoreSpiderNavigationIndex(){
+    actorNavigationProjections_.clear();
     spiderNavigationActors_.assign(actors_.size(),Missing);
     if(!spiderNavigation_)return;
     for(size_t n=0;n<spiderNavigation_->objects.size();++n){const auto& o=spiderNavigation_->objects[n];
@@ -88,7 +93,7 @@ void GameWorld::updateSpiderNavigation(size_t id,std::optional<size_t> closestNo
     if(!actorHasNavigationShape(actor,subtype)){
         if(index!=Missing){removeNativeNavigationObject(*spiderNavigation_,index);index=Missing;}return;
     }
-    const auto bounds=actorNavigationBounds(actor,scene_->objects[id],subtype);
+    const auto bounds=actorNavigationBounds(id,subtype);
     if(index==Missing){if(actorNavigationEnabled(actor,scene_->objects[id],subtype))index=insertNativeNavigationObject(*spiderNavigation_,id,bounds);}
     else updateNativeContactGraphObject(*spiderNavigation_,index,bounds,closestNonContact);
 }

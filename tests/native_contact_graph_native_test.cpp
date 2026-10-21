@@ -13,7 +13,7 @@ int main(int argc,char**argv){try{need(argc==1||argc==2,"usage: native_contact_g
   NativeNavGraph graph;for(unsigned a=0;a<4;++a){float x=positions[layout][a*2],y=positions[layout][a*2+1];graph.objects.push_back({a,{x-8,y-8,x+8,y+8}});}
   for(unsigned axis=0;axis<2;++axis){auto&edges=axis?graph.yEdges:graph.xEdges;for(unsigned a=0;a<4;++a)for(bool maximum:{false,true})edges.push_back({a,maximum});
    const auto value=[&](auto e){auto b=graph.objects[e.object].bounds;return axis?(e.maximum?b.maxY:b.minY):(e.maximum?b.maxX:b.minX);};
-   std::sort(edges.begin(),edges.end(),[&](auto a,auto b){float x=value(a),y=value(b);unsigned ai=a.object*4+axis+(a.maximum?2:0),bi=b.object*4+axis+(b.maximum?2:0);return x!=y?x<y:reverse?ai>bi:ai<bi;});}
+   std::vector<NativeNavGraphEdge> ordered(edges.begin(),edges.end());std::sort(ordered.begin(),ordered.end(),[&](auto a,auto b){float x=value(a),y=value(b);unsigned ai=a.object*4+axis+(a.maximum?2:0),bi=b.object*4+axis+(b.maximum?2:0);return x!=y?x<y:reverse?ai>bi:ai<bi;});edges.assign(ordered.begin(),ordered.end());}
   auto b=graph.objects[source].bounds;b.minX+=movement[m][0];b.maxX+=movement[m][0];b.minY+=movement[m][1];b.maxY+=movement[m][1];
   auto ordinary=graph;updateNativeNavigationObject(ordinary,source,b);updateNativeContactGraphObject(graph,source,b,hint);
   bool bad=false,different=false;for(unsigned axis=0;axis<2;++axis){const auto& edges=axis?graph.yEdges:graph.xEdges;const auto& other=axis?ordinary.yEdges:ordinary.xEdges;

@@ -126,22 +126,34 @@ std::optional<NativeNavObstacle> queryNativeNavigation(const std::vector<NativeN
 namespace vyruz {
 namespace {
 float graphCoordinate(const NativeNavGraph& g,NativeNavGraphEdge e,bool x){auto b=g.objects[e.object].bounds;return x?(e.maximum?b.maxX:b.minX):(e.maximum?b.maxY:b.minY);}
-void reorderGraphEdge(NativeNavGraph& g,std::vector<NativeNavGraphEdge>& edges,bool x,size_t object,bool maximum){
- auto it=std::find_if(edges.begin(),edges.end(),[&](auto e){return e.object==object&&e.maximum==maximum;});if(it==edges.end())return;
- size_t n=it-edges.begin();const float value=graphCoordinate(g,*it,x);
- while(n&&graphCoordinate(g,edges[n-1],x)>value){std::swap(edges[n],edges[n-1]);--n;}
- while(n+1<edges.size()&&graphCoordinate(g,edges[n+1],x)<value){std::swap(edges[n],edges[n+1]);++n;}
+void reorderGraphEdge(NativeNavGraph& g,NativeNavGraphAxis& edges,bool x,size_t object,bool maximum){
+ const auto n=edges.endpoint(object,maximum);if(n==NativeNavGraphAxis::none)return;
+ const float value=graphCoordinate(g,edges.edge(n),x);
+ for(auto p=edges.previous(n);p!=NativeNavGraphAxis::none&&graphCoordinate(g,edges.edge(p),x)>value;p=edges.previous(n))edges.moveBefore(n,p);
+ for(auto q=edges.next(n);q!=NativeNavGraphAxis::none&&graphCoordinate(g,edges.edge(q),x)<value;q=edges.next(n))edges.moveBefore(q,n);
+}
+size_t allocateGraphObject(NativeNavGraph& g,NativeNavGraphObject object){
+ if(g.indexedObjectCount!=g.objects.size()){
+  g.freeObjects.clear();for(size_t i=0;i<g.objects.size();++i)if(!g.objects[i].alive)g.freeObjects.push_back(i);
+  std::make_heap(g.freeObjects.begin(),g.freeObjects.end(),std::greater<size_t>());g.indexedObjectCount=g.objects.size();
+ }
+ size_t id;if(g.freeObjects.empty()){id=g.objects.size();g.objects.push_back(object);g.indexedObjectCount=g.objects.size();}
+ else{std::pop_heap(g.freeObjects.begin(),g.freeObjects.end(),std::greater<size_t>());id=g.freeObjects.back();g.freeObjects.pop_back();g.objects[id]=object;}
+ return id;
+}
+void insertGraphEdge(NativeNavGraph& g,NativeNavGraphAxis& edges,bool x,NativeNavGraphEdge e){
+ const float c=graphCoordinate(g,e,x);auto n=edges.first();
+ while(n!=NativeNavGraphAxis::none&&!(c<=graphCoordinate(g,edges.edge(n),x)))n=edges.next(n);
+ edges.insertBefore(n,e);
 }
 }
 NativeNavPoint insertNativeNavigationPoint(NativeNavGraph& g,NativeNavPoint p){
- p.graphNode=size_t(std::find_if(g.objects.begin(),g.objects.end(),[](auto o){return !o.alive;})-g.objects.begin());
- NativeNavGraphObject object{0,{p.x,p.y,p.x,p.y},true,true};if(p.graphNode==g.objects.size())g.objects.push_back(object);else g.objects[p.graphNode]=object;
- for(bool x:{true,false}){auto& edges=x?g.xEdges:g.yEdges;NativeNavGraphEdge edge{p.graphNode,false};float c=x?p.x:p.y;auto it=std::find_if(edges.begin(),edges.end(),[&](auto e){return c<=graphCoordinate(g,e,x);});edges.insert(it,edge);}return p;
+ p.graphNode=allocateGraphObject(g,{0,{p.x,p.y,p.x,p.y},true,true});
+ for(bool x:{true,false})insertGraphEdge(g,x?g.xEdges:g.yEdges,x,{p.graphNode,false});return p;
 }
 size_t insertNativeNavigationObject(NativeNavGraph& g,uint64_t reference,NativeNavObstacle b){
- size_t id=size_t(std::find_if(g.objects.begin(),g.objects.end(),[](auto o){return !o.alive;})-g.objects.begin());
- NativeNavGraphObject object{reference,b,true};if(id==g.objects.size())g.objects.push_back(object);else g.objects[id]=object;
- for(bool maximum:{true,false})for(bool x:{true,false}){auto& edges=x?g.xEdges:g.yEdges;NativeNavGraphEdge edge{id,maximum};float c=graphCoordinate(g,edge,x);auto it=std::find_if(edges.begin(),edges.end(),[&](auto e){return c<=graphCoordinate(g,e,x);});edges.insert(it,edge);}
+ const auto id=allocateGraphObject(g,{reference,b,true});
+ for(bool maximum:{true,false})for(bool x:{true,false})insertGraphEdge(g,x?g.xEdges:g.yEdges,x,{id,maximum});
  return id;
 }
 void updateNativeNavigationObject(NativeNavGraph& g,size_t id,NativeNavObstacle b){
@@ -149,53 +161,51 @@ void updateNativeNavigationObject(NativeNavGraph& g,size_t id,NativeNavObstacle 
  const auto old=g.objects[id].bounds;
  if(old.minX==b.minX&&old.minY==b.minY&&old.maxX==b.maxX&&old.maxY==b.maxY)return;
  g.objects[id].bounds=b;
- // 40e630 picks first endpoint based on whether its old neighbours remain
- // sorted after ALL four coordinates have been written by40ef20.
- for(bool x:{true,false}){auto& edges=x?g.xEdges:g.yEdges;auto position=[&](bool maximum){return size_t(std::find_if(edges.begin(),edges.end(),[&](auto e){return e.object==id&&e.maximum==maximum;})-edges.begin());};
-  size_t lo=position(false),hi=position(true);auto ordered=[&](size_t n){float c=graphCoordinate(g,edges[n],x);return(!n||graphCoordinate(g,edges[n-1],x)<=c)&&(n+1==edges.size()||c<=graphCoordinate(g,edges[n+1],x));};
-  // Native min endpoint at head is considered already ordered; max endpoint
-  // at tail likewise. This branch ordering matters when bounds cross nodes.
-  if(lo!=0&&!ordered(lo)){reorderGraphEdge(g,edges,x,id,false);reorderGraphEdge(g,edges,x,id,true);}
-  else if(hi+1!=edges.size()&&!ordered(hi)){reorderGraphEdge(g,edges,x,id,true);reorderGraphEdge(g,edges,x,id,false);}
+ // Write all four coordinates first; retain40e630's endpoint selection and
+ // its unordered head-min/tail-max histories.
+ for(bool x:{true,false}){auto& edges=x?g.xEdges:g.yEdges;
+  const auto lo=edges.endpoint(id,false),hi=edges.endpoint(id,true);if(lo==NativeNavGraphAxis::none||hi==NativeNavGraphAxis::none)continue;
+  const auto ordered=[&](size_t n){const auto p=edges.previous(n),q=edges.next(n);const float c=graphCoordinate(g,edges.edge(n),x);return(p==NativeNavGraphAxis::none||graphCoordinate(g,edges.edge(p),x)<=c)&&(q==NativeNavGraphAxis::none||c<=graphCoordinate(g,edges.edge(q),x));};
+  if(lo!=edges.first()&&!ordered(lo)){reorderGraphEdge(g,edges,x,id,false);reorderGraphEdge(g,edges,x,id,true);}
+  else if(hi!=edges.last()&&!ordered(hi)){reorderGraphEdge(g,edges,x,id,true);reorderGraphEdge(g,edges,x,id,false);}
  }
 }
-void removeNativeNavigationObject(NativeNavGraph& g,size_t id){if(id>=g.objects.size())return;g.objects[id].alive=false;for(auto* edges:{&g.xEdges,&g.yEdges})std::erase_if(*edges,[&](auto e){return e.object==id;});}
+void removeNativeNavigationObject(NativeNavGraph& g,size_t id){
+ if(id>=g.objects.size()||!g.objects[id].alive)return;
+ const bool indexed=g.indexedObjectCount==g.objects.size();g.objects[id].alive=false;
+ for(auto* edges:{&g.xEdges,&g.yEdges}){edges->eraseNode(edges->endpoint(id,false));edges->eraseNode(edges->endpoint(id,true));}
+ if(indexed){g.freeObjects.push_back(id);std::push_heap(g.freeObjects.begin(),g.freeObjects.end(),std::greater<size_t>());}
+}
 std::optional<NativeNavObstacle> queryNativeNavigation(const NativeNavGraph& g,NativeNavPoint a,NativeNavPoint b,NativeNavPoint h,bool overlap,const NativeNavEligible& eligible,bool nativeIntersectionPrecision){
  auto allowed=[&](NativeNavGraphEdge e){return g.objects[e.object].alive&&!g.objects[e.object].point&&(!eligible||eligible(g.objects[e.object].reference));};
- auto sourceIndex=[&](const std::vector<NativeNavGraphEdge>& edges){
-  if(a.graphNode==SIZE_MAX||a.graphNode>=g.objects.size()||!g.objects[a.graphNode].alive||!g.objects[a.graphNode].point)return edges.size();
-  return size_t(std::find_if(edges.begin(),edges.end(),[&](auto e){return e.object==a.graphNode;})-edges.begin());
- };
- const size_t fromX=sourceIndex(g.xEdges),fromY=sourceIndex(g.yEdges);
- auto pointSide=[&](const std::vector<NativeNavGraphEdge>& edges,const NativeNavGraphEdge& edge,bool forward){
-  size_t from=&edges==&g.xEdges?fromX:fromY;if(from==edges.size())return true;
-  size_t at=&edge-edges.data();return forward?at>from:at<from;
- };
+ const bool enrolled=a.graphNode!=SIZE_MAX&&a.graphNode<g.objects.size()&&g.objects[a.graphNode].alive&&g.objects[a.graphNode].point;
+ const size_t fromX=enrolled?g.xEdges.endpoint(a.graphNode,false):NativeNavGraphAxis::none;
+ const size_t fromY=enrolled?g.yEdges.endpoint(a.graphNode,false):NativeNavGraphAxis::none;
  // Native40f840/40f9b0/40fce0 begin at the source node's neighbour.
  // Preserve graph list history, including temporarily unordered head/tail bounds.
- if(overlap&&fromX<g.xEdges.size()){
+ if(overlap&&fromX!=NativeNavGraphAxis::none){
   auto check=[&](NativeNavGraphEdge e)->std::optional<NativeNavObstacle>{
    const auto o=g.objects[e.object].bounds;
    if(allowed(e)&&o.minX<=a.x+h.x&&a.x-h.x<=o.maxX&&o.minY<=a.y+h.y&&a.y-h.y<=o.maxY)return o;
    return {};
   };
-  for(size_t n=fromX;n>0;){const auto e=g.xEdges[--n];if(graphCoordinate(g,e,true)<a.x-h.x)break;if(auto hit=check(e))return hit;}
-  for(size_t n=fromX+1;n<g.xEdges.size();++n){const auto e=g.xEdges[n];if(graphCoordinate(g,e,true)>a.x+h.x)break;if(auto hit=check(e))return hit;}
+  for(size_t n=g.xEdges.previous(fromX);n!=NativeNavGraphAxis::none;n=g.xEdges.previous(n)){const auto e=g.xEdges.edge(n);if(graphCoordinate(g,e,true)<a.x-h.x)break;if(auto hit=check(e))return hit;}
+  for(size_t n=g.xEdges.next(fromX);n!=NativeNavGraphAxis::none;n=g.xEdges.next(n)){const auto e=g.xEdges.edge(n);if(graphCoordinate(g,e,true)>a.x+h.x)break;if(auto hit=check(e))return hit;}
   return {};
  }
- if(overlap){for(auto it=g.xEdges.rbegin();it!=g.xEdges.rend();++it){float c=graphCoordinate(g,*it,true);if(c>a.x||!pointSide(g.xEdges,*it,false)||(c==a.x&&a.graphNode==SIZE_MAX))continue;if(c<a.x-h.x)break;auto o=g.objects[it->object].bounds;if(allowed(*it)&&o.minX<=a.x+h.x&&a.x-h.x<=o.maxX&&o.minY<=a.y+h.y&&a.y-h.y<=o.maxY)return o;}for(const auto& e:g.xEdges){float c=graphCoordinate(g,e,true);if(c<a.x||!pointSide(g.xEdges,e,true))continue;if(c>a.x+h.x)break;auto o=g.objects[e.object].bounds;if(allowed(e)&&o.minX<=a.x+h.x&&a.x-h.x<=o.maxX&&o.minY<=a.y+h.y&&a.y-h.y<=o.maxY)return o;}return {};}
+ if(overlap){for(auto it=g.xEdges.rbegin();it!=g.xEdges.rend();++it){float c=graphCoordinate(g,*it,true);if(c>a.x||(c==a.x&&a.graphNode==SIZE_MAX))continue;if(c<a.x-h.x)break;auto o=g.objects[it->object].bounds;if(allowed(*it)&&o.minX<=a.x+h.x&&a.x-h.x<=o.maxX&&o.minY<=a.y+h.y&&a.y-h.y<=o.maxY)return o;}for(const auto& e:g.xEdges){float c=graphCoordinate(g,e,true);if(c<a.x)continue;if(c>a.x+h.x)break;auto o=g.objects[e.object].bounds;if(allowed(e)&&o.minX<=a.x+h.x&&a.x-h.x<=o.maxX&&o.minY<=a.y+h.y&&a.y-h.y<=o.maxY)return o;}return {};}
  if(a==b)return {};
  struct Hit {size_t id;NativeNavPoint point;};
  auto scan=[&](bool x,bool first)->std::optional<Hit>{const auto line=x?nativeNavLine(a.x,a.y,b.x,b.y):nativeNavLine(a.y,a.x,b.y,b.x,nativeIntersectionPrecision);const auto& edges=x?g.xEdges:g.yEdges;float start=x?a.x:a.y,end=x?b.x:b.y;bool increasing=end>start;
- auto test=[&](const NativeNavGraphEdge& edge)->std::optional<Hit>{float c=graphCoordinate(g,edge,x);if(increasing?(c<start||c>end):(c>start||c<end||(c==start&&a.graphNode==SIZE_MAX)))return {};if(!pointSide(edges,edge,increasing))return {};if(!allowed(edge))return {};NativeNavPoint p;if(x){p.x=c;p.y=line.at(c);}else{p.y=c;p.x=line.at(c);}auto o=g.objects[edge.object].bounds;if(p.x<std::min(a.x,b.x)||p.x>std::max(a.x,b.x)||p.y<std::min(a.y,b.y)||p.y>std::max(a.y,b.y)||p.x<o.minX||p.x>o.maxX||p.y<o.minY||p.y>o.maxY)return {};return Hit{edge.object,p};};
+ auto test=[&](const NativeNavGraphEdge& edge)->std::optional<Hit>{float c=graphCoordinate(g,edge,x);if(increasing?(c<start||c>end):(c>start||c<end||(c==start&&a.graphNode==SIZE_MAX)))return {};if(!allowed(edge))return {};NativeNavPoint p;if(x){p.x=c;p.y=line.at(c);}else{p.y=c;p.x=line.at(c);}auto o=g.objects[edge.object].bounds;if(p.x<std::min(a.x,b.x)||p.x>std::max(a.x,b.x)||p.y<std::min(a.y,b.y)||p.y>std::max(a.y,b.y)||p.x<o.minX||p.x>o.maxX||p.y<o.minY||p.y>o.maxY)return {};return Hit{edge.object,p};};
  const size_t source=x?fromX:fromY;
- if(source<edges.size()){
+ if(source!=NativeNavGraphAxis::none){
   // 40f9b0 decreasing-X uses extent.y; 40fce0's horizontal fallback
   // uses extent.x. Preserve that original cutoff asymmetry.
   const float extent=x&&!(first&&!increasing)?h.x:h.y;
   const float limit=increasing?end+extent:end-extent;
-  if(increasing){for(size_t n=source+1;n<edges.size();++n){const auto& edge=edges[n];if(graphCoordinate(g,edge,x)>limit)break;if(auto hit=test(edge))return hit;}}
-  else {for(size_t n=source;n>0;){const auto& edge=edges[--n];if(graphCoordinate(g,edge,x)<limit)break;if(auto hit=test(edge))return hit;}}
+  if(increasing){for(size_t n=edges.next(source);n!=NativeNavGraphAxis::none;n=edges.next(n)){const auto& edge=edges.edge(n);if(graphCoordinate(g,edge,x)>limit)break;if(auto hit=test(edge))return hit;}}
+  else {for(size_t n=edges.previous(source);n!=NativeNavGraphAxis::none;n=edges.previous(n)){const auto& edge=edges.edge(n);if(graphCoordinate(g,edge,x)<limit)break;if(auto hit=test(edge))return hit;}}
  }else if(increasing){for(const auto& edge:edges){if(graphCoordinate(g,edge,x)>end)break;if(auto hit=test(edge))return hit;}}
  else {for(auto it=edges.rbegin();it!=edges.rend();++it){if(graphCoordinate(g,*it,x)<end)break;if(auto hit=test(*it))return hit;}}
  return {};};

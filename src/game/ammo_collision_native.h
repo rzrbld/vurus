@@ -97,13 +97,13 @@ inline NativeAmmoContactTraversal nativeAmmoPhysicalContactTraversal(const Nativ
         const auto& edges=axis?graph.yEdges:graph.xEdges;
         const auto coordinate=[&](const auto&e){const auto& b=graph.objects[e.object].bounds;
             return axis?(e.maximum?b.maxY:b.minY):(e.maximum?b.maxX:b.minX);};
-        size_t start=edges.size();for(size_t n=0;n<edges.size();++n)if(edges[n].object==source&&edges[n].maximum==!forward){start=n;break;}
-        if(start==edges.size())continue;
+        const auto start=edges.endpoint(source,!forward);
+        if(start==NativeNavGraphAxis::none)continue;
         size_t preceding=source;
         result.closestNonContactNode.reset();
         std::optional<size_t> closest;float closestDistance=0;
-        for(std::ptrdiff_t n=static_cast<std::ptrdiff_t>(start)+(forward?1:-1);n>=0&&n<static_cast<std::ptrdiff_t>(edges.size());n+=forward?1:-1){
-            const auto& edge=edges[n];const float c=coordinate(edge);if(forward?c>cutoff:c<cutoff)break;
+        for(size_t n=forward?edges.next(start):edges.previous(start);n!=NativeNavGraphAxis::none;n=forward?edges.next(n):edges.previous(n)) {
+            const auto& edge=edges.edge(n);const float c=coordinate(edge);if(forward?c>cutoff:c<cutoff)break;
             if(edge.object==preceding||edge.object==source)continue;
             const auto& object=graph.objects[edge.object];if(!object.alive||object.point)continue;const auto b=object.bounds;
             if(b.minX>static_cast<long double>(high[0])-.5L || b.maxX<static_cast<long double>(low[0])-.5L ||

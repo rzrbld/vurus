@@ -7,6 +7,7 @@
 #include "game/native_awake_state.h"
 #include "game/player_facing_native.h"
 #include "game/native_actor_cells.h"
+#include "game/native_projection_cache.h"
 #include "game/generator_occupancy_native.h"
 #include "game/native_ammo_cells.h"
 #include "game/world_pool_state.h"
@@ -580,6 +581,9 @@ private:
     void updateActorBounds(size_t actor);
     std::optional<NativeNavGraph> spiderNavigation_;
     std::vector<size_t> spiderNavigationActors_;
+    // Pure projection cache, excluded from WorldSnapshot and disk saves.
+    std::vector<NativeProjectionCache> actorNavigationProjections_;
+    NativeNavObstacle actorNavigationBounds(size_t actor,uint32_t subtype);
     void initializeSpiderNavigation(bool projectileNeeded=false);
     void restoreSpiderNavigationIndex();
     void clearSpiderNavigationRoutes(size_t actor);

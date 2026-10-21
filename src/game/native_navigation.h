@@ -5,6 +5,7 @@
 #include <limits>
 #include <optional>
 #include <vector>
+#include "game/native_graph_axis.h"
 namespace vyruz {
 // Coordinates and bounds are the executable's native XY plane, not surface pixels.
 struct NativeNavPoint { float x=0,y=0; size_t graphNode=SIZE_MAX; bool operator==(const NativeNavPoint& b) const{return x==b.x&&y==b.y;} };
@@ -41,10 +42,12 @@ std::optional<NativeNavObstacle> queryNativeNavigation(const std::vector<NativeN
 }
 namespace vyruz {
 struct NativeNavGraphObject { uint64_t reference=0; NativeNavObstacle bounds; bool alive=true,point=false; };
-struct NativeNavGraphEdge { size_t object=0; bool maximum=false; };
 struct NativeNavGraph {
  std::vector<NativeNavGraphObject> objects;
- std::vector<NativeNavGraphEdge> xEdges,yEdges;
+ NativeNavGraphAxis xEdges,yEdges;
+ // Derived free-slot heap preserves the existing lowest-free-ID birth order.
+ std::vector<size_t> freeObjects;
+ size_t indexedObjectCount=SIZE_MAX;
 };
 using NativeNavEligible=std::function<bool(uint64_t)>;
 NativeNavPoint insertNativeNavigationPoint(NativeNavGraph&,NativeNavPoint);
