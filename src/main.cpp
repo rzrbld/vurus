@@ -206,6 +206,10 @@ struct App {
     std::vector<vyruz::ContentPosition> previousPositions;
 };
 
+#if defined(VURUS_BENCHMARK)
+void drawBenchmarkProgress(App&);
+#endif
+
 bool loadStoryTexture(App& a) {
     if(a.storyTex)return true;
     std::vector<uint8_t> data;
@@ -1332,6 +1336,9 @@ void presentApplication(App& a) {
             a.hud.drawMenuText(a.gfx,a.debugMemoryText[i],18,114+20.f*i,4,right-20);
         glPopAttrib();glPopMatrix();
     }
+#if defined(VURUS_BENCHMARK)
+    drawBenchmarkProgress(a);
+#endif
     a.gfx.present();
     finishSavePreview(a);
 }

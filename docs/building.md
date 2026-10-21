@@ -17,7 +17,7 @@ On Debian/Ubuntu, install the build dependencies and Rust/Cargo:
 
 ```sh
 sudo apt-get install g++ cmake pkg-config libsdl2-dev zlib1g-dev libgl1-mesa-dev
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DVURUS_BUILD_BENCHMARK=ON
 cmake --build build --parallel 2
 ctest --test-dir build --output-on-failure --parallel 2
 ./build/vurus --data /path/to/game.iso
@@ -37,7 +37,7 @@ MSVC toolchain. Obtain SDL2 and zlib source directories; replace these example
 paths with their actual locations. Run from a Visual Studio developer terminal:
 
 ```powershell
-cmake -S . -B build -A x64 -DBUILD_TESTING=ON -DVYRUZ_SDL_SOURCE=C:/deps/SDL -DVYRUZ_ZLIB_SOURCE=C:/deps/zlib
+cmake -S . -B build -A x64 -DBUILD_TESTING=ON -DVURUS_BUILD_BENCHMARK=ON -DVYRUZ_SDL_SOURCE=C:/deps/SDL -DVYRUZ_ZLIB_SOURCE=C:/deps/zlib
 cmake --build build --config Release --parallel 2
 ctest --test-dir build -C Release --output-on-failure --parallel 2
 cmake --build build --config Release --target package
@@ -54,7 +54,7 @@ Use Xcode command-line tools, CMake and Rust/Cargo for the host architecture.
 Supply SDL2 and zlib source directories:
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DVURUS_BUILD_BENCHMARK=ON \
   -DVYRUZ_SDL_SOURCE=/absolute/path/to/SDL \
   -DVYRUZ_ZLIB_SOURCE=/absolute/path/to/zlib \
   -DVYRUZ_ENABLE_SMAA=OFF -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
@@ -89,12 +89,12 @@ docker run --rm --platform linux/arm64 \
 ```
 
 The [builder script](../tools/build_portmaster.sh) configures a Release build with
-`VYRUZ_GLES=ON` and `VYRUZ_PORTMASTER=ON`, runs tests and a headless GLES renderer
+`VYRUZ_GLES=ON`, `VYRUZ_PORTMASTER=ON` and `VURUS_BUILD_BENCHMARK=ON`, runs tests and a headless GLES renderer
 check, then packages `dist/portmaster/vurus-portmaster.zip`. Change
 `VURUS_BUILD_JOBS` to limit build parallelism; tests default to On.
 
-The package contains `Vurus.sh` and `vurus/`, including `vurus.aarch64`, instructions
-and license notices. The packaging script must run inside the builder to include
+The package contains `Vurus.sh`, `Vurus Benchmark.sh` and `vurus/`, including
+`vurus.aarch64`, `vurus-bench.aarch64`, instructions and license notices. The packaging script must run inside the builder to include
 the runtime notices. Desktop CRT/post-processing effects are disabled in this
 GLES build; display resolution, adaptive HUD and controller controls remain.
 See [handheld installation](../packaging/portmaster/README.txt) to copy the package
@@ -122,3 +122,14 @@ each package. Include engine and third-party notices, and exclude original game
 resources, local settings and saves. See the [player guide](../packaging/README.txt)
 for runtime options and [performance report](performance_update_2026-10-19.md)
 for the scope of existing measurements.
+
+## Validate performance after building
+
+The builds above include the separate benchmark executable. Run
+`./build/vurus-bench --data /path/to/existing/resources` (Windows:
+`build/Release/vurus-bench.exe`) after importing game data. It reads the game's
+menu-video settings, disables VSync/capping, and writes a score plus HTML/JSON
+reports; `--default-settings` selects a fixed640x480preset. See the
+[benchmark manual](benchmark.md) for the workload, report fields and comparisons.
+Desktop/PortMaster CI smoke-check and package this binary alongside the engine;
+no original game assets or benchmark result folders belong in release archives.

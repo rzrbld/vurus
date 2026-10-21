@@ -13,6 +13,10 @@ Keep data/, saves/, slot1.vzs, options.cfg and vz.sco when upgrading. Install
 engine updates over the existing folder; do not replace it with an empty folder.
 All user storage is beside the executable, independently of launch location.
 
+Launch Vurus Benchmark from Ports to run the separate automatic performance test
+after importing game data. See benchmark-README.txt for scores, video settings,
+--default-settings and offline HTML/JSON reports; game saves/settings stay unchanged.
+
 Native SDL controller input uses PortMaster's mappings. Configure controls in
 Options. Start opens the game menu; use PortMaster's usual exit hotkey to quit.
 Options -> Video -> Advanced -> FPS counter enables a saved On/Off frame-rate

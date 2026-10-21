@@ -55,15 +55,15 @@ jobs:
           rustc --version
       - name: Configure Linux
         if: runner.os == 'Linux'
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DVYRUZ_ZLIB_SOURCE="${{ github.workspace }}/work/ci-zlib"
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DVURUS_BUILD_BENCHMARK=ON -DVYRUZ_ZLIB_SOURCE="${{ github.workspace }}/work/ci-zlib"
       - name: Configure macOS
         if: runner.os == 'macOS'
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DVYRUZ_ZLIB_SOURCE="${{ github.workspace }}/work/ci-zlib" -DVYRUZ_SDL_SOURCE="$PWD/work/ci-sdl" -DVYRUZ_ENABLE_SMAA=OFF -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DVURUS_BUILD_BENCHMARK=ON -DVYRUZ_ZLIB_SOURCE="${{ github.workspace }}/work/ci-zlib" -DVYRUZ_SDL_SOURCE="$PWD/work/ci-sdl" -DVYRUZ_ENABLE_SMAA=OFF -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
       - name: Configure Windows
         if: runner.os == 'Windows'
-        run: cmake -S . -B build -A x64 -DBUILD_TESTING=ON -DVYRUZ_ZLIB_SOURCE="${{ github.workspace }}/work/ci-zlib" -DVYRUZ_SDL_SOURCE="$pwd/work/ci-sdl"
-      - name: Build engine first
-        run: cmake --build build --config Release --target vurus --parallel ${{ matrix.parallel }}
+        run: cmake -S . -B build -A x64 -DBUILD_TESTING=ON -DVURUS_BUILD_BENCHMARK=ON -DVYRUZ_ZLIB_SOURCE="${{ github.workspace }}/work/ci-zlib" -DVYRUZ_SDL_SOURCE="$pwd/work/ci-sdl"
+      - name: Build engine and benchmark first
+        run: cmake --build build --config Release --target vurus vurus-bench --parallel ${{ matrix.parallel }}
       - name: Windows critical integration checks
         if: runner.os == 'Windows'
         run: |
@@ -80,9 +80,13 @@ jobs:
           if [ "${{ runner.os }}" = "Windows" ]; then
             build/Release/vurus.exe --help
             build/Release/vurus.exe --licenses > build/licenses-smoke.txt
+            build/Release/vurus-bench.exe --help
+            build/Release/vurus-bench.exe --licenses > build/benchmark-licenses-smoke.txt
           else
             build/vurus --help
             build/vurus --licenses > build/licenses-smoke.txt
+            build/vurus-bench --help
+            build/vurus-bench --licenses > build/benchmark-licenses-smoke.txt
           fi
       - name: Package Linux
         if: runner.os == 'Linux'
@@ -90,6 +94,20 @@ jobs:
       - name: Package Windows/macOS
         if: runner.os != 'Linux'
         run: cmake --build build --config Release --target package
+      - name: Verify benchmark is packaged
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            package=dist/vurus-linux.tar.gz
+          else
+            set -- build/vurus-*.zip
+            test "$#" -eq 1
+            package=$1
+          fi
+          test -f "$package"
+          entries=$(cmake -E tar tf "$package")
+          printf '%s\n' "$entries" | grep -E '(^|/)vurus-bench(\.exe)?$'
+          printf '%s\n' "$entries" | grep -E '(^|/)benchmark-README\.txt$'
       - name: Retain packages and test logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -131,6 +149,6 @@ jobs:
           done
           (cd release-assets && sha256sum vurus-*.zip vurus-*.tar.gz > SHA256SUMS.txt)
           cat > release-notes.txt <<'NOTES'
-          Native engine builds for Linux, Windows and macOS. Original game data is required and is not included. Verify downloads with SHA256SUMS.txt. PortMaster Alpha Preview has its own independent build and release workflow.
+          Native engine and standalone benchmark builds for Linux, Windows and macOS. Run vurus-bench after importing your game data; see benchmark-README.txt for the score, video settings and offline HTML/JSON reports. Original game data is required and is not included. Verify downloads with SHA256SUMS.txt. PortMaster Alpha Preview has its own independent build and release workflow.
           NOTES
           gh release create "$RELEASE_TAG" release-assets/* --draft --title "Vurus $RELEASE_TAG" --notes-file release-notes.txt

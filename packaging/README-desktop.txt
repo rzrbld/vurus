@@ -16,6 +16,10 @@ Imported data/, saves/, options.cfg and vz.sco live beside the executable.
 Keep the folder writable. Do not place it in Program Files or a read-only disk
 image. --debug enables the F2 debug menu. --help lists launch options.
 
+The separate vurus-bench executable (vurus-bench.exe on Windows) runs six
+automatic performance scenes after importing game data. See benchmark-README.txt
+for its score, menu-video settings, --default-settings and offline HTML/JSON reports.
+
 These are initial cross-platform builds: successful CI is required before they
 are considered build-validated. Physical audio/controller/GPU testing remains
 separate from CI. Operating-system libraries and graphics drivers are required;

@@ -12,9 +12,11 @@ on:
       - "third_party/**"
       - "LICENSE.md"
       - "packaging/portmaster/**"
+      - "packaging/benchmark/**"
       - "packaging/README.txt"
       - "tools/build_portmaster.sh"
       - "tools/package_portmaster.sh"
+      - "tools/package_benchmark.sh"
       - ".github/workflows/build-portmaster.yml"
   pull_request:
     paths:
@@ -25,9 +27,11 @@ on:
       - "third_party/**"
       - "LICENSE.md"
       - "packaging/portmaster/**"
+      - "packaging/benchmark/**"
       - "packaging/README.txt"
       - "tools/build_portmaster.sh"
       - "tools/package_portmaster.sh"
+      - "tools/package_benchmark.sh"
       - ".github/workflows/build-portmaster.yml"
 permissions:
   contents: read
@@ -50,6 +54,7 @@ jobs:
           mkdir -p work/portmaster-build dist/portmaster
           docker run --rm --platform linux/arm64 \
             -e VURUS_BUILD_TESTS=ON -e VURUS_BUILD_JOBS=4 \
+            -e GITHUB_SHA="${{ github.sha }}" \
             -v "$PWD:/source:ro" \
             -v "$PWD/work/portmaster-build:/build" \
             -v "$PWD/dist/portmaster:/dist" \
@@ -58,6 +63,10 @@ jobs:
       - name: Verify package and record checksum
         run: |
           unzip -t dist/portmaster/vurus-portmaster.zip
+          entries=$(unzip -Z1 dist/portmaster/vurus-portmaster.zip)
+          printf '%s\n' "$entries" | grep -Fx 'Vurus Benchmark.sh'
+          printf '%s\n' "$entries" | grep -Fx 'vurus/vurus-bench.aarch64'
+          printf '%s\n' "$entries" | grep -Fx 'vurus/benchmark-README.txt'
           (cd dist/portmaster && sha256sum vurus-portmaster.zip > SHA256SUMS.txt)
       - name: Retain validated Alpha Preview package
         uses: actions/upload-artifact@v4
@@ -78,6 +87,7 @@ jobs:
             work/portmaster-logs/
             work/portmaster-build/Testing/Temporary/LastTest.log
             work/portmaster-build/licenses-smoke.txt
+            work/portmaster-build/benchmark-licenses-smoke.txt
           if-no-files-found: warn
           retention-days: 7
 
@@ -110,5 +120,7 @@ jobs:
           PortMaster Alpha Preview — ARM64 / OpenGL ES 3.0, optimized Release build. Original game data is required and is not included.
 
           Use the normal firmware Ports launcher. Advanced video → FPS counter toggles FPS and RSS memory display. See the repository README and performance report for measured H700 encounter results and settings; performance varies with the scene. Existing imported data does not need re-importing; preserve saves and settings when updating. This remains an alpha prerelease.
+
+          Includes a separate Vurus Benchmark Ports entry. It uses your saved video settings with VSync off and FPS uncapped, then shows a score and writes offline HTML/JSON reports. See vurus/benchmark-README.txt; --default-settings selects the fixed benchmark preset.
           NOTES
           gh release create "$RELEASE_TAG" "$package_dir/vurus-portmaster.zip" "$package_dir/SHA256SUMS.txt" --draft --prerelease --title "Vurus PortMaster Alpha Preview $RELEASE_TAG" --notes-file release-notes.txt

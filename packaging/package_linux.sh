@@ -5,11 +5,21 @@ project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 build_dir=${1:-"$project_dir/build"}
 out_dir=${2:-"$project_dir/dist"}
 cmake --build "$build_dir" --target vurus -j 4
+benchmark=false
+if grep -q '^VURUS_BUILD_BENCHMARK:BOOL=ON$' "$build_dir/CMakeCache.txt"; then
+    cmake --build "$build_dir" --target vurus-bench -j 4
+    benchmark=true
+fi
 mkdir -p "$out_dir"
 staging=$(mktemp -d)
 trap 'rm -rf "$staging"' EXIT HUP INT TERM
 mkdir "$staging/vurus-linux"
 install -m 755 "$build_dir/vurus" "$staging/vurus-linux/vurus"
+if [ "$benchmark" = true ]; then
+    install -m 755 "$build_dir/vurus-bench" "$staging/vurus-linux/vurus-bench"
+    install -m 644 "$project_dir/packaging/benchmark/README.txt" "$staging/vurus-linux/benchmark-README.txt"
+    strip "$staging/vurus-linux/vurus-bench"
+fi
 install -m 755 "$project_dir/packaging/launch.sh" "$staging/vurus-linux/launch.sh"
 install -m 644 "$project_dir/packaging/README.txt" "$staging/vurus-linux/README.txt"
 install -m 644 "$project_dir/LICENSE" "$project_dir/LICENSE.md" "$staging/vurus-linux/"

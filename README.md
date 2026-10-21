@@ -146,10 +146,16 @@ Requires a C++20 compiler, CMake, Rust/Cargo, SDL2, OpenGL and zlib development
 files. From the source directory:
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DVURUS_BUILD_BENCHMARK=ON
 cmake --build build --config Release --parallel 2
 ctest --test-dir build -C Release --output-on-failure --parallel 2
 ```
+
+After importing your game data, run `./build/vurus-bench --data /path/to/existing/resources`
+to check performance across six scenes and produce a score plus HTML/JSON reports.
+It uses your in-game video settings with VSync off and FPS uncapped; add
+`--default-settings` for the fixed preset. See the [benchmark manual](docs/benchmark.md)
+for Windows/PortMaster commands, report locations and comparisons.
 
 Windows/macOS builds need additional SDL2/zlib source configuration; see the
 [full build guide](docs/building.md#desktop-builds).

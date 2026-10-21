@@ -1,0 +1,75 @@
+#include "benchmark/report.h"
+#include <cassert>
+#include <cmath>
+#include <limits>
+#include <stdexcept>
+using namespace vyruz::benchmark;
+int main() {
+    vyruz::GameOptions menu;
+    menu.width = 1920; menu.height = 1080; menu.windowMode = 2;
+    menu.gamma = 73; menu.hudAspect = 2; menu.spriteFiltering = 2;
+    menu.shadows = menu.reactorFx = menu.vignette = false; menu.groundDetails = true;
+    menu.crt = menu.crtRetro = menu.crtBright = menu.smaa = menu.bloom = menu.sharpen = true;
+    menu.vsync = true; menu.frameCap = 30; menu.music = true; menu.soundFx = menu.voices = false;
+    menu.audioRate = 11025; menu.difficulty = 3; menu.playerName = "User"; menu.saveProfile = "private";
+    const auto snapshot = menu, user = resolveOptions(&menu, false), fixed = resolveOptions(nullptr, false);
+    assert(menu == snapshot); // Never mutate the menu's source object.
+    assert(user.width == 1920 && user.height == 1080 && user.windowMode == 2);
+    assert(user.gamma == 73 && user.hudAspect == 2 && user.spriteFiltering == 2);
+    assert(!user.shadows && !user.reactorFx && !user.vignette && user.groundDetails);
+    assert(user.crt && user.crtRetro && user.crtBright && user.smaa && user.bloom && user.sharpen);
+    assert(!user.vsync && user.frameCap == 0 && !user.music && user.soundFx && user.voices);
+    assert(user.audioRate == 48000 && user.difficulty == 1 && user.playerName == "Benchmark" && user.saveProfile.empty());
+    assert(fixed.width == 640 && fixed.height == 480 && fixed.windowMode == 0 && fixed.spriteFiltering == 0);
+    assert(fixed.shadows && fixed.reactorFx && fixed.vignette && !fixed.groundDetails && !fixed.crt);
+    assert(resolveOptions(&menu, false).fxaa == menu.fxaa);
+    const auto gles = resolveOptions(&menu, true);
+    assert(gles.width == 1920 && gles.groundDetails && !gles.crt && !gles.crtRetro && !gles.crtBright);
+    assert(!gles.fxaa && !gles.smaa && !gles.bloom && !gles.sharpen);
+    std::vector<double> samples;
+    for (int n = 100; n >= 1; --n) samples.push_back(n);
+    const auto stats = summarize(samples);
+    assert(stats.count == 100 && stats.mean == 50.5 && stats.p50 == 51);
+    assert(stats.p95 == 96 && stats.p99 == 100 && stats.maximum == 100);
+    assert(summarize({3}).p99 == 3 && summarize({}).count == 0);
+    for (double bad : {0.0, -1.0, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
+        assert(!calculateScore({bad})); bool rejected = false;
+        try { summarize({1, bad}); } catch (const std::invalid_argument&) { rejected = true; }
+        assert(rejected);
+    }
+    assert(!calculateScore({}));
+    assert(calculateScore({1000.0 / 60}) == 1000);
+    assert(calculateScore({1000.0 / 120, 1000.0 / 120}) == 2000);
+    assert(calculateScore({10, 40}) == 833);
+    assert(calculateScore({10, 40}) == calculateScore({10, 10, 40, 40}));
+    Report report; report.complete = true;
+    for (const auto& scene : scenes) {
+        Result result; result.id = scene.id; result.map = scene.map;
+        result.frame = summarize(std::vector<double>(measuredSteps, 1000.0 / 60));
+        report.results.push_back(result);
+    }
+    assert(report.score() == 1000);
+    report.settingsPreset = "user"; report.settingsSource = "game-menu"; report.options = user;
+    assert(report.score() == 1000); // User resolution/effects runs still get a score.
+    const auto customJson = jsonReport(report), customHtml = htmlReport(report);
+    assert(customJson.find("\"width\":1920,\"height\":1080") != std::string::npos);
+    assert(customJson.find("\"filtering\":2,\"shadows\":false") != std::string::npos);
+    assert(customJson.find("\"smaa\":true,\"bloom\":true,\"sharpen\":true") != std::string::npos);
+    assert(customJson.find("\"settings_preset\":\"user\"") != std::string::npos);
+    assert(customHtml.find("Game-menu video settings") != std::string::npos);
+    assert(customHtml.find("1920×1080") != std::string::npos && customHtml.find("SMAA on") != std::string::npos);
+    report.complete = false; assert(!report.score()); report.complete = true;
+    report.standard = false; assert(!report.score()); report.standard = true;
+    report.results.back().frame.count--; assert(!report.score()); report.results.back().frame.count++;
+    report.results.back().id = "different workload"; assert(!report.score()); report.results.back().id = scenes.back().id;
+    report.gpu = "<script>alert(\"x\")</script>&";
+    report.error = "line\nquote\"\\\t";
+    report.platform = std::string("control") + char(1);
+    const auto html = htmlReport(report), json = jsonReport(report);
+    assert(html.find("<script>") == std::string::npos);
+    assert(html.find("&lt;script&gt;") != std::string::npos);
+    assert(json.find("\\u0001") != std::string::npos);
+    assert(json.find("line\\nquote\\\"\\\\\\t") != std::string::npos);
+    assert(json.find("\"score\":1000") != std::string::npos);
+    assert(html.find("https://") == std::string::npos && html.find("http://") == std::string::npos);
+}
