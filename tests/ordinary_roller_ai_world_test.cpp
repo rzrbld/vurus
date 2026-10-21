@@ -15,6 +15,32 @@ SceneContent roller(std::string base="Random",std::string mode="Seeker"){
  }
  s.objects[1].properties=c.properties;s.objects[1].behaviours=c.behaviours;return s;
 }
+void checkZeroRouteHeading(const Level& l){
+ std::string e;
+ // Original42caa0 refreshes the endpoint from the live target;42c9d0/4075c0
+ // yields heading0 when it returns to the retained start. Exercise the World
+ // path with both action modes and stationary/powered motion, without route injection.
+ for(const std::string mode:{"Seeker","Tracker"})for(bool powered:{false,true}){
+  auto scene=roller("Fixed",mode);
+  if(!powered){set(scene.classes[1].properties,"Speed-max","0");scene.objects[1].properties=scene.classes[1].properties;}
+  const auto authored=scene;GameWorld w;need(w.load(scene,l,e),e);
+  for(int tick=0;tick<15;++tick)w.tick(.017f,{});
+  need(w.actors()[1].ordinaryAI->targeting.clock.active,"Roller route admitted before target return");
+  if(powered)need(w.actors()[1].enemyMagnitude>0,"powered zero-route fixture has live propulsion");
+  const auto start=w.actors()[1].ordinaryAI->targeting.segmentStart;
+  w.setPlayerPosition(1000,1000);const auto target=spiderSurfaceToNative(1000,1000);
+  need(start.x==target.x&&start.y==target.y,"target returns exactly to retained Roller route start");
+  w.tick(.017f,{});
+  const auto& route=w.actors()[1].ordinaryAI->targeting;
+  need(route.clock.active&&(route.status&4)&&route.segmentStart==route.segmentEnd,"Roller close-target refresh retains zero route vector");
+  need(route.desiredHeading==0,"original Roller zero route vector yields heading0 rather than sentinel24");
+  const int previousHeading=w.actors()[1].direction;
+  for(int tick=0;tick<4;++tick)w.tick(.017f,{});
+  need(w.actors()[1].direction!=previousHeading,"Roller keeps turning after coincident endpoint refresh");
+  continuation(w,authored,l,30);
+ }
+ need(spiderContactHeading({0,0})==24,"Roller route fix preserves contact zero-vector sentinel");
+}
 void checkPostAiTurnCommand(const Level& l){
  std::string e;
  // Original441367..4413b8: low previous displacement clears only the final
@@ -72,6 +98,7 @@ void checkPostAiTurnCommand(const Level& l){
 }
 int main(){try{
  Level l;l.mapW=l.mapH=100;l.hasTerrainCollision=true;l.collisionMask.assign(10000,0xff);std::string e;
+ checkZeroRouteHeading(l);
  checkPostAiTurnCommand(l);
  // Original42c5a0 fresh action performs begin, then a search/selection wave,
  // then steering. A nearby target cannot immediately manufacture reverse208.

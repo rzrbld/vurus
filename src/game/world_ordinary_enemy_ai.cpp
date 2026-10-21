@@ -15,8 +15,8 @@ NativeNavPoint nativePoint(ContentPosition p){const auto n=spiderSurfaceToNative
 bool terminal(const NativeEnemyRouteCore& r){return r.cursor>=r.points.size()||r.cursor+1==r.points.size();}
 int heading(NativeNavPoint a,NativeNavPoint b,int subtype){
     // 42c9d0 -> 4075c0: zero/zero reaches x87/__ftol and yields heading0.
-    // Walker/Burner/Jeep/Heli/Tank route shortcuts retain this without changing contact rules.
-    if((subtype==0x19||subtype==0x1a||subtype==0x1b||subtype==0x1d||subtype==0x20)&&a==b)return 0;
+    // Walker/Burner/Jeep/Roller/Heli/Tank route shortcuts retain this without changing contact rules.
+    if((subtype==0x19||subtype==0x1a||subtype==0x1b||subtype==0x1c||subtype==0x1d||subtype==0x20)&&a==b)return 0;
     return spiderContactHeading({b.x-a.x,b.y-a.y});
 }
 bool nextSegment(NativeEnemyRouteCore& r,int subtype){
