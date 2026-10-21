@@ -21,6 +21,46 @@ void appendStationaryAmmo(WorldSnapshot& snapshot,const SceneContent& scene,Proj
 }
 }
 int main(){try{Level l;l.mapW=l.mapH=100;l.hasTerrainCollision=true;l.collisionMask.assign(10000,0xff);std::string e;unsigned actions=0;
+ //42caa0 refreshes the endpoint from the target;42c9d0/4075c0 store
+ //heading0 when it returns exactly to the retained segment start. Exercise
+ //real route creation and a powered approach without injecting an action.
+ need(spiderContactHeading({0,0})==24,"shared contact zero-heading sentinel remains unchanged");
+ for(bool powered:{false,true})for(bool coincident:{false,true}){
+  auto scene=familyFixture("Burner");
+  if(powered){auto& p=scene.classes[1].properties;
+   for(const auto& [key,text]:{std::pair{"Speed-max","20"},{"Speed-min","-10"},{"Use-inertia","1"},{"Grip","1"},{"Friction-factor","0.97"},{"Friction-threshold","0.01"},{"Acceleration-step","1.5"},{"Decceleration-step","0.5"}})replace(p,key,text);
+   p.push_back(block("Weight",{value("Initial","10")}));
+   p.push_back(block("Thrust",{value("Initial","20"),value("Min","-20"),value("Max","20")}));
+   scene.objects[1].properties=p;
+  }
+  const auto authored=scene;GameWorld world;need(world.load(scene,l,e),e);
+  if(powered){auto initial=world.snapshot();auto& actor=initial.actors[1];
+   // Ordinary motion history is created on its first AI visit, not load.
+   const auto from=spiderSurfaceToNative(initial.objects[1].position.x,initial.objects[1].position.y);
+   const auto to=spiderSurfaceToNative(initial.objects[0].position.x,initial.objects[0].position.y);
+   actor.direction=spiderContactHeading({to.x-from.x,to.y-from.y});
+   actor.enemyTurn=initializeEnemyTurn(actor.enemyTurnConfig,actor.direction,0);
+   need(world.restoreSnapshot(initial,e),e);
+  }
+  bool ready=false;
+  for(int tick=0;tick<600;++tick){world.tick(.017f,{});
+   const auto& actor=world.actors()[1];const auto& route=actor.ordinaryAI->targeting;
+   const auto center=actor.nativeMotion->center;
+   const float dx=center.x-route.segmentStart.x,dy=center.y-route.segmentStart.y;
+   if(route.clock.active&&route.clock.scanRemainingMs>0&&(!powered||(dx*dx+dy*dy>3600&&dx*dx+dy*dy<40000))){ready=true;break;}
+  }
+  need(ready,"Burner follows an authored-origin route before target return");
+  const auto start=world.actors()[1].ordinaryAI->targeting.segmentStart;
+  const auto birth=spiderSurfaceToNative(1000,1000);
+  if(!(start==NativeNavPoint{birth.x,birth.y}))std::cerr<<std::hexfloat<<"Burner start powered="<<powered<<" coincident="<<coincident<<" actual="<<start.x<<','<<start.y<<" expected="<<birth.x<<','<<birth.y<<'\n';
+  need(start==NativeNavPoint{birth.x,birth.y},"Burner retains its original route start through powered movement");
+  world.setPlayerPosition(coincident?1000:1001,1000);world.tick(.017f,{});
+  const auto& route=world.actors()[1].ordinaryAI->targeting;
+  const int expected=coincident?0:spiderContactHeading({route.segmentEnd.x-start.x,route.segmentEnd.y-start.y});
+  need(route.clock.active&&(route.status&4)&&route.desiredHeading==expected,"Burner target return stores native zero or nonzero route heading");
+  need((route.segmentEnd==start)==coincident,"nearby-target control is not a zero segment");
+  continuation(world,authored,l,30);
+ }
  //Original graph queries ignore Ammo even though its real collision bounds
  //remain enrolled. A large non-Ammo Thing at the same coordinates must still
  //obstruct the search; simply removing all nonsolid bounds is incorrect.
