@@ -222,6 +222,11 @@ std::optional<NativeNavObstacle> queryNativeNavigation(const NativeNavGraph& g,N
  }else if(increasing){for(const auto& edge:edges){if(graphCoordinate(g,edge,x)>end)break;if(auto hit=test(edge))return hit;}}
  else {for(auto it=edges.rbegin();it!=edges.rend();++it){if(graphCoordinate(g,*it,x)<end)break;if(auto hit=test(*it))return hit;}}
  return {};};
- auto xhit=scan(a.x!=b.x,true),yhit=scan(a.y==b.y,false);if(!xhit)return yhit?std::optional<NativeNavObstacle>(g.objects[yhit->id].bounds):std::nullopt;if(yhit&&xhit->id!=yhit->id&&distance2(yhit->point,a)<=distance2(xhit->point,a))return g.objects[yhit->id].bounds;return g.objects[xhit->id].bounds;
+ auto xhit=scan(a.x!=b.x,true);
+ // The two fallback scans are identical for vertical routes and horizontal
+ // routes with the same cutoff. Preserve decreasing-X unequal extents.
+ const bool sameAxis=(a.x==b.x)||(a.y==b.y);
+ const bool sameCutoff=(a.x==b.x)||(b.x>a.x)||(fromX==NativeNavGraphAxis::none)||(h.x==h.y);
+ auto yhit=sameAxis&&sameCutoff?xhit:scan(a.y==b.y,false);if(!xhit)return yhit?std::optional<NativeNavObstacle>(g.objects[yhit->id].bounds):std::nullopt;if(yhit&&xhit->id!=yhit->id&&distance2(yhit->point,a)<=distance2(xhit->point,a))return g.objects[yhit->id].bounds;return g.objects[xhit->id].bounds;
 }
 }

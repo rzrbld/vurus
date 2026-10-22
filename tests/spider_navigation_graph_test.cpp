@@ -63,6 +63,21 @@ int main(){
   check(same(queryNativeNavigation(g,left,right,{1,1},false,{}),newer),"sorted source-less forward control");
   check(same(queryNativeNavigation(g,right,left,{1,1},false,{}),older),"sorted source-less backward control");
  }
+ // Identical fallback searches must not repeat admission work. Counters only
+ // observe calls; each predicate's answer is stable throughout the query.
+ for(bool y:{false,true})for(int sign:{-1,1})for(bool detached:{false,true}){
+  NativeNavGraph graph;const auto obstacle=transform(NativeNavObstacle{4,-2,6,2},y,sign);
+  insertNativeNavigationObject(graph,1,obstacle);
+  auto from=insertNativeNavigationPoint(graph,transform(NativeNavPoint{0,0},y,sign));
+  auto to=transform(NativeNavPoint{10,0},y,sign);if(detached)from.graphNode=SIZE_MAX;
+  unsigned visits=0;auto label="reuse axis="+std::to_string(y)+" sign="+std::to_string(sign)+" detached="+std::to_string(detached);
+  check(same(queryNativeNavigation(graph,from,to,{1,1},false,[&](uint64_t){++visits;return true;}),obstacle),label+" selected bounds");
+  check(visits==1,label+" one admission visit on hit");
+  visits=0;check(!queryNativeNavigation(graph,from,to,{1,1},false,[&](uint64_t){++visits;return false;}),label+" filtered miss");
+  check(visits==2,label+" one pass over rejected endpoints");
+  visits=0;check(same(queryNativeNavigation(graph,from,to,{1,2},false,[&](uint64_t){++visits;return true;}),obstacle),label+" unequal extent selected bounds");
+  check(visits==(!y&&sign<0&&!detached?2u:1u),label+" preserve distinct decreasing-X cutoffs");
+ }
  // Exact original-instruction audit fixture: source5/goal15, extent1,
  // retained X order[20,1,5,10,15,120]; native selects object11 at X10.
  NativeNavGraph g;auto head=insertNativeNavigationObject(g,10,{0,-2,100,2});
