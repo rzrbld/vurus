@@ -1,4 +1,4 @@
-#include "game/native_navigation.h"
+#include "game/native_contact_graph.h"
 #include <iostream>
 #include <random>
 #include <stdexcept>
@@ -69,6 +69,19 @@ void compare(const NativeNavGraph& a,const NativeNavGraph& b){
 }
 }
 int main()try{
+ // Contact-assisted bounds may remain in order while an endpoint becomes
+ // equal to the cached insertion coordinate. The next insertion must still
+ // stop at that endpoint, before the previous point, on either axis.
+ for(bool x:{true,false}){
+  NativeNavGraph actual,expected;
+  const auto anchor=insertNativeNavigationObject(actual,1,{-20,-20,-15,-15});reference::insertNativeNavigationObject(expected,1,{-20,-20,-15,-15});
+  const auto mover=insertNativeNavigationObject(actual,2,{-5,-5,5,5});reference::insertNativeNavigationObject(expected,2,{-5,-5,5,5});
+  insertNativeNavigationPoint(actual,{10,10});reference::insertNativeNavigationPoint(expected,{10,10});
+  const NativeNavObstacle bounds=x?NativeNavObstacle{0,-5,10,5}:NativeNavObstacle{-5,0,5,10};
+  updateNativeContactGraphObject(actual,mover,bounds,anchor);updateNativeContactGraphObject(expected,mover,bounds,anchor);
+  const NativeNavPoint next=x?NativeNavPoint{10,11}:NativeNavPoint{11,10};
+  insertNativeNavigationPoint(actual,next);reference::insertNativeNavigationPoint(expected,next);compare(actual,expected);
+ }
  NativeNavGraph a,b;std::mt19937 random(0x40e630);std::vector<size_t> live;
  for(unsigned tick=0;tick<10000;++tick){
   const unsigned action=random()%8;
@@ -78,7 +91,11 @@ int main()try{
    else{NativeNavObstacle bounds{x,y,x+float(random()%40),y+float(random()%40)};const auto p=insertNativeNavigationObject(a,tick,bounds);const auto q=reference::insertNativeNavigationObject(b,tick,bounds);need(p==q,"body slot identity");live.push_back(p);}
   }else{
    const auto n=random()%live.size(),id=live[n];
-   if(action<6&&!a.objects[id].point){float x=float(int(random()%151)-75),y=float(int(random()%151)-75);NativeNavObstacle bounds{x,y,x+float(random()%70),y+float(random()%70)};updateNativeNavigationObject(a,id,bounds);reference::updateNativeNavigationObject(b,id,bounds);}
+   if(action<6&&!a.objects[id].point){float x=float(int(random()%151)-75),y=float(int(random()%151)-75);NativeNavObstacle bounds{x,y,x+float(random()%70),y+float(random()%70)};
+    std::optional<size_t> hint;
+    if(tick%2)for(const auto candidate:live)if(candidate!=id&&!a.objects[candidate].point){hint=candidate;break;}
+    if(hint){updateNativeContactGraphObject(a,id,bounds,hint);updateNativeContactGraphObject(b,id,bounds,hint);}
+    else{updateNativeNavigationObject(a,id,bounds);reference::updateNativeNavigationObject(b,id,bounds);}}
    else{removeNativeNavigationObject(a,id);reference::removeNativeNavigationObject(b,id);live.erase(live.begin()+n);}
   }
   compare(a,b);

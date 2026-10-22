@@ -13,7 +13,12 @@ inline void updateNativeContactGraphObject(NativeNavGraph& graph,size_t source,
     }
     const auto old=graph.objects[source].bounds;
     if(old.minX==bounds.minX&&old.minY==bounds.minY&&old.maxX==bounds.maxX&&old.maxY==bounds.maxY)return;
+    // A changed endpoint can reach an earlier insertion's coordinate without
+    // needing relinking. Its cached prefix is no longer proved strictly lower.
+    graph.xEdges.invalidateInsertionHint();graph.yEdges.invalidateInsertionHint();
     graph.objects[source].bounds=bounds;
+    graph.xEdges.publishCoordinates(source,bounds.minX,bounds.maxX);
+    graph.yEdges.publishCoordinates(source,bounds.minY,bounds.maxY);
     for(bool x:{true,false}){
         auto& edges=x?graph.xEdges:graph.yEdges;
         const auto coordinate=[&](auto edge){auto b=graph.objects[edge.object].bounds;return x?(edge.maximum?b.maxX:b.minX):(edge.maximum?b.maxY:b.minY);};

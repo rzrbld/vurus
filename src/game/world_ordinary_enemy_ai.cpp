@@ -105,7 +105,7 @@ bool GameWorld::advanceOrdinaryEnemyAI(size_t id,float seconds,std::span<const C
     auto& actor=actors_[id];const auto& object=scene_->objects[id];
     if(!actor.ordinaryAI)configureOrdinaryEnemyAI(actor,object,true);
     if(!actor.ordinaryAI)return false;
-    if(!spiderNavigation_){initializeSpiderNavigation(true);for(auto& shot:projectiles_)updateSpiderProjectileNavigation(shot);}
+    if(!spiderNavigation_)initializeSpiderNavigation(true);
     auto& state=*actor.ordinaryAI;const auto& config=actor.ordinaryAIConfig;
     if(!actor.nativeMotion){const auto n=nativePoint(object.position);actor.nativeMotion=SpiderMotionHistory{{n.x,n.y},object.position};}
     const auto position=object.position;const auto native=actor.nativeMotion->center;

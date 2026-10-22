@@ -1,4 +1,5 @@
 #include "game/native_navigation.h"
+#include <bit>
 #include <algorithm>
 #include <cmath>
 namespace vyruz {
@@ -142,9 +143,19 @@ size_t allocateGraphObject(NativeNavGraph& g,NativeNavGraphObject object){
  return id;
 }
 void insertGraphEdge(NativeNavGraph& g,NativeNavGraphAxis& edges,bool x,NativeNavGraphEdge e){
+ edges.prepareCoordinates([&](auto edge){return graphCoordinate(g,edge,x);});
  const float c=graphCoordinate(g,e,x);auto n=edges.insertionStart(c);
- while(n!=NativeNavGraphAxis::none&&!(c<=graphCoordinate(g,edges.edge(n),x)))n=edges.next(n);
- const auto inserted=edges.insertBefore(n,e);edges.rememberInsertion(inserted,c);
+ while(n!=NativeNavGraphAxis::none&&!(c<=edges.coordinate(n)))n=edges.next(n);
+#if VURUS_COORDINATE_ORACLE
+ for(auto k=edges.first();k!=NativeNavGraphAxis::none;k=edges.next(k)){
+  const float expected=graphCoordinate(g,edges.edge(k),x),actual=edges.coordinate(k);
+  if(std::bit_cast<uint32_t>(expected)!=std::bit_cast<uint32_t>(actual))throw std::runtime_error("Endpoint coordinate cache drift");
+ }
+ auto expected=edges.first();
+ while(expected!=NativeNavGraphAxis::none&&!(c<=graphCoordinate(g,edges.edge(expected),x)))expected=edges.next(expected);
+ if(n!=expected)throw std::runtime_error("Cached insertion stopping handle drift");
+#endif
+ const auto inserted=edges.insertBeforeWithCoordinate(n,e,c);edges.rememberInsertion(inserted,c);
 }
 }
 NativeNavPoint insertNativeNavigationPoint(NativeNavGraph& g,NativeNavPoint p){
@@ -162,6 +173,7 @@ void updateNativeNavigationObject(NativeNavGraph& g,size_t id,NativeNavObstacle 
  if(old.minX==b.minX&&old.minY==b.minY&&old.maxX==b.maxX&&old.maxY==b.maxY)return;
  g.xEdges.invalidateInsertionHint();g.yEdges.invalidateInsertionHint();
  g.objects[id].bounds=b;
+ g.xEdges.publishCoordinates(id,b.minX,b.maxX);g.yEdges.publishCoordinates(id,b.minY,b.maxY);
  // Write all four coordinates first; retain40e630's endpoint selection and
  // its unordered head-min/tail-max histories.
  for(bool x:{true,false}){auto& edges=x?g.xEdges:g.yEdges;

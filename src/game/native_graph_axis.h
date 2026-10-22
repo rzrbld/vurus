@@ -22,7 +22,7 @@ struct NativeNavGraphEdge {
 class NativeNavGraphAxis {
 public:
  static constexpr uint32_t none=UINT32_MAX;
- struct Node { NativeNavGraphEdge edge; uint32_t previous=none,next=none; };
+ struct Node { NativeNavGraphEdge edge; uint32_t previous=none,next=none; float coordinate=0; };
 private:
  std::vector<Node> nodes_;
  std::vector<uint32_t> free_;
@@ -31,6 +31,7 @@ private:
  float insertionLowerBound_=0;
  mutable std::vector<uint32_t> endpoints_;
  mutable bool dirty_=false;
+ bool coordinatesValid_=false;
  static size_t key(NativeNavGraphEdge e) {
   if(e.object>(SIZE_MAX-1)/2)throw std::length_error("Graph endpoint index overflow");
   return e.object*2+size_t(e.maximum);
@@ -69,7 +70,7 @@ public:
   using reference=std::conditional_t<Const,const value_type&,value_type&>;
   using pointer=std::conditional_t<Const,const value_type*,value_type*>;
   Iterator()=default;
-  reference operator*()const{if constexpr(!Const){axis_->dirty_=true;axis_->invalidateInsertionHint();}return axis_->nodes_[node_].edge;}
+  reference operator*()const{if constexpr(!Const){axis_->dirty_=true;axis_->invalidateInsertionHint();axis_->invalidateCoordinates();}return axis_->nodes_[node_].edge;}
   pointer operator->()const{return &**this;}
   Iterator& operator++(){node_=axis_->nodes_[node_].next;++rank_;return *this;}
   Iterator operator++(int){auto r=*this;++*this;return r;}
@@ -88,6 +89,24 @@ public:
  void invalidateInsertionHint(){insertionHint_=none;}
  size_t insertionStart(float coordinate)const{return insertionHint_!=none&&coordinate>=insertionLowerBound_?insertionHint_:head_;}
  void rememberInsertion(size_t node,float coordinate){insertionHint_=static_cast<uint32_t>(node);insertionLowerBound_=coordinate;}
+ // Derived endpoint coordinates never enter graph serialization. Direct
+ // object-bounds writers outside the publication APIs must invalidate these.
+ void invalidateCoordinates(){coordinatesValid_=false;}
+ template<class Coordinate>void prepareCoordinates(const Coordinate& coordinate){
+  if(coordinatesValid_)return;
+  for(size_t n=head_;n!=none;n=nodes_[n].next)nodes_[n].coordinate=coordinate(nodes_[n].edge);
+  coordinatesValid_=true;
+ }
+ float coordinate(size_t n)const{return nodes_[n].coordinate;}
+ void publishCoordinates(size_t object,float minimum,float maximum){
+  const auto lo=endpoint(object,false),hi=endpoint(object,true);
+  if(lo!=none)nodes_[lo].coordinate=minimum;
+  if(hi!=none)nodes_[hi].coordinate=maximum;
+ }
+ size_t insertBeforeWithCoordinate(size_t before,NativeNavGraphEdge e,float coordinate){
+  const bool valid=coordinatesValid_;const auto n=insertBefore(before,e);
+  nodes_[n].coordinate=coordinate;coordinatesValid_=valid;return n;
+ }
  size_t first()const{return head_;}size_t last()const{return tail_;}
  size_t next(size_t n)const{return nodes_[n].next;}size_t previous(size_t n)const{return nodes_[n].previous;}
  const NativeNavGraphEdge& edge(size_t n)const{return nodes_[n].edge;}
@@ -97,7 +116,7 @@ public:
   const auto k=object*2+size_t(maximum);return k<endpoints_.size()?endpoints_[k]:none;
  }
  size_t insertBefore(size_t before,NativeNavGraphEdge e){
-  invalidateInsertionHint();
+  invalidateInsertionHint();invalidateCoordinates();
   if(dirty_)rebuildLookup();
   size_t n;if(free_.empty()){n=nodes_.size();if(n>=none)throw std::length_error("Graph endpoint pool overflow");nodes_.push_back({e});}else{n=free_.back();free_.pop_back();nodes_[n]={e};}
   linkBefore(n,before);++count_;
@@ -110,7 +129,7 @@ public:
   endpoints_[key(nodes_[n].edge)]=none;unlink(n);free_.push_back(n);--count_;
  }
  void moveBefore(size_t n,size_t before){invalidateInsertionHint();if(n==before||nodes_[n].next==before)return;unlink(n);linkBefore(n,before);}
- void clear(){invalidateInsertionHint();nodes_.clear();free_.clear();endpoints_.clear();head_=tail_=none;count_=0;dirty_=false;}
+ void clear(){invalidateInsertionHint();invalidateCoordinates();nodes_.clear();free_.clear();endpoints_.clear();head_=tail_=none;count_=0;dirty_=false;}
  void push_back(NativeNavGraphEdge e){insertBefore(none,e);}
  template<class It>void assign(It first,It last){clear();for(;first!=last;++first)push_back(*first);}
  void resize(size_t n){while(count_>n)eraseNode(tail_);while(count_<n)push_back({});dirty_=true;}
@@ -118,7 +137,7 @@ public:
  const_iterator begin()const{return {this,head_,0};}const_iterator end()const{return {this,none,count_};}
  auto rbegin()const{return std::reverse_iterator(end());}auto rend()const{return std::reverse_iterator(begin());}
  // Rank access is only for fixtures/inspection; runtime traversal uses handles.
- NativeNavGraphEdge& operator[](size_t n){invalidateInsertionHint();dirty_=true;return nodes_[atRank(n)].edge;}
+ NativeNavGraphEdge& operator[](size_t n){invalidateInsertionHint();invalidateCoordinates();dirty_=true;return nodes_[atRank(n)].edge;}
  const NativeNavGraphEdge& operator[](size_t n)const{return nodes_[atRank(n)].edge;}
  NativeNavGraphEdge& front(){return (*this)[0];}const NativeNavGraphEdge& front()const{return (*this)[0];}
  iterator insert(iterator pos,NativeNavGraphEdge e){return {this,insertBefore(pos.node_,e),pos.rank_};}

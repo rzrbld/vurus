@@ -69,6 +69,7 @@ void GameWorld::initializeSpiderNavigation(bool projectileNeeded){
     }else spiderNavigationActors_[e.id]=insertNativeNavigationObject(*spiderNavigation_,e.id,actorNavigationBounds(e.id,nativeDamageSubtype(e.id)));
     // A producer rebuild must include already-existing bare Ammo immediately;
     //waiting for its next projectile visit loses actor->Ammo candidates.
+    // Initialization owns this publication; lazy AI/guidance callers need no second pass.
     for(auto& shot:projectiles_){shot.spiderGraphNode=Missing;updateSpiderProjectileNavigation(shot);}
 }
 void GameWorld::restoreSpiderNavigationIndex(){

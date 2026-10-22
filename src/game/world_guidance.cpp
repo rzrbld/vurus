@@ -53,10 +53,7 @@ void GameWorld::initializeProjectileGuidance(Projectile& shot,size_t shooter) {
     shot.guidanceClass=scene_->objects[*selected].classId;shot.guidanceTarget=selected;
     shot.guidance.pose48=heading*2+1;
     shot.guidanceNative.emplace();
-    if(!spiderNavigation_) {
-        initializeSpiderNavigation(true);
-        for(auto& existing:projectiles_)updateSpiderProjectileNavigation(existing);
-    }
+    if(!spiderNavigation_)initializeSpiderNavigation(true);
 }
 void GameWorld::clearProjectileNavigation(Projectile& shot) {
     if(shot.guidanceNative && spiderNavigation_) {
@@ -107,10 +104,7 @@ void GameWorld::updateProjectileGuidance(Projectile& shot,float milliseconds) {
         q.visionDegrees=static_cast<int>(propertyNumber(tracker->children,"Vision-Angle",360));
         auto target=selectGuidanceTrackingTarget(q,candidates(*scene_,actors_,q.targetClass));
         if(!target)return {};
-        if(!spiderNavigation_) {
-            initializeSpiderNavigation(true);
-            for(auto& existing:projectiles_)updateSpiderProjectileNavigation(existing);
-        }
+        if(!spiderNavigation_)initializeSpiderNavigation(true);
         if(!shot.guidanceNative)shot.guidanceNative.emplace();
         auto& native=*shot.guidanceNative;
         MissileSavedRoute saved{static_cast<MissileNativeRoute&>(native),state,shot.guidanceTarget,
