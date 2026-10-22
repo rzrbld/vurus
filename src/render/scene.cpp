@@ -14,6 +14,13 @@
 
 namespace vyruz {
 namespace {
+#if VURUS_SHADOW_VERIFY
+struct ShadowEnvelopeAudit {
+    unsigned long long layers=0,policy=0,sequence=0,tested=0,rejected=0;
+    ~ShadowEnvelopeAudit(){std::fprintf(stderr,"SHADOW_ENVELOPE layers=%llu policy=%llu sequence=%llu tested=%llu rejected=%llu violations=0\n",layers,policy,sequence,tested,rejected);}
+} shadowEnvelopeAudit;
+struct ShadowVerifyScope { std::function<void()> finish; ~ShadowVerifyScope(){if(finish)finish();} };
+#endif
 constexpr auto timeWarpBank="common/data/object/fx/time-warp.gaf";
 // Native431ae0 reads visible body230/gun23c for artwork. Idle controllers
 // retain independent movement/weapon rings14c/18c, so logical heading is not
@@ -317,8 +324,9 @@ bool SceneRenderer::loadTerrain(const NativeTileBodyCatalog& catalog,std::string
         auto& use=sequenceUses_[key];
         if(use.sequences.insert(source.sequence).second && !use.all && banks_.contains(key))expanded.insert(key);
     }
-    for(const auto& key:expanded)if(!decodeBank(key,banks_.at(key).animation)) {
-        error="cannot expand shared terrain bank: "+key;return false;
+    for(const auto& key:expanded) {
+        auto& bank=banks_.at(key);bank.envelopes.clear();
+        if(!decodeBank(key,bank.animation)){error="cannot expand shared terrain bank: "+key;return false;}
     }
     std::vector<TerrainChannel> channels;
     std::vector<std::array<size_t,4>> cells(catalog.cells.size());
@@ -996,6 +1004,57 @@ void SceneRenderer::draw(Gfx& gfx,const SceneContent& scene,const Level& level,f
         // Consume it after all three origins, not after the center flash.
         if (actors && (channel.object>=actors->size() || !(*actors)[channel.object].alive)) continue;
         const auto& object=scene.objects[channel.object];
+#if VURUS_SHADOW_VERIFY
+        ShadowVerifyScope shadowVerify;
+        ++shadowEnvelopeAudit.layers;
+#endif
+        // Only skip read-only shadow selection. Sequence transitions, leaning,
+        // player anchors and special banks retain their complete original path.
+        if(channel.shadow && shadows && !playerChannel && !channel.firing && !overlay &&
+           !channel.bankedEnemy && !channel.walker && !channel.spider && !channel.helicopter &&
+           !channel.lift && !channel.tank && !channel.turretBase && !channel.generatorBank &&
+           (!actors || !(*actors)[channel.object].directional || channel.shadowPoseStride>=0)) {
+#if VURUS_SHADOW_VERIFY
+            ++shadowEnvelopeAudit.policy;
+#endif
+            if(channel.sequence==object.shadow.sequence.value && channel.sequence>0 &&
+               channel.sequence<=channel.bank->animation.sequences.size()) {
+#if VURUS_SHADOW_VERIFY
+                ++shadowEnvelopeAudit.sequence;
+#endif
+                auto& bank=*channel.bank;
+                if(bank.envelopes.size()<bank.animation.sequences.size())bank.envelopes.resize(bank.animation.sequences.size());
+                auto& envelope=bank.envelopes[channel.sequence-1];
+                if(!envelope.ready)envelope=spriteSequenceEnvelope(bank.animation,bank.animation.sequences[channel.sequence-1]);
+                const auto* spatialActor=actors?&(*actors)[channel.object]:nullptr;
+                const auto anchor=previous && channel.object<previous->size() &&
+                    !(spatialActor && (spatialActor->pooledTrail || spatialActor->reusedRecord) && spatialActor->ageMs==0)
+                    ?presentationPosition((*previous)[channel.object],object.position,alpha):object.position;
+#if VURUS_SHADOW_VERIFY
+                ++shadowEnvelopeAudit.tested;
+#endif
+                if(envelope.outside(anchor.x+submission.dx,anchor.y+submission.dy,cameraX,cameraY,gfx.viewport().width,gfx.viewport().height)) {
+#if VURUS_SHADOW_VERIFY
+                    ++shadowEnvelopeAudit.rejected;
+                    // Run the original path instead of skipping it. Every predicted
+                    // rejection must emit nothing and leave channel/audio state alone.
+                    shadowVerify.finish=[&,count=sprites.size(),cursor=channel.cursor.capture(),seq=channel.sequence,
+                        lean=channel.enemyLean,pending=channel.pendingAudio.size(),identity=channel.audioIdentity,
+                        cues=audioCues_.size(),starts=queuedAudioStarts_,next=nextAudioIdentity_] {
+                        const auto after=channel.cursor.capture();
+                        if(sprites.size()!=count || seq!=channel.sequence || lean!=channel.enemyLean ||
+                           cursor.cursor!=after.cursor || cursor.flags!=after.flags || cursor.remaining!=after.remaining ||
+                           pending!=channel.pendingAudio.size() || identity!=channel.audioIdentity ||
+                           cues!=audioCues_.size() || starts!=queuedAudioStarts_ || next!=nextAudioIdentity_) {
+                            std::fprintf(stderr,"SHADOW_ENVELOPE_UNSAFE object=%zu\n",channel.object);std::abort();
+                        }
+                    };
+#else
+                    continue;
+#endif
+                }
+            }
+        }
         const auto& properties=spriteProperties(object);
         // 431ae0 Only-base hides the gun/muzzle, retaining Turret sequence25
         // or Tank's directional ground hull, plus the secondary shadow.

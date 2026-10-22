@@ -1,5 +1,6 @@
 #pragma once
 #include "render/sprite_properties.h"
+#include "render/sprite_envelope.h"
 #include "render/texture_residency.h"
 #include "render/sprite_sequences.h"
 #include "render/animation.h"
@@ -84,7 +85,7 @@ private:
     std::optional<size_t> playerObject_;
     std::optional<ContentPosition> playerBodyCenter_;
     TextureResidency textureResidency_;
-    struct Bank { GafAnimation animation; std::vector<GLuint> textures; };
+    struct Bank { GafAnimation animation; std::vector<GLuint> textures; std::vector<SpriteSequenceEnvelope> envelopes; };
     struct Channel { size_t object; bool shadow; Bank* bank; uint32_t sequence; AnimationCursor cursor; uint64_t gateRevision=0; bool firing=false; uint64_t fireRevision=0; bool lift=false; std::vector<GafSubframe> pendingAudio{}; bool spider=false; uint32_t baseSequence=0; uint64_t visualRevision=0; Bank* generatorBank=nullptr; bool derivedInvisible=false; float visibility=0,fadeClockMs=0; bool visibilityAlpha=true; bool helicopter=false; bool walker=false; bool walkerTurned=false; int flightTilt=0; double flightClockMs=0; ContentPosition flightPosition{},flightPrevious{};
         // Derived pose policy: -1 timed, 0 fixed, 1/2 entries per heading.
         bool skipNewbornAdvance=false;
