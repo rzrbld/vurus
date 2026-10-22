@@ -328,7 +328,7 @@ public:
     bool restoreNativePool(const std::optional<NativeWorldPoolState>&,std::string& error);
     bool reconstructNativePoolForReplacement(const NativeWorldPoolState&,std::string& error,bool checkpoint=false);
     bool reconstructNativePoolForReplacement(const NativePoolReplacementContext&,std::string& error,bool checkpoint=false);
-    void rebind(SceneContent& scene,const Level& level) { scene_=&scene;level_=&level;navigationItemMetadata_.clear();classNames_.clear(); }
+    void rebind(SceneContent& scene,const Level& level) { scene_=&scene;level_=&level;navigationItemMetadata_.clear();classNames_.clear();resetSpatialPublications(); }
     const std::optional<SaveRequest>& saveRequest() const { return saveRequest_; }
     void finishSave(bool success,const std::string& error={});
     void tick(float seconds,const WorldInput&);
@@ -346,6 +346,9 @@ public:
     bool audioMotorAttempt() const { return audioMotorAttempt_; }
     void movePlayer(float dx,float dy);
     void setPlayerPosition(float x,float y);
+    // External edits to the bound SceneContent must invalidate spatial publication.
+    void invalidateActorSpatialState(size_t id) { markSpatialDirty(id); }
+    void invalidateSpatialState() { resetSpatialPublications(); }
     void setPlayerDirection(int direction);
     bool selectPlayerWeaponSlot(unsigned slot); // zero-based native ADD Weapon order
     // Port-only testing controls: transient, deliberately excluded from saves.
@@ -530,7 +533,7 @@ private:
     uint32_t nativeDamageClassFlags(size_t actor) const;
     uint32_t nativeDamageSubtype(size_t actor) const;
     void initializeActorCells();
-    void synchronizeActorCell(size_t actor);
+    void synchronizeActorCell(size_t actor,bool requestPublication=true);
     NativeActorCells actorCells_;
     NativeAmmoCells bareAmmoCells_;
     std::unordered_map<std::uint64_t,size_t> bareAmmoIndex_; // Derived after append/compaction/restore.
@@ -592,6 +595,13 @@ private:
     bool actorBoundsActive_=false;
     void updateActorBounds(size_t actor);
     void updateActorCollisionBounds(size_t actor);
+    // Derived pending publication: one current row per ID, never serialized.
+    // Immediate publishers do not consume requests for the next tick phase.
+    std::vector<size_t> spatialDirtyActors_,spatialPublishBatch_;
+    std::vector<uint8_t> spatialDirtyFlags_;
+    void markSpatialDirty(size_t actor);
+    void resetSpatialPublications();
+    void publishSpatialDirtyActors();
     std::optional<NativeNavGraph> spiderNavigation_;
     std::vector<size_t> spiderNavigationActors_;
     // Pure projection cache, excluded from WorldSnapshot and disk saves.

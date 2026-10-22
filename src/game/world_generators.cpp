@@ -38,6 +38,7 @@ bool GameWorld::generatorOccupied(size_t source) {
     //merges compact Ammo and Actor bodies on their shared insertion ordinal.
     const auto actorBounds=[&](size_t id) {
         auto& actor=actors_[id];const auto p=scene_->objects[id].position;
+        markSpatialDirty(id); // Sensing below rewrites this body's authoritative center.
         NativeGeneratorBounds bounds;
         const auto shape=nativeBodyContactShape(nativeDamageSubtype(id),actor.radius);
         bounds.words[0]=shape;

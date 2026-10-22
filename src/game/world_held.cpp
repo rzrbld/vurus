@@ -8,6 +8,7 @@ std::string mapKey(std::string path){path=folded(path);std::replace(path.begin()
 bool sameSource(const HeldItem& item,const HeldCode& code){return mapKey(item.mapPath)==mapKey(code.mapPath)&&item.object.id==code.object.id;}
 }
 void GameWorld::rebuildNativeHeldOriginals() {
+    resetSpatialPublications();
     for(auto& actor:actors_)actor.nativeHeldOriginal=false;
     for(auto& held:heldItems_) {
         const auto id=held.object.id.value;
@@ -18,6 +19,7 @@ void GameWorld::rebuildNativeHeldOriginals() {
 }
 void GameWorld::retainItem(size_t id,bool surprise) {
     actors_[id].nativeHeldOriginal=true;
+    markSpatialDirty(id);
     heldItems_.push_back({scene_->objects[id],actors_[id],scene_->mapPath,
         scene_->classes[scene_->objects[id].classId.value].name,player_,surprise});
 }

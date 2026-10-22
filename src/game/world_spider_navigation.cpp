@@ -5,6 +5,8 @@
 #include "game/native_contact_graph.h"
 #include "game/native_navigation_filter.h"
 #include <algorithm>
+#include <bit>
+#include <stdexcept>
 #include <limits>
 namespace vyruz {
 namespace {
@@ -35,6 +37,67 @@ bool actorNavigationEnabled(const ActorState& a,const ObjectPlacement& o,uint32_
     return true;
 }
 }
+void GameWorld::markSpatialDirty(size_t id){
+    if(id>=actors_.size())return;
+    if(spatialDirtyFlags_.size()<actors_.size())spatialDirtyFlags_.resize(actors_.size());
+    if(spatialDirtyFlags_[id])return;
+    spatialDirtyActors_.push_back(id);spatialDirtyFlags_[id]=1;
+}
+void GameWorld::resetSpatialPublications(){
+    spatialDirtyActors_.clear();spatialPublishBatch_.clear();
+    spatialDirtyFlags_.assign(actors_.size(),1);
+    spatialDirtyActors_.reserve(actors_.size());
+    for(size_t id=0;id<actors_.size();++id)spatialDirtyActors_.push_back(id);
+}
+void GameWorld::publishSpatialDirtyActors(){
+#if VURUS_SPATIAL_ORACLE
+    // Independent reference: run the retained full sweep on a copy. No pending
+    // flags or mutation notifications decide which reference rows get visited.
+    auto expected=*this;
+    for(size_t i=0;i<expected.actors_.size();++i){
+        if(!expected.actors_[i].alive && expected.actors_[i].reactivateMs<0 && !expected.actors_[i].nativeHeldOriginal &&
+           i<expected.actorCells_.cell.size() && expected.actorCells_.cell[i]==NativeActorCells::Missing &&
+           (!expected.spiderNavigation_ || (i<expected.spiderNavigationActors_.size() &&
+             expected.spiderNavigationActors_[i]==std::numeric_limits<size_t>::max())))continue;
+        expected.updateSpiderNavigation(i);
+    }
+#endif
+    spatialPublishBatch_.swap(spatialDirtyActors_);
+    std::sort(spatialPublishBatch_.begin(),spatialPublishBatch_.end());
+    for(const auto i:spatialPublishBatch_){
+        if(i>=actors_.size())continue;
+        spatialDirtyFlags_[i]=0;
+        if(!actors_[i].alive && actors_[i].reactivateMs<0 && !actors_[i].nativeHeldOriginal &&
+           i<actorCells_.cell.size() && actorCells_.cell[i]==NativeActorCells::Missing &&
+           (!spiderNavigation_ || (i<spiderNavigationActors_.size() &&
+             spiderNavigationActors_[i]==std::numeric_limits<size_t>::max())))continue;
+        updateSpiderNavigation(i);
+    }
+    spatialPublishBatch_.clear();
+#if VURUS_SPATIAL_ORACLE
+    const auto require=[](bool ok,const char* why){if(!ok)throw std::runtime_error(why);};
+    const auto& a=actorCells_;const auto& b=expected.actorCells_;
+    require(a.width==b.width&&a.height==b.height&&a.heads==b.heads&&a.next==b.next&&a.cell==b.cell&&a.arrivalOrder==b.arrivalOrder&&a.nextArrivalOrder==b.nextArrivalOrder&&nextNativeCellOrder_==expected.nextNativeCellOrder_,"Spatial oracle: cell publication drift");
+    require(spiderNavigationActors_==expected.spiderNavigationActors_&&bool(spiderNavigation_)==bool(expected.spiderNavigation_),"Spatial oracle: graph membership drift");
+    if(spiderNavigation_){
+        const auto& g=*spiderNavigation_;const auto& h=*expected.spiderNavigation_;
+        require(g.objects.size()==h.objects.size()&&g.freeObjects==h.freeObjects&&g.indexedObjectCount==h.indexedObjectCount,"Spatial oracle: graph allocation drift");
+        const auto same=[](float a,float b){return std::bit_cast<uint32_t>(a)==std::bit_cast<uint32_t>(b);};
+        for(size_t i=0;i<g.objects.size();++i){const auto& x=g.objects[i];const auto& y=h.objects[i];
+            require(x.reference==y.reference&&x.alive==y.alive&&x.point==y.point&&same(x.bounds.minX,y.bounds.minX)&&same(x.bounds.minY,y.bounds.minY)&&same(x.bounds.maxX,y.bounds.maxX)&&same(x.bounds.maxY,y.bounds.maxY),"Spatial oracle: graph bounds/identity drift");
+        }
+        for(bool x:{true,false}){const auto& left=x?g.xEdges:g.yEdges;const auto& right=x?h.xEdges:h.yEdges;
+            require(left.size()==right.size(),"Spatial oracle: endpoint count drift");
+            auto l=left.first(),r=right.first();
+            while(l!=NativeNavGraphAxis::none&&r!=NativeNavGraphAxis::none){
+                require(l==r&&left.previous(l)==right.previous(r)&&left.next(l)==right.next(r)&&left.edge(l).object==right.edge(r).object&&left.edge(l).maximum==right.edge(r).maximum,"Spatial oracle: endpoint order drift");
+                l=left.next(l);r=right.next(r);
+            }
+            require(l==r,"Spatial oracle: endpoint termination drift");
+        }
+    }
+#endif
+}
 NativeNavObstacle GameWorld::actorNavigationBounds(size_t id,uint32_t subtype){
     const auto& a=actors_[id];const auto& o=scene_->objects[id];
     //41a5d0/41b4b0 use the same x87 projection for every native BBOX.
@@ -50,6 +113,7 @@ NativeNavObstacle GameWorld::actorNavigationBounds(size_t id,uint32_t subtype){
 }
 void GameWorld::initializeSpiderNavigation(bool projectileNeeded){
     spiderNavigation_.reset();spiderNavigationActors_.clear();actorNavigationProjections_.clear();
+    resetSpatialPublications();
     if(!projectileNeeded && !std::any_of(actors_.begin(),actors_.end(),[](const auto& a){return a.contactConfig.nativeEnemy;}))return;
     spiderNavigation_.emplace();spiderNavigationActors_.assign(actors_.size(),Missing);
     struct Entry{int x,y;bool decor;size_t id;};std::vector<Entry> entries;
@@ -81,7 +145,7 @@ void GameWorld::restoreSpiderNavigationIndex(){
         if(o.alive&&!o.point&&!(o.reference&(DecorBit|ProjectileBit))&&o.reference<actors_.size())spiderNavigationActors_[o.reference]=n;}
 }
 void GameWorld::updateSpiderNavigation(size_t id,std::optional<size_t> closestNonContact,bool synchronizeCell){
-    if(synchronizeCell)synchronizeActorCell(id);
+    if(synchronizeCell)synchronizeActorCell(id,false);
     if(!spiderNavigation_||id>=actors_.size())return;
     if(spiderNavigationActors_.size()<=id)spiderNavigationActors_.resize(id+1,Missing);
     auto& index=spiderNavigationActors_[id];const auto& actor=actors_[id];

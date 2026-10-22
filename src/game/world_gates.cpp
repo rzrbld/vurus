@@ -50,6 +50,7 @@ void GameWorld::updateGate(size_t i,float milliseconds) {
         }
         const auto output=advanceGate(*gate.gate,gate.gateState,
             {milliseconds,gate.gateAnimationFinished,authorized.has_value(),occupied});
+        if(gate.solid!=output.blocking)markSpatialDirty(i);
         gate.solid=output.blocking;
         if(output.restartAnimation){++gate.gateRevision;gate.gateAnimationFinished=false;}
         if(output.consumeKeyId&&authorized){

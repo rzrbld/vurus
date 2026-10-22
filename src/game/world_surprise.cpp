@@ -114,6 +114,7 @@ void GameWorld::applySurprise() {
         surprise_.originalInvisible=scene_->objects[player_].flags.invisible.value_or(false);
         surprise_.originalSolid=player().solid;
         scene_->objects[player_].flags.invisible=true;actors_[player_].solid=false;
+        markSpatialDirty(player_);
     }
     if(kind==SurpriseKind::Trap) {
         //41c390 constructs both effects before reducing vitals and drawing.

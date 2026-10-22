@@ -494,6 +494,7 @@ bool GameWorld::load(SceneContent& scene,const Level& level,std::string& error,i
     initializeNativeTileBodies();
     initializeSpiderNavigation();
     rebuildTransientRecordCandidates();
+    resetSpatialPublications();
     return true;
 }
 void GameWorld::setDebugEnemyAI(bool enabled) {
@@ -634,6 +635,7 @@ void GameWorld::notifyAccessBlocked(size_t id) {
     notifications_.access(NoticeKind::AccessBlocked,std::move(text),std::trunc(p.x)-offset,std::trunc(p.y)-32,true);
 }
 TerrainDisplacement GameWorld::move(size_t actor,float dx,float dy,bool physical,const ContactVelocity* nativeStep) {
+    markSpatialDirty(actor);
     lastSpiderSeparated_=false;
     auto& p=scene_->objects[actor].position;const auto from=p;
     const auto radius=actors_[actor].radius;
@@ -1236,6 +1238,7 @@ void GameWorld::expireVisual(size_t id) {
 }
 void GameWorld::destroy(size_t id,std::optional<size_t> source) {
     if (id>=actors_.size() || !actors_[id].alive) return;
+    markSpatialDirty(id);
     const auto capturedCreatorGeneration=actors_[id].nativeCreatorGeneration;
     actors_[id].nativeDamagePending=false;
     clearOrdinaryEnemyRoutes(id);
@@ -2017,6 +2020,7 @@ void GameWorld::updateLift(size_t i,float milliseconds) {
         }
         const auto result=advanceLift(*actor.lift,actor.liftState,
             {milliseconds,actor.gateAnimationFinished,authorized.has_value(),occupied,usage});
+        if(actor.solid!=!actor.liftState.passable)markSpatialDirty(i);
         actor.solid=!actor.liftState.passable;
         if(result.restartAnimation){++actor.gateRevision;actor.gateAnimationFinished=false;}
         if(result.consumeKeyId && authorized) {
@@ -2112,7 +2116,7 @@ bool GameWorld::advanceActorAI(size_t i,float seconds) {
         if(a.enemyTurn) { // 440fe1: clear both commands before AI dispatch.
             a.enemyTurn->turnCommand=0;a.enemyTurn->gunCommand=0;
         }
-        if(!a.nativeMotion){const auto n=spiderSurfaceToNative(pos.x,pos.y);a.nativeMotion=SpiderMotionHistory{{n.x,n.y},pos};}
+        if(!a.nativeMotion){const auto n=spiderSurfaceToNative(pos.x,pos.y);a.nativeMotion=SpiderMotionHistory{{n.x,n.y},pos};markSpatialDirty(i);}
         const int nativeAim=nativeDirectionFromVector(target.x-pos.x,target.y-pos.y);
         // 42ca30 admits Spider seeker only for a two-node, four-axis route.
         // Native direct actor-obstacle admission is centreline vs raw AABBs.
@@ -2310,6 +2314,7 @@ void GameWorld::tick(float seconds,const WorldInput& suppliedInput) {
     const float tripleTarget=surprise_.active(SurpriseKind::Triple)&&input.fire?400.f:0.f;
     if(tripleTarget>0 && surprise_.tripleOffset==0)surprise_.tripleOffset=100;
     surprise_.tripleOffset=std::clamp(surprise_.tripleOffset+(tripleTarget>0?20.f:-50.f)*seconds/.014f,0.f,400.f);
+    publishSpatialDirtyActors();
     actorBounds_.resize(actors_.size());actorBoundsIndexedCount_=actors_.size();
     for(size_t i=0;i<actors_.size();++i) {
         actors_[i].nativeAmmoAbort=false;
@@ -2320,7 +2325,7 @@ void GameWorld::tick(float seconds,const WorldInput& suppliedInput) {
            i<actorCells_.cell.size() && actorCells_.cell[i]==NativeActorCells::Missing &&
            (!spiderNavigation_ || (i<spiderNavigationActors_.size() &&
              spiderNavigationActors_[i]==std::numeric_limits<size_t>::max())))continue;
-        updateActorBounds(i);
+        updateActorCollisionBounds(i);
 
     }
     actorBoundOrder_.clear();actorBoundGroup_.assign(actors_.size(),std::numeric_limits<size_t>::max());

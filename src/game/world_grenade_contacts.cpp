@@ -14,6 +14,7 @@ GrenadeNativeContactResult GameWorld::updateNativeGrenadeContacts(Projectile& sh
     // Keep their accepted response fixture rather than inventing diagonal shapes.
     if(level_->nativeNavigationDecor.empty() && !level_->collisionEdges.empty())return result;
     result.used=true;const size_t visual=*shot.visual;const auto from=shot.position;
+    markSpatialDirty(visual);
     const auto initialHistory=actors_[visual].nativeMotion;
     const int initialCommand=actors_[visual].enemyMoveCommand;
     result.proposedX=from.x;result.proposedY=from.y;

@@ -104,7 +104,7 @@ void GameWorld::updateHeldCodes(float milliseconds) {
             std::optional<size_t> target;
             if(normalizedMap(source.mapPath)==normalizedMap(scene_->mapPath) && source.object.id.value<actors_.size() &&
                 !actors_[source.object.id.value].alive && matches(key,scene_->objects[source.object.id.value]))target=source.object.id.value;
-            if(!returns){if(target){actors_[*target].reactivateMs=-1;actors_[*target].vitals.energy=0;}continue;}
+            if(!returns){if(target){actors_[*target].reactivateMs=-1;actors_[*target].vitals.energy=0;markSpatialDirty(*target);}continue;}
             //4398db reinserts the retained original; return is not a factory
             //birth. Foreign carry resolves class IDs without consuming a UID.
             if(!target && retained) {

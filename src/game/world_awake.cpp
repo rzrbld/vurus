@@ -99,7 +99,7 @@ void GameWorld::visitNativeActor(size_t id,float seconds,const WorldInput& input
     if(id>=actors_.size() || (!actors_[id].nativeHeldOriginal && !actors_[id].alive && actors_[id].reactivateMs<0))return;
     const bool heldVisit=actors_[id].nativeHeldOriginal;
     const auto heldSlot=actors_[id].nativePoolSlot;const auto heldGeneration=actors_[id].nativeGeneration;
-    if(heldVisit)actors_[id].alive=true;
+    if(heldVisit){markSpatialDirty(id);actors_[id].alive=true;}
     // The native held original remains the same kind3 manager body. Port
     // presentation uses alive=false, while its normal age/timer/rest visit
     //still runs. Keep the inventory copy synchronized on every early return.
@@ -140,7 +140,7 @@ void GameWorld::visitNativeActor(size_t id,float seconds,const WorldInput& input
     if(!actors_[id].alive) {
         actors_[id].reactivateMs-=seconds*1000;
         if(actors_[id].reactivateMs>0)return;
-        actors_[id].alive=true;actors_[id].reactivateMs=-1;
+        actors_[id].alive=true;actors_[id].reactivateMs=-1;markSpatialDirty(id);
     }
     if(actors_[id].nativeDamagePending) {
         destroy(id,std::nullopt);

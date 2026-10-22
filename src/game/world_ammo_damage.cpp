@@ -23,7 +23,8 @@ void GameWorld::initializeActorCells() {
     bareAmmoCells_.reset(actorCells_.width,actorCells_.height);
     for(size_t id=0;id<actors_.size();++id)synchronizeActorCell(id);
 }
-void GameWorld::synchronizeActorCell(size_t id) {
+void GameWorld::synchronizeActorCell(size_t id,bool requestPublication) {
+    if(requestPublication)markSpatialDirty(id);
     if(!scene_||!level_||id>=actors_.size()||actorCells_.width!=level_->mapW||actorCells_.height!=level_->mapH)return;
     const auto p=scene_->objects[id].position;
     const auto destination=!actors_[id].nativeHeldOriginal && (actors_[id].alive||actors_[id].reactivateMs>=0)?

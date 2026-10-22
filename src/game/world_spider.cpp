@@ -48,7 +48,7 @@ void GameWorld::clearSpiderNavigationRoutes(size_t id) {
         }
         for(auto handle:handles)removeNativeNavigationObject(*spiderNavigation_,handle);
     }
-    actors_[id].spiderAI.reset();
+    actors_[id].spiderAI.reset();markSpatialDirty(id);
 }
 bool GameWorld::advanceSpiderAI(size_t id,float seconds,std::span<const ContentPosition> path){
     auto& actor=actors_[id];const auto& object=scene_->objects[id];
@@ -62,7 +62,7 @@ bool GameWorld::advanceSpiderAI(size_t id,float seconds,std::span<const ContentP
         actor.route.clear();actor.routeSearch.reset();actor.routeGoal.reset();
     }
     auto& state=*actor.spiderAI;
-    if(!state.motion){const auto n=spiderSurfaceToNative(object.position.x,object.position.y);state.motion=SpiderMotionHistory{{n.x,n.y},object.position};}
+    if(!state.motion){const auto n=spiderSurfaceToNative(object.position.x,object.position.y);state.motion=SpiderMotionHistory{{n.x,n.y},object.position};markSpatialDirty(id);}
     const auto& classProperties=scene_->classes[object.classId.value].properties;
     const EnemyTurnConfig turnConfig{0x1f,false,propertyBool(classProperties,"Can-turn-on-place"),
         static_cast<int>(propertyNumber(classProperties,"Turn-timeout",42)),0};

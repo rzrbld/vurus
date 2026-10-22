@@ -40,6 +40,7 @@ bool GameWorld::updateAmmoActivation(Projectile& shot,float ms) {
     const auto visible=[&]{
         if(!shot.visual || *shot.visual>=actors_.size())return;
         auto& actor=actors_[*shot.visual];
+        if(actor.ammoHidden!=shot.phaseHidden)markSpatialDirty(*shot.visual);
         actor.ammoHidden=shot.phaseHidden;
         actor.ammoContactDisabled=!ammoContactEnabled(shot);
         actor.ammoFadeClockMs+=ms;

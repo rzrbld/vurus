@@ -40,7 +40,7 @@ int main(){try{
  need(warm.world.restoreSnapshot(checkpoint,error),error);need(cold.world.restoreSnapshot(checkpoint,error),error);
  need(bytes(warm.world)==bytes(cold.world),"paired cache runs start from the same normalized state");
  for(unsigned tick=0;tick<240;++tick){
-  if(tick%17==0){warm.scene.objects[1].position.x+=.03125f;cold.scene.objects[1].position=warm.scene.objects[1].position;}
+  if(tick%17==0){warm.scene.objects[1].position.x+=.03125f;cold.scene.objects[1].position=warm.scene.objects[1].position;warm.world.invalidateActorSpatialState(1);cold.world.invalidateActorSpatialState(1);}
   AmmoImpactNativeTestAccess::cold(cold.world);WorldInput input;warm.world.tick(1.f/60,input);cold.world.tick(1.f/60,input);verify(1);if(bytes(warm.world)!=bytes(cold.world))throw std::runtime_error("warm/cold World mismatch at tick "+std::to_string(tick));
   if(tick==119){SaveGame decoded;need(decodeSave(bytes(warm.world),decoded,error),error);need(warm.world.restoreSnapshot(decoded.levels.at(decoded.currentLevel).world,error),error);need(cold.world.restoreSnapshot(decoded.levels.at(decoded.currentLevel).world,error),error);}
  }
