@@ -65,38 +65,43 @@ settings and command-line options.
 
 ## Performance
 
-Measured on **Anbernic RG40XX H / H700 / Mali-G31, 1 GB RAM**, muOS,
-640×480, development build `d23b515` (2026-10-21). Uncapped, VSync off,
-sprite filtering off, music off; shadows, reactor FX and vignette on.
+Measured on **Anbernic RG40XX H / H700 / Mali-G31, 1 GB RAM**,
+muOS (2026-10-22): **946 points**, 640×480, trilinear filtering and ground details
+on; shadows, reactor FX and vignette on. Uncapped, VSync off, music off.
 
-| Map / position | FPS¹ | Enemies nearby² | Startup RSS³ |
+| Map / start position | Bench FPS | Enemies nearby¹ | RSS MiB² |
 | --- | ---: | ---: | ---: |
-| UNDERGROUND/T2U1 · 4870,2180 | 49.8 | 39 | 116 MiB |
-| UNDERGROUND/T2U1 · 3968,348 | 60.0 | 8 | 118 MiB |
-| HITEK/T1H1 · 3670,2570 | 42.0 | 18 | 131 MiB |
-| HITEK/T1H1 · 2166,1107 | 33.8 | 19 | 131 MiB |
+| CAVE/T1C2 · 5230,1080 | 54.5 | 30 | 132.3 |
+| CPU/T3P2 · 3523,2763 | 59.8 | 11 | 142.3 |
+| UNDERGROUND/T2U1 · 4870,2180 | 59.1 | 39 | 148.3 |
+| UNDERGROUND/T2U1 · 3968,348 | 60.0 | 8 | 143.5 |
+| HITEK/T1H1 · 3670,2570 | 59.6 | 18 | 140.7 |
+| HITEK/T1H1 · 2166,1107 | 59.8 | 19 | 142.9 |
+| HITEK/T2H2 · 4571,2841 | 46.0 | 30 | 139.8 |
 
-Median timings in milliseconds; CPU columns are **per simulation tick**,
-rendering is **per frame**. CPU total includes World, animation, audio and input;
-frames can run multiple ticks.
+Median timings in milliseconds: CPU columns are per simulation tick; render/present
+is per frame. CPU total includes World, animation, audio and other update work.
 
-| Map / position | World | Animation | CPU total | Render / present |
+| Map / start position | World | Animation | CPU total | Render / present |
 | --- | ---: | ---: | ---: | ---: |
-| UNDERGROUND/T2U1 · 4870,2180 | 4.86 | 1.97 | 8.53 | 10.64 |
-| UNDERGROUND/T2U1 · 3968,348 | 3.12 | 1.59 | 6.10 | 9.63 |
-| HITEK/T1H1 · 3670,2570 | 6.55 | 1.82 | 9.79 | 9.63 |
-| HITEK/T1H1 · 2166,1107 | 6.83 | 1.97 | 10.32 | 10.16 |
+| CAVE/T1C2 · 5230,1080 | 3.61 | 1.98 | 6.96 | 10.44 |
+| CPU/T3P2 · 3523,2763 | 3.81 | 1.81 | 6.85 | 9.64 |
+| UNDERGROUND/T2U1 · 4870,2180 | 3.18 | 1.74 | 6.08 | 10.25 |
+| UNDERGROUND/T2U1 · 3968,348 | 2.08 | 1.62 | 4.75 | 11.22 |
+| HITEK/T1H1 · 3670,2570 | 3.16 | 1.73 | 6.00 | 10.04 |
+| HITEK/T1H1 · 2166,1107 | 2.85 | 1.84 | 5.87 | 10.01 |
+| HITEK/T2H2 · 4571,2841 | 5.15 | 2.46 | 9.50 | 12.06 |
 
-¹ Reciprocal of the mean run-median frame time; two 1,200-frame live runs per
-spot after warmup. ² Enemies within 1,000 world units at spawn, not all visible
-or active. ³ Separate startup captures, not timed-run peaks. These are encounter
-samples, not whole-level averages. See the [H700 performance report](docs/performance_update_2026-10-21.md)
-for conditions, percentile timings, memory provenance and before/after results.
+Seven scenes, 120 warmup + 1,200 measured steps each. Bench FPS = 1,000 / mean
+step time, with one fixed simulation tick and frame per step; it is not ordinary
+gameplay FPS. ¹ Alive enemies within 1,000 world units at spawn. ² Highest periodic
+process RSS sample, not an exact peak or total device memory. Full distributions,
+presets and raw data: [H700 performance report](docs/performance_update_2026-10-22.md).
 
-![H700 benchmark in CAVE/T1C2 with FPS and RSS overlay](docs/images/h700-cave-t1c2-benchmark.png)
+![Latest H700 benchmark results with trilinear filtering and ground details](docs/images/h700-benchmark-results-2026-10-22.png)
 
-*CAVE/T1C2 on H700, 2026-10-21: a frame from the fixed-step combat probe;
-40.1 FPS is the momentary overlay reading, not the run average.*
+*Actual H700 results screen from the same run: CAVE/T1C2 averages 54.5 bench FPS;
+the default preset's separate run averages 57.8.*
 
 ## Screenshots
 
