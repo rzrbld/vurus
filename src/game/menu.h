@@ -2,8 +2,8 @@
 #include <string>
 #include <vector>
 namespace vyruz {
-enum class MenuPage { Closed,Main,Game,Controls,Confirm,Options,Debug,DebugLevels,DebugSurprises,Extras,SavedSessions };
-enum class MenuAction { None,Resume,LoadGame,Restart,NewGame,Quit,Controls,EndGame,Options,Debug,DebugLevels,DebugSelectLevel,DebugAI,DebugGod,DebugAmmo,DebugMoney,DebugSurprises,DebugSelectSurprise,Extras,Scores,Credits,Intro,SlideShow,Demo,LoadSelected,ControlsHelp };
+enum class MenuPage { Closed,Main,Game,Controls,Confirm,Options,Debug,DebugLevels,DebugSurprises,Extras,SavedSessions,Benchmark };
+enum class MenuAction { None,Resume,LoadGame,Restart,NewGame,Quit,Controls,EndGame,Options,Debug,DebugLevels,DebugSelectLevel,DebugAI,DebugGod,DebugAmmo,DebugMoney,DebugSurprises,DebugSelectSurprise,Extras,Scores,Credits,Intro,SlideShow,Demo,LoadSelected,ControlsHelp,Benchmark,BenchmarkDefault,BenchmarkUser };
 const std::vector<std::string>& debugLevels();
 struct MenuEntry { std::string label;MenuAction action; };
 // Port menu flow. Shared keyboard/mouse selection, with pause restoration.

@@ -104,6 +104,7 @@ struct App {
     unsigned slideIndex=0;double slideDeadline=4000;
     bool presentationReturnExtras=false,scoresLoaded=false,scoreRecorded=false;
     bool slidesAvailable=false;
+    std::optional<bool> benchmarkRequest; // true: fixed preset; false: menu video settings.
     bool deathPresented=false,presentationReturnMain=false;
     uint64_t mainMenuIdleSince=0;
     vyruz::HighScores scores{};std::string scorePath;
@@ -206,9 +207,8 @@ struct App {
     std::vector<vyruz::ContentPosition> previousPositions;
 };
 
-#if defined(VURUS_BENCHMARK)
+std::string benchProgress;
 void drawBenchmarkProgress(App&);
-#endif
 
 bool loadStoryTexture(App& a) {
     if(a.storyTex)return true;
@@ -855,6 +855,9 @@ bool applyMenuAction(App& a) {
             const auto action=a.menuAction;a.menuAction=vyruz::MenuAction::None;
             if(!a.debugEnabled && action>=vyruz::MenuAction::Debug && action<=vyruz::MenuAction::DebugSelectSurprise)return false;
             if(action==vyruz::MenuAction::Options){a.optionsPage=0;a.menu.showOptions();refreshOptions(a);}
+            else if(action==vyruz::MenuAction::BenchmarkDefault || action==vyruz::MenuAction::BenchmarkUser){
+                a.benchmarkRequest=action==vyruz::MenuAction::BenchmarkDefault;a.quit=1;
+            }
             else if(action==vyruz::MenuAction::Demo){levelChanged=startDemo(a);if(!levelChanged)a.menu.error="Could not play original demo: "+a.loadError;}
             else if(action==vyruz::MenuAction::Scores||action==vyruz::MenuAction::Credits||action==vyruz::MenuAction::Intro||action==vyruz::MenuAction::SlideShow||action==vyruz::MenuAction::ControlsHelp)beginExtra(a,action);
             else if(action==vyruz::MenuAction::DebugAI)a.world.setDebugEnemyAI(!a.world.debugEnemyAI());
@@ -1336,9 +1339,7 @@ void presentApplication(App& a) {
             a.hud.drawMenuText(a.gfx,a.debugMemoryText[i],18,114+20.f*i,4,right-20);
         glPopAttrib();glPopMatrix();
     }
-#if defined(VURUS_BENCHMARK)
-    drawBenchmarkProgress(a);
-#endif
+    if(!benchProgress.empty())drawBenchmarkProgress(a);
     a.gfx.present();
     finishSavePreview(a);
 }
@@ -1579,7 +1580,12 @@ void render(App& a,float alpha=1) {
 
 } // namespace
 
-int main(int argc, char** argv) {
+struct BenchmarkLaunch {
+    bool requested=false,defaultSettings=false;
+    std::string data,options,controllerMap;
+};
+
+int runApplication(int argc, char** argv, BenchmarkLaunch& benchmark, bool returnToMain) {
     SDL_SetMainReady();
     if(argc==2 && std::string_view(argv[1])=="--licenses"){for(const char* notice:vyruz::videoLicenseChunks)std::fputs(notice,stdout);std::fputs(vyruz::crtLicenses,stdout);std::fputs(vyruz::smaaLicense,stdout);return 0;}
     const std::string executableDirectory=binaryDirectory();
@@ -1685,6 +1691,14 @@ int main(int argc, char** argv) {
                         " [--debug] [--step raw-bitmap-index] [--anim-ms 0..60000] [--simulate-ms 0..60000] [--fire] [--pause] [--inventory] [--map] [--money N] [--play] [--menu main|game|controls|confirm] [--mute] [--volume 0..1] [--no-music] [--music-dir path] [--music-track 2..8] [--music-theme 1..3] [--audio-language english|french] [--save-file path] [--load-save path] [--write-save path] [--damage N] [--controller-map path] [--fps 60|90] [--options-file path] [--profile-frames N] [--profile-warmup N] [--shot out.ppm]\n", argv[0]);
             return 0;
         } else {std::fprintf(stderr,"Unknown option or missing value: %s; use --help\n",argv[i]);return 1;}
+    }
+
+    if(returnToMain) {
+        // Re-enter the title menu, without replaying launch-time gameplay/probes.
+        levelPath="UNDERGROUND/T1U1.3DG";loadPath.clear();writePath.clear();shotPath.clear();
+        probeMenu="main";directPlay=false;profileFrames=0;walkSteps=0;simulateMs=0;
+        havePlayerOverride=false;forcedDir=forcedStep=-1;animationMs=0;
+        probePause=probeInventory=probeMap=false;probeDamage=0;probeMoney=-1;
     }
 
     const auto reportDataError=[&](const std::string& message){
@@ -2083,6 +2097,10 @@ int main(int argc, char** argv) {
                     renderHz,a.gfx.vsyncEnabled(),warmupTimes.size(),static_cast<size_t>(overruns),profileCatchups,profileDroppedTicks);
     }
 
+    if(a.benchmarkRequest) {
+        benchmark.requested=true;benchmark.defaultSettings=*a.benchmarkRequest;
+        benchmark.data=dataDir;benchmark.options=a.optionsPath;benchmark.controllerMap=controllerMap;
+    }
     cancelSavePreview(a);
     if(a.saveFuture.valid()){a.saveFuture.wait();serviceSave(a,true);}
     a.audio.device().close();
@@ -2097,4 +2115,28 @@ int main(int argc, char** argv) {
     SDL_Quit();
     std::printf("\nbye\n");
     return a.renderFailed ? 1 : 0;
+}
+
+#include "benchmark_runtime.inc"
+
+int main(int argc, char** argv) {
+    bool returnToMain=false;
+    for(;;) {
+        BenchmarkLaunch launch;
+        const int result=runApplication(argc,argv,launch,returnToMain);
+        if(!launch.requested)return result;
+        // runApplication's App has been destroyed: benchmark RSS and timings
+        // exclude a suspended game, its renderer and its audio callback.
+        releaseUnusedPortMemory();
+        std::vector<std::string> arguments={argv[0],"--data",launch.data,"--options-file",launch.options};
+        if(launch.defaultSettings)arguments.push_back("--default-settings");
+        if(!launch.controllerMap.empty()) {
+            arguments.push_back("--controller-map");arguments.push_back(launch.controllerMap);
+        }
+        std::vector<char*> pointers;
+        for(auto& argument:arguments)pointers.push_back(argument.data());
+        pointers.push_back(nullptr);
+        if(runBenchmark(static_cast<int>(arguments.size()),pointers.data(),true)==3)return 0;
+        returnToMain=true;
+    }
 }

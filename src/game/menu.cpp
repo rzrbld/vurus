@@ -7,13 +7,16 @@ std::string MenuView::selectedHelp() const {
     if(selected<0 || size_t(selected)>=rows.size())return {};
     if(page==MenuPage::Options)return size_t(selected)<optionHelp.size()?optionHelp[selected]:std::string{};
     if(page==MenuPage::SavedSessions)return savedSessionsLoading?std::string{}:size_t(selected)<saveHelp.size()?saveHelp[selected]:std::string{};
-    if(page!=MenuPage::Main && page!=MenuPage::Game && page!=MenuPage::Extras)return {};
+    if(page!=MenuPage::Main && page!=MenuPage::Game && page!=MenuPage::Extras && page!=MenuPage::Benchmark)return {};
     switch(rows[selected].action) {
     case MenuAction::NewGame:return newGameHelp;
     case MenuAction::Restart:return page==MenuPage::Main?retryHelp:std::string{};
     case MenuAction::Options:return "Video, Audio, Control, User settings, Language.";
-    case MenuAction::Extras:return "Scores, Credits, Intro, Slide Show, Demo.";
+    case MenuAction::Extras:return "Scores, Credits, Intro, Slide Show, Demo, Benchmark.";
     case MenuAction::LoadGame:if(savedSessionsLoading)return "Reading saved sessions...";return savedSessions?std::to_string(savedSessions)+" saved session"+(savedSessions==1?"":"s")+" available.":"No saved session.";
+    case MenuAction::Benchmark:return "Seven performance scenes, score and offline reports.";
+    case MenuAction::BenchmarkDefault:return "Fixed 640x480 benchmark preset. VSync off, FPS uncapped. Saves and settings unchanged.";
+    case MenuAction::BenchmarkUser:return "Your saved video settings. VSync off, FPS uncapped. Saves and settings unchanged.";
     case MenuAction::Demo:return "Auto-playing game demo.";
     case MenuAction::Intro:return "Select to view intro animation.";
     default:return {};
@@ -52,7 +55,8 @@ std::vector<MenuEntry> MenuView::entries() const {
         if(retryAvailable)rows.push_back({"Restart Level",MenuAction::Restart});
         for(const auto& row:std::vector<MenuEntry>{{"Start New Game",MenuAction::NewGame},{"Load game",MenuAction::LoadGame},{"Options",MenuAction::Options},{"Extras",MenuAction::Extras},{"Exit",MenuAction::Quit}})rows.push_back(row);
         return rows;}
-    case MenuPage::Extras:{std::vector<MenuEntry> rows={{"Scores",MenuAction::Scores},{"Credits",MenuAction::Credits},{"Intro",MenuAction::Intro}};if(slidesAvailable)rows.push_back({"Slide Show",MenuAction::SlideShow});rows.push_back({"Demo",MenuAction::Demo});rows.push_back({"Controls help",MenuAction::ControlsHelp});rows.push_back({"Back",MenuAction::None});return rows;}
+    case MenuPage::Extras:{std::vector<MenuEntry> rows={{"Scores",MenuAction::Scores},{"Credits",MenuAction::Credits},{"Intro",MenuAction::Intro}};if(slidesAvailable)rows.push_back({"Slide Show",MenuAction::SlideShow});rows.push_back({"Demo",MenuAction::Demo});rows.push_back({"Controls help",MenuAction::ControlsHelp});rows.push_back({"Benchmark",MenuAction::Benchmark});rows.push_back({"Back",MenuAction::None});return rows;}
+    case MenuPage::Benchmark:return {{"Default",MenuAction::BenchmarkDefault},{"User Settings",MenuAction::BenchmarkUser}};
     case MenuPage::Game:{std::vector<MenuEntry> rows={{"Resume",MenuAction::Resume},{"Load game",MenuAction::LoadGame},{"Restart level",MenuAction::Restart},{"Options",MenuAction::Options},{"Controls",MenuAction::Controls},{"End game",MenuAction::EndGame}};
         if(debugEnabled)rows.push_back({"Debug / testing (F2)",MenuAction::Debug});
         return rows;}
@@ -80,6 +84,7 @@ std::vector<MenuEntry> MenuView::entries() const {
 }
 std::string MenuView::title() const {
     if(page==MenuPage::Extras)return "Extras";
+    if(page==MenuPage::Benchmark)return "Benchmark";
     if(page==MenuPage::SavedSessions)return "Saved sessions";
     if(page==MenuPage::Options)return optionTitle;
     if(page==MenuPage::Debug)return "Debug / testing";
@@ -97,6 +102,7 @@ std::string MenuView::title() const {
 void MenuView::back(bool& paused) {
     error.clear();
     if(page==MenuPage::SavedSessions){page=saveParent_;selected=page==MenuPage::Main&&retryAvailable?2:1;}
+    else if(page==MenuPage::Benchmark){page=MenuPage::Extras;selected=slidesAvailable?6:5;}
     else if(page==MenuPage::Extras){page=MenuPage::Main;selected=retryAvailable?4:3;}
     else if(page==MenuPage::DebugLevels || page==MenuPage::DebugSurprises){page=MenuPage::Debug;selected=0;}
     else if(page==MenuPage::Debug){page=MenuPage::Game;selected=0;}
@@ -160,6 +166,8 @@ MenuAction MenuView::activate(bool& paused) {
         if(saveParent_==MenuPage::Main)return action;
         parent_=page;pending_=action;page=MenuPage::Confirm;selected=0;return MenuAction::None;
     }
+    if(action==MenuAction::Benchmark){page=MenuPage::Benchmark;selected=0;return MenuAction::None;}
+    if(page==MenuPage::Benchmark)return action;
     if(page==MenuPage::Extras){if(action==MenuAction::None)back(paused);return action;}
     if(action==MenuAction::Extras){page=MenuPage::Extras;selected=0;return MenuAction::None;}
     if(page==MenuPage::Options)return MenuAction::None;

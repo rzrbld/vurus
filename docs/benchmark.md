@@ -1,10 +1,24 @@
-# Standalone Vurus benchmark
+# Vurus benchmark
 
 `vurus-bench` is a separate executable using the game's World, animation,
 audio and renderer. It runs seven scripted encounters automatically and ends with
 a score and a small map/FPS/nearby-enemy/RSS table. Game saves and the
 leaderboard are never read or written. Video preferences saved by the in-game menus
 are read only. Players supply their own existing game data.
+
+## From the game menu
+
+Choose **Extras → Benchmark → Default** or **User Settings**. The two choices use
+exactly the standalone benchmark's fixed preset and saved menu-video settings,
+respectively; both disable VSync and the FPS cap for the run. Esc/B returns from
+the submenu to Extras. The game releases its active runtime before the benchmark,
+so a suspended game does not add renderer/audio work or inflate benchmark RSS.
+
+The same seven scenes, score and HTML/JSON reports are used. Results stay visible
+until a fresh A/B/Start/Enter/Esc press returns to the main menu; closing the window
+quits instead. Saves, leaderboard and saved options are untouched, and the main
+menu resumes with your normal settings. No separate benchmark executable is needed
+for this menu entry.
 
 ## Run a development or future release build
 
