@@ -465,7 +465,7 @@ bool GameWorld::restoreSnapshot(const WorldSnapshot& saved,std::string& error) {
     if(!restoreNativePool(saved.nativePool,error))return false;
     rebuildNativeHeldOriginals();
     retaliationTarget_=SIZE_MAX;retaliationGeneration_=0;
-    navigationItemMetadata_.clear();classNames_.clear();
+    navigationItemMetadata_.clear();classNames_.clear();savingRoles_.reset();
     resetSpatialPublications();
     applyingDamage_=false;map_.close();error.clear();return true;
 }
@@ -488,23 +488,20 @@ void GameWorld::updateSaving(float milliseconds) {
     // A background checkpoint owns this request until commit/failure. Moving
     // away must not cancel its fee/notification or start a second transaction.
     if(saveRequest_)return;
+    savingRoles_.ensure(*scene_,actors_.size());
     std::optional<size_t> plot;
     if(player().alive && !scene_->objects[player_].flags.invisible.value_or(false)) {
         const auto p=playerPosition();
-        for(size_t area=0;area<actors_.size()&&!plot;++area) {
+        for(const size_t area:savingRoles_.zones()) {
             const auto& object=scene_->objects[area];
             if(!actors_[area].alive)continue;
             const double radius=actors_[area].radius+player().radius;
             if(nativeDistanceSquared(p.x-object.position.x,p.y-object.position.y)>radius*radius)continue;
-            // These predicates are independent. Reject distant actors before
-            // searching their text properties; retain the exact sensor metric,
-            // actor order and first matching colocated terminal.
-            if(!propertyBool(object.properties,"Saving-zone"))continue;
-            // Only a colocated body can be the terminal. Keep first-match
-            // actor order, but avoid text-property scans on unrelated actors.
-            for(size_t i=0;i<actors_.size();++i)if(actors_[i].alive &&
-                scene_->objects[i].position.x==object.position.x && scene_->objects[i].position.y==object.position.y &&
-                propertyBool(scene_->objects[i].properties,"Saving-plot")){plot=i;break;}
+            // Role IDs retain ascending actor order. Read current positions,
+            // liveness and radius; keep the first matching colocated terminal.
+            for(const size_t i:savingRoles_.terminals())if(actors_[i].alive &&
+                scene_->objects[i].position.x==object.position.x && scene_->objects[i].position.y==object.position.y){plot=i;break;}
+            if(plot)break;
         }
     }
     if(plot!=savePlot_) {

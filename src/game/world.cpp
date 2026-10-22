@@ -444,7 +444,7 @@ bool GameWorld::load(SceneContent& scene,const Level& level,std::string& error,i
     spiderNavigation_.reset();spiderNavigationActors_.clear();
     scene_=&scene;level_=&level;player_=scene.player->value;elapsedMs_=0;playerKills_=0;ammoHits_=ammoMisses_=0;motion_={};map_={};
     catalogHash_=contentFingerprint();savePlot_.reset();saveDwellMs_=0;saveAttempted_=false;saveRequest_.reset();
-    effectSequences_.clear();attachedProtectionActors_.clear();navigationItemMetadata_.clear();classNames_.clear();actors_.clear();transientRecordCandidates_.clear();referenceOwnerCandidates_.clear();projectiles_.clear();transition_.reset();rejectedLifts_.clear();diagnostics_.clear();message_.clear();
+    effectSequences_.clear();attachedProtectionActors_.clear();savingRoles_.reset();navigationItemMetadata_.clear();classNames_.clear();actors_.clear();transientRecordCandidates_.clear();referenceOwnerCandidates_.clear();projectiles_.clear();transition_.reset();rejectedLifts_.clear();diagnostics_.clear();message_.clear();
     damageQueue_.clear();contactDamage_.clear();applyingDamage_=false;surprise_={};touchVictims_.clear();heldItems_.clear();
     actorCells_={};bareAmmoCells_={};bareAmmoIndex_.clear();visualAmmoIndex_.clear();
     awakeManager_.entries.clear();awakeVisitIndex_.reset();deferActorFire_=false;deferredActorFire_.reset();
@@ -1123,6 +1123,7 @@ void GameWorld::registerReferenceOwnerCandidate(size_t id) {
     if(at==referenceOwnerCandidates_.end() || *at!=id)referenceOwnerCandidates_.insert(at,id);
 }
 void GameWorld::registerTransientRecordCandidate(size_t id) {
+    savingRoles_.refresh(id,scene_->objects[id],actors_.size());
     if(id<actors_.size() && actors_[id].routeSearch)legacyRouteSearchSeen_=true;
     // Generic births can receive creator/explosion/AI state after returning.
     registerReferenceOwnerCandidate(id);

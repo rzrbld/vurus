@@ -1,4 +1,5 @@
 #pragma once
+#include "game/saving_role_index.h"
 #include "game/effect_camera_native.h"
 #include "game/indirect_optional.h"
 #include "game/demo_replay.h"
@@ -328,7 +329,7 @@ public:
     bool restoreNativePool(const std::optional<NativeWorldPoolState>&,std::string& error);
     bool reconstructNativePoolForReplacement(const NativeWorldPoolState&,std::string& error,bool checkpoint=false);
     bool reconstructNativePoolForReplacement(const NativePoolReplacementContext&,std::string& error,bool checkpoint=false);
-    void rebind(SceneContent& scene,const Level& level) { scene_=&scene;level_=&level;navigationItemMetadata_.clear();classNames_.clear();resetSpatialPublications(); }
+    void rebind(SceneContent& scene,const Level& level) { scene_=&scene;level_=&level;navigationItemMetadata_.clear();classNames_.clear();savingRoles_.reset();resetSpatialPublications(); }
     const std::optional<SaveRequest>& saveRequest() const { return saveRequest_; }
     void finishSave(bool success,const std::string& error={});
     void tick(float seconds,const WorldInput&);
@@ -393,6 +394,7 @@ public:
 private:
     friend struct AmmoImpactNativeTestAccess;
     friend struct NavigationItemMetadataTestAccess;
+    friend struct SavingRoleIndexTestAccess;
     friend struct ClassNameIndexTestAccess;
     NativeAwakeManager awakeManager_;
     std::optional<std::size_t> awakeVisitIndex_;
@@ -513,6 +515,7 @@ private:
     // Nonpersistent authored query metadata; retained property identity handles
     // COW edits/recycled slots. Load, accepted restore and rebind discard it.
     std::vector<NavigationItemCache> navigationItemMetadata_;
+    SavingRoleIndex savingRoles_;
     bool navigationItemOnlyForPlayer(size_t actor);
     // Catalog names are authored and immutable while bound. Rebind after
     // replacing a catalog; property edits are still read from current classes.
