@@ -270,7 +270,15 @@ bool loadSceneContent(const ContentReader& read, const std::string& mapPath,
             object.id = {static_cast<uint32_t>(scene.objects.size())}; object.classId = c.id;
             object.authored = n;
             object.position = position(require(n.children,"position",n));
-            object.properties = c.properties;
+            // Every placement overlays Class-name/Position onto the class
+            // definition. Allocate room for at most one new root per field
+            // before copying, rather than growing a detached, full class tree.
+            // The overlay below still owns all matching and ordering decisions.
+            const auto& inherited = c.properties.read();
+            std::vector<TextNode> properties;
+            properties.reserve(inherited.size() + n.children.size());
+            properties.insert(properties.end(), inherited.begin(), inherited.end());
+            object.properties = SharedProperties(std::move(properties));
             std::vector<size_t> claimedAttributes;
             for (const auto& field : n.children) {
                 // Native .3DO dispatch has no class-inheritance directives.
