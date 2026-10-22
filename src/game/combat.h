@@ -27,16 +27,19 @@ struct WeaponState {
 struct ShotRequest {
     float lateralOffset = 0;
 };
+enum class WeaponFireVisit { Input, PendingSweep };
 
 // One volley per call at most, without accumulating shots during long frames.
 // A zero gap means one center barrel regardless of side flags. A nonzero gap
 // enables up to two authored barrels. Each emitted request consumes one round.
 // Release keeps cooldown; the caller may reset state when selecting a weapon.
 // Invalid negative/nonfinite gap or a clock moving backwards produces no shot.
+// Pending Circular visits bypass native input processing and retain slope state.
 std::vector<ShotRequest> fireWeapon(const WeaponConfig& config, WeaponState& state,
                                   bool held, uint64_t nowMs, uint32_t& ammo,
                                   std::optional<bool> aiming={},
-                                  std::optional<uint32_t> activeAmmo={});
+                                  std::optional<uint32_t> activeAmmo={},
+                                  WeaponFireVisit visit=WeaponFireVisit::Input);
 
 struct ShotPositionOffset { float x=0,y=0; };
 // 443e97: explicit TYPE Weapon Start-distance times PE surface table50d440.

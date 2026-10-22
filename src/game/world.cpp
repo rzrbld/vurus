@@ -1567,7 +1567,8 @@ void GameWorld::fire(size_t id,bool held,bool sweep,std::optional<ContentPositio
     if(held && !stock->second.count)audioEvent(AudioEventKind::DryFire,id,weapon.name);
     const auto beforeAmmo=stock->second.count;
     if(sweep)weapon.state.lastFireMs.reset();
-    auto requests=fireWeapon(weapon.config,weapon.state,held,static_cast<uint64_t>(elapsedMs_),stock->second.count,aiming,actor.nativeAmmoOwner.activeAmmo);
+    auto requests=fireWeapon(weapon.config,weapon.state,held,static_cast<uint64_t>(elapsedMs_),stock->second.count,aiming,actor.nativeAmmoOwner.activeAmmo,
+        sweep?WeaponFireVisit::PendingSweep:WeaponFireVisit::Input);
     std::vector<ShotPositionOffset> shotOrigins(requests.size());
     if(id==player_ && !requests.empty()) {
         if(surprise_.active(SurpriseKind::Triple) || surprise_.active(SurpriseKind::Circular) || sweep)

@@ -31,10 +31,13 @@ ShotPositionOffset enemyProjectileBarrelOffset(int direction,float lateralOffset
 
 std::vector<ShotRequest> fireWeapon(const WeaponConfig& config, WeaponState& state,
                                   bool held, uint64_t nowMs, uint32_t& ammo,
-                                  std::optional<bool> aiming,std::optional<uint32_t> activeAmmo) {
+                                  std::optional<bool> aiming,std::optional<uint32_t> activeAmmo,
+                                  WeaponFireVisit visit) {
     // 438540 -> 42c210/42c280, before cooldown admission: slope changes
     // per held input tick, not per emitted bullet or elapsed milliseconds.
-    if(config.initialSlope!=0) {
+    // 440dd7/440f1b goes directly to443bd0 for a pending Circular sweep,
+    // skipping438540 and its slope input helpers entirely.
+    if(visit==WeaponFireVisit::Input && config.initialSlope!=0) {
         if(!aiming.value_or(held)){state.slopeHeld=false;state.slopeRadians=config.initialSlope;}
         else if(!state.slopeHeld){state.slopeHeld=true;state.slopeRadians=config.initialSlope;}
         else if(state.slopeRadians!=0)state.slopeRadians=std::min(0.f,state.slopeRadians+config.slopeStep);
