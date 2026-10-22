@@ -1,5 +1,6 @@
 #pragma once
 #include "game/saving_role_index.h"
+#include "game/pickup_candidate_index.h"
 #include "game/effect_camera_native.h"
 #include "game/indirect_optional.h"
 #include "game/demo_replay.h"
@@ -516,6 +517,7 @@ private:
     // COW edits/recycled slots. Load, accepted restore and rebind discard it.
     std::vector<NavigationItemCache> navigationItemMetadata_;
     SavingRoleIndex savingRoles_;
+    PickupCandidateIndex pickupCandidates_;
     bool navigationItemOnlyForPlayer(size_t actor);
     // Catalog names are authored and immutable while bound. Rebind after
     // replacing a catalog; property edits are still read from current classes.

@@ -45,5 +45,32 @@ int main(){
  Fixture outbound;outbound.collect(1);const auto aState=outbound.world.snapshot();Fixture destination("TEST/B.3DG");destination.world.restore(outbound.world.carry());check(destination.world.snapshot().heldItems.size()==1&&destination.world.actors()[1].alive,"Cross-level carry does not hide same-index foreign placement");Fixture returned;returned.restore(aState);returned.world.restore(destination.world.carry());check(returned.world.snapshot().heldItems.size()==1&&!returned.world.actors()[1].alive,"Returning to source map retains one identity");returned.world.setPlayerPosition(900,400);returned.world.tick(.1f,{});check(returned.world.snapshot().heldItems.size()==1,"Cross-level held identity remains stable on update");
  Fixture gate;auto gateState=gate.world.snapshot();gateState.objects[1].properties.push_back(type("Key",{prop("Id","7")}));gateState.objects[3].position={320,200};gateState.actors[3].gate=GateConfig{GateActive|GateSensor|GateDestroyKey,100,7,{1}};gateState.actors[3].gateState=initializeGate(*gateState.actors[3].gate);gateState.actors[3].gateAnimationFinished=true;vyruz_test::synchronizeActor(gateState,3);gate.restore(gateState);gate.collect(1);check(gate.world.snapshot().heldItems.size()==1&&gate.world.player().heldKeys.size()==1,"Gate fixture retains real keyed object");gate.world.updateGates(100);check(gate.world.snapshot().heldItems.empty()&&gate.world.player().heldKeys.empty()&&!gate.world.actors()[1].alive,"Destroy-key consumes retained item and key bookkeeping together");
  auto invalid=aState;invalid.heldItems.push_back(invalid.heldItems.front());check(!outbound.world.restoreSnapshot(invalid,outbound.error)&&outbound.world.snapshot().heldItems.size()==1,"Duplicate held identity is rejected transactionally");
+ // The first overlapping Surprise changes admission of the next slot.
+ // Keep collection numeric even after a move/rebind or an accepted restore.
+ auto ordered=fixture();
+ for(size_t id:{1u,2u}) {
+  ordered.objects[id].classId={4};ordered.objects[id].properties=ordered.classes[4].properties;
+  ordered.objects[id].behaviours=ordered.classes[4].behaviours;
+  ordered.objects[id].position=ordered.objects[0].position;
+ }
+ Level orderLevel;orderLevel.mapW=100;orderLevel.mapH=100;orderLevel.hasTerrainCollision=true;
+ GameWorld orderSource;std::string orderError;check(orderSource.load(ordered,orderLevel,orderError),orderError.c_str());
+ GameWorld orderWorld=std::move(orderSource);orderWorld.rebind(ordered,orderLevel);
+ const auto orderBefore=orderWorld.snapshot();
+ orderWorld.movePlayer(0,0);
+ check(!orderWorld.actors()[1].alive && orderWorld.actors()[2].alive && orderWorld.pickupsTaken==1,
+       "lowest overlapping Surprise wins after World move/rebind");
+ check(orderWorld.restoreSnapshot(orderBefore,orderError),orderError.c_str());orderWorld.movePlayer(0,0);
+ check(!orderWorld.actors()[1].alive && orderWorld.actors()[2].alive && orderWorld.pickupsTaken==1,
+       "accepted restore rebuilds pickup candidates without changing order");
+ auto delayed=orderBefore;delayed.actors[1].pickupDelayMs=100;
+ check(orderWorld.restoreSnapshot(delayed,orderError),orderError.c_str());orderWorld.movePlayer(0,0);
+ check(orderWorld.actors()[1].alive && !orderWorld.actors()[2].alive && orderWorld.pickupsTaken==1,
+       "delay admission stays dynamic and later eligible Surprise can win");
+ auto rejected=orderBefore;rejected.objects[0].classId={999999};
+ check(!orderWorld.restoreSnapshot(rejected,orderError),"invalid restore rejected");
+ orderWorld.movePlayer(0,0);
+ check(orderWorld.actors()[1].alive && !orderWorld.actors()[2].alive && orderWorld.pickupsTaken==1,
+       "rejected restore leaves pickup admission unchanged");
  std::cout<<"held item lifecycle fixtures passed\n";
 }

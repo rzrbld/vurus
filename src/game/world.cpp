@@ -444,7 +444,7 @@ bool GameWorld::load(SceneContent& scene,const Level& level,std::string& error,i
     spiderNavigation_.reset();spiderNavigationActors_.clear();
     scene_=&scene;level_=&level;player_=scene.player->value;elapsedMs_=0;playerKills_=0;ammoHits_=ammoMisses_=0;motion_={};map_={};
     catalogHash_=contentFingerprint();savePlot_.reset();saveDwellMs_=0;saveAttempted_=false;saveRequest_.reset();
-    effectSequences_.clear();attachedProtectionActors_.clear();savingRoles_.reset();navigationItemMetadata_.clear();classNames_.clear();actors_.clear();transientRecordCandidates_.clear();referenceOwnerCandidates_.clear();projectiles_.clear();transition_.reset();rejectedLifts_.clear();diagnostics_.clear();message_.clear();
+    effectSequences_.clear();attachedProtectionActors_.clear();savingRoles_.reset();pickupCandidates_.clear();navigationItemMetadata_.clear();classNames_.clear();actors_.clear();transientRecordCandidates_.clear();referenceOwnerCandidates_.clear();projectiles_.clear();transition_.reset();rejectedLifts_.clear();diagnostics_.clear();message_.clear();
     damageQueue_.clear();contactDamage_.clear();applyingDamage_=false;surprise_={};touchVictims_.clear();heldItems_.clear();
     actorCells_={};bareAmmoCells_={};bareAmmoIndex_.clear();visualAmmoIndex_.clear();
     awakeManager_.entries.clear();awakeVisitIndex_.reset();deferActorFire_=false;deferredActorFire_.reset();
@@ -1124,6 +1124,7 @@ void GameWorld::registerReferenceOwnerCandidate(size_t id) {
 }
 void GameWorld::registerTransientRecordCandidate(size_t id) {
     savingRoles_.refresh(id,scene_->objects[id],actors_.size());
+    if(actors_[id].pickup)pickupCandidates_.include(id);
     if(id<actors_.size() && actors_[id].routeSearch)legacyRouteSearchSeen_=true;
     // Generic births can receive creator/explosion/AI state after returning.
     registerReferenceOwnerCandidate(id);
@@ -1134,10 +1135,12 @@ void GameWorld::registerTransientRecordCandidate(size_t id) {
 }
 void GameWorld::rebuildTransientRecordCandidates() {
     legacyRouteSearchSeen_=false;
+    pickupCandidates_.clear();
     transientRecordCandidates_.clear();
     referenceOwnerCandidates_.clear();
     for(size_t i=0;i<actors_.size();++i) {
         const auto& a=actors_[i];
+        if(a.pickup)pickupCandidates_.include(i);
         if(a.routeSearch)legacyRouteSearchSeen_=true;
         if(a.effect || a.hasAmmoAttribute || a.contactConfig.launchedThing)
             transientRecordCandidates_.push_back(i);
@@ -1408,7 +1411,9 @@ void GameWorld::damage(size_t id,float amount,std::optional<size_t> source,bool 
 void GameWorld::collect() {
     if(endingSource_)return; // native final destruction sequence disables pickups
     if (!player().alive || scene_->objects[player_].flags.invisible.value_or(false)) return;
-    for (size_t i=0;i<actors_.size();++i) {
+    PickupCandidateIndex::Cursor cursor;
+    while(const auto candidate=pickupCandidates_.next(cursor)) {
+        const size_t i=*candidate;
         auto& item=actors_[i];
         if (i==player_ || !item.alive || !item.pickup || item.pickupDelayMs>0) continue;
         const auto p=playerPosition(),q=scene_->objects[i].position;
