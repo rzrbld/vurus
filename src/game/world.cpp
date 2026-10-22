@@ -557,11 +557,14 @@ bool GameWorld::clearRoute(ContentPosition from,ContentPosition to,float radius)
     return terrainMoveAllowed(*level_,from.x,from.y,to.x,to.y,radius);
 }
 void GameWorld::updateActorBounds(size_t actor) {
+    updateSpiderNavigation(actor);
+    updateActorCollisionBounds(actor);
+}
+void GameWorld::updateActorCollisionBounds(size_t actor) {
     //A factory append may move later in this same live pass. Its first bounds
     //update must grow the acceleration cache before writing the newborn slot.
     if(actorBounds_.size()<actors_.size())actorBounds_.resize(actors_.size());
     if(actorBoundGroup_.size()<actors_.size())actorBoundGroup_.resize(actors_.size(),std::numeric_limits<size_t>::max());
-    updateSpiderNavigation(actor);
     const auto p=scene_->objects[actor].position;
     // Slightly oversized native-to-surface radii keep this rejection conservative.
     const double rx=double(actors_[actor].radius)*1.266, ry=double(actors_[actor].radius)*.633;
@@ -1092,7 +1095,11 @@ TerrainDisplacement GameWorld::move(size_t actor,float dx,float dy,bool physical
     //A separating return2 can leave bounds ahead of the rolled-back surface;
     //the next visit still needs the retained-center path.
     actors_[actor].nativeAmmoContinuation=continuing && lastSpiderSeparated_;
-    if(actorBoundsActive_)updateActorBounds(actor);
+    if(actorBoundsActive_) {
+        // Touch skips the hinted publication above and still needs the full wrapper.
+        if(nativeTouchVictim)updateActorBounds(actor);
+        else updateActorCollisionBounds(actor);
+    }
     if(pinballBouncePoint) {
         // Capture the native pre-response event above; construct after local
         // reference use so factory growth cannot invalidate p/history. Response

@@ -591,6 +591,7 @@ private:
     size_t actorBoundsIndexedCount_=0;
     bool actorBoundsActive_=false;
     void updateActorBounds(size_t actor);
+    void updateActorCollisionBounds(size_t actor);
     std::optional<NativeNavGraph> spiderNavigation_;
     std::vector<size_t> spiderNavigationActors_;
     // Pure projection cache, excluded from WorldSnapshot and disk saves.
