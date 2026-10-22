@@ -34,6 +34,14 @@ int main(){
     }
     auto p=presentationPosition({0,0},{3,6},1.f/3);assert(std::abs(p.x-1)<.001&&std::abs(p.y-2)<.001);
     p=presentationPosition({0,0},{100,0},.5);assert(p.x==100);
+    // Stationary positions still use interpolation (including signed zero),
+    // and the teleport boundary remains strictly greater than64.
+    p=presentationPosition({-0.f,-0.f},{-0.f,-0.f},.5f);
+    assert(p.x==0 && p.y==0 && !std::signbit(p.x) && !std::signbit(p.y));
+    p=presentationPosition({7,9},{7,9},-.5f);assert(p.x==7&&p.y==9);
+    p=presentationPosition({0,0},{64,0},.5f);assert(p.x==32);
+    const float beyond=std::nextafter(64.f,100.f);
+    p=presentationPosition({0,0},{beyond,0},.5f);assert(p.x==beyond);
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,"1");
     assert(SDL_Init(SDL_INIT_GAMECONTROLLER)==0);
     int index=SDL_JoystickAttachVirtual(SDL_JOYSTICK_TYPE_GAMECONTROLLER,SDL_CONTROLLER_AXIS_MAX,SDL_CONTROLLER_BUTTON_MAX,0);
