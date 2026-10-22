@@ -12,15 +12,15 @@ struct SpriteSequenceEnvelope {
     float minOffsetX=0,maxOffsetX=0,minOffsetY=0,maxOffsetY=0;
     float minOriginX=0,maxOriginX=0,minOriginY=0,maxOriginY=0;
     float width=0,height=0;
-    bool outside(float x,float y,float cameraX,float cameraY,float viewWidth,float viewHeight) const {
-        if(!valid || !std::isfinite(x) || !std::isfinite(y) ||
+    bool outside(float x,float y,float cameraX,float cameraY,float viewWidth,float viewHeight,float altitude=0) const {
+        if(!valid || !std::isfinite(altitude) || !std::isfinite(x) || !std::isfinite(y) ||
            !std::isfinite(cameraX) || !std::isfinite(cameraY) ||
            !std::isfinite(viewWidth) || !std::isfinite(viewHeight) || viewWidth<=0 || viewHeight<=0)return false;
         if(!drawable)return true;
         const float left=x+0.f+minOffsetX+minOriginX;
         const float right=x+0.f+maxOffsetX+maxOriginX+width;
-        const float top=y+0.f-0.f+minOffsetY+minOriginY;
-        const float bottom=y+0.f-0.f+maxOffsetY+maxOriginY+height;
+        const float top=y+0.f-altitude+minOffsetY+minOriginY;
+        const float bottom=y+0.f-altitude+maxOffsetY+maxOriginY+height;
         const float viewRight=cameraX+viewWidth,viewBottom=cameraY+viewHeight;
         if(!std::isfinite(left)||!std::isfinite(right)||!std::isfinite(top)||!std::isfinite(bottom)||
            !std::isfinite(viewRight)||!std::isfinite(viewBottom))return false;

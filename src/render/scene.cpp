@@ -12,6 +12,8 @@
 #include <cstdlib>
 #include <set>
 
+
+
 namespace vyruz {
 namespace {
 #if VURUS_SHADOW_VERIFY
@@ -947,7 +949,34 @@ void SceneRenderer::draw(Gfx& gfx,const SceneContent& scene,const Level& level,f
     struct Submission { Channel* channel; uint32_t overlay=0; float dx=0,dy=0; bool tripleBody=false; };
     std::vector<Submission> ordered;
     if(!actors)refreshChannelScan();
+    // Only read-only ordinary body selection may bypass ordered preparation.
+    // Special banks/cursor transitions and actor-driven admission stay unchanged.
+    const auto bodyOutside=[&](Channel& channel) {
+        if(playerOnly || channel.shadow || channel.firing || channel.nativeEnemy ||
+           channel.bankedEnemy || channel.walker || channel.spider || channel.helicopter ||
+           channel.lift || channel.tank || channel.turretBase || channel.generatorBank ||
+           channel.derivedInvisible || (scene.player && channel.object==scene.player->value))return false;
+        const auto* actor=actors && channel.object<actors->size()?&(*actors)[channel.object]:nullptr;
+        if(actors && !actor)return false;
+        if(actor && (!actor->alive || actor->directional || actor->gate || actor->lift ||
+                     actor->trailSegment || actor->explosion || actor->turretOnlyBase))return false;
+        const auto& object=scene.objects[channel.object];
+        if(channel.sequence!=object.sprite.sequence.value || !channel.sequence ||
+           channel.sequence>channel.bank->animation.sequences.size())return false;
+        auto& bank=*channel.bank;
+        if(bank.envelopes.size()<bank.animation.sequences.size())bank.envelopes.resize(bank.animation.sequences.size());
+        auto& envelope=bank.envelopes[channel.sequence-1];
+        if(!envelope.ready)envelope=spriteSequenceEnvelope(bank.animation,bank.animation.sequences[channel.sequence-1]);
+        const auto anchor=previous && channel.object<previous->size() &&
+            !(actor && (actor->pooledTrail || actor->reusedRecord) && actor->ageMs==0)
+            ?presentationPosition((*previous)[channel.object],object.position,alpha):object.position;
+        const float altitude=actor && actor->projectileAltitude?*actor->projectileAltitude:spriteProperties(object).altitude;
+        return envelope.outside(anchor.x,anchor.y,cameraX,cameraY,gfx.viewport().width,gfx.viewport().height,altitude);
+    };
     for(const auto index:workingChannels_)if(auto& channel=channels_[index];!channel.firing) {
+        if(bodyOutside(channel)) {
+            continue;
+        }
         const bool body=scene.player && channel.object==scene.player->value && !channel.shadow;
         if(body)ordered.push_back({&channel,3});
         // 417b30/431ae0: the Turret's static ground base is sequence25
