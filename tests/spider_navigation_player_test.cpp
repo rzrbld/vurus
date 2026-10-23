@@ -1,4 +1,4 @@
-// Preinclude dependencies so the test-only access macro affects GameWorld only.
+// Test dependencies; private navigation calls use the dedicated friend adapter.
 #include "game/effect_camera_native.h"
 #include "game/indirect_optional.h"
 #include "game/demo_replay.h"
@@ -39,9 +39,7 @@
 #include <map>
 #include <set>
 #include <unordered_map>
-#define private public
 #include "game/world.h"
-#undef private
 #include "game/save_state.h"
 #include "game/save_file.h"
 #include "game/spider_turn_native.h"
@@ -50,6 +48,15 @@
 #include <iostream>
 #include <stdexcept>
 #include <tuple>
+namespace vyruz {
+struct SpiderNavigationPlayerTestAccess {
+    static void publish(GameWorld& world,size_t actor) { world.updateSpiderNavigation(actor); }
+    static std::optional<NativeNavObstacle> obstacle(const GameWorld& world,size_t actor,
+        std::optional<size_t> target,NativeNavPoint from,NativeNavPoint to,NativeNavPoint extent,bool overlap) {
+        return world.spiderNavigationObstacle(actor,target,from,to,extent,overlap);
+    }
+};
+}
 using namespace vyruz;
 namespace {
 void need(bool value,const char* why){if(!value)throw std::runtime_error(why);}
@@ -131,15 +138,15 @@ int main(){try{
     auto& actor=state.actors[1];actor.brain.seeker=false;actor.enemyMotionConfig.acceleration=0;
     const auto start=actor.spiderAI->motion->center;
     targetAt(state,{start.x+80,start.y},{start.x+80,start.y});
-    restore(world,state);world.updateSpiderNavigation(0);
+    restore(world,state);SpiderNavigationPlayerTestAccess::publish(world,0);
     const NativeNavPoint end{start.x+160,start.y};
-    need(world.spiderNavigationObstacle(1,{},start,end,{20,20},false).has_value(),"Patrol sees Player obstacle");++cases;
-    need(!world.spiderNavigationObstacle(1,0,start,end,{20,20},false),"Seeker excludes its Player target");++cases;
-    need(!world.spiderNavigationObstacle(0,{},start,end,{20,20},false),"query self remains excluded");++cases;
+    need(SpiderNavigationPlayerTestAccess::obstacle(world,1,{},start,end,{20,20},false).has_value(),"Patrol sees Player obstacle");++cases;
+    need(!SpiderNavigationPlayerTestAccess::obstacle(world,1,0,start,end,{20,20},false),"Seeker excludes its Player target");++cases;
+    need(!SpiderNavigationPlayerTestAccess::obstacle(world,0,{},start,end,{20,20},false),"query self remains excluded");++cases;
     auto hidden=world.snapshot();hidden.objects[0].flags.invisible=true;
     restore(world,hidden);
-    need(!world.spiderNavigationObstacle(1,{},start,end,{20,20},false),"hidden Player without Keep-bb remains excluded");++cases;
-    restore(world,state);world.updateSpiderNavigation(0);
+    need(!SpiderNavigationPlayerTestAccess::obstacle(world,1,{},start,end,{20,20},false),"hidden Player without Keep-bb remains excluded");++cases;
+    restore(world,state);SpiderNavigationPlayerTestAccess::publish(world,0);
     // Run the actual World Spider callback rather than substituting a helper
     // filter: its in-flight Patrol search must route around the Player BBOX.
     auto searching=world.snapshot();auto& patrol=searching.actors[1].spiderAI->patrolRoute;

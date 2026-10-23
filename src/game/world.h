@@ -394,6 +394,7 @@ public:
     uint64_t shotsFired=0, pickupsTaken=0, actorsDestroyed=0;
 private:
     friend struct AmmoImpactNativeTestAccess;
+    friend struct SpiderNavigationPlayerTestAccess;
     friend struct NavigationItemMetadataTestAccess;
     friend struct SavingRoleIndexTestAccess;
     friend struct ClassNameIndexTestAccess;
