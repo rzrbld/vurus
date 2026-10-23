@@ -20,6 +20,8 @@ class HudRenderer {
 public:
     bool load(const ContentReader&,const std::string& world,std::string& error);
     void clear(Gfx&);
+    void preloadNotificationFonts(Gfx&);
+    static void setNotificationPreloadForTest(bool enabled) { notificationPreload_=enabled; }
     void advance(double milliseconds,const GameWorld* world=nullptr);
     void setLevel(const Level&);
     void setLanguage(int language) { language_=language==2?2:1; }
@@ -50,13 +52,14 @@ public:
     void drawPresentation(Gfx&,const Presentation&);
     void drawInventory(Gfx&,const GameWorld&,const InventoryView&,int width=640,int height=480,std::string_view closeKey="I");
 private:
+    static inline bool notificationPreload_=true;
     int language_=1;
     ContentReader read_;
     MapMarkers markers_;bool markersReady_=false;
     std::vector<RadarClassificationCache> radarClassifications_;
     std::array<AnimationCursor,26> panelCursors_;
     std::array<AnimationCursor,2> arrowCursors_;
-    struct Bank { GafAnimation animation;std::vector<GLuint> textures; };
+    struct Bank { GafAnimation animation;std::vector<GLuint> textures; GLuint glyphUploadBuffer=0; std::vector<size_t> glyphUploadOffsets; };
     struct HeldIcon { std::string path; AnimationCursor cursor; uint32_t sequence=0; uint64_t seen=0; };
     uint64_t inventorySyncSerial_=0;
     std::map<std::string,HeldIcon> heldIcons_;

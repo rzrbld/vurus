@@ -137,7 +137,7 @@ GLuint Gfx::uploadTexture(const GafBitmap& bitmap,bool sprite) {
 }
 
 #if VYRUZ_GLES
-Gfx::AtlasRegion Gfx::atlasUpload(const uint8_t* rgba,int w,int h,int kind) {
+Gfx::AtlasRegion Gfx::atlasUpload(const uint8_t* rgba,int w,int h,int kind,GLuint unpackBuffer,size_t unpackOffset) {
     // Separate nearest world, bilinear world, and nearest font pages. Bounded
     // independently of the animation cache; large/overflow frames stay standalone.
     const int size=std::min(kind==2?256:(w+2<=512 && h+2<=512)?512:1024,atlasMaximum_);
@@ -174,12 +174,17 @@ Gfx::AtlasRegion Gfx::atlasUpload(const uint8_t* rgba,int w,int h,int kind) {
     if(kind!=2)atlasWorldUsed_+=size_t(rw)*rh*4;
     // Replicated one-texel border is clamp-to-edge for both nearest and linear.
     // Transparent filtered RGB has already been dilated by the existing helper.
-    std::vector<uint8_t> padded(size_t(rw)*rh*4);
-    for(int y=0;y<rh;++y)for(int x=0;x<rw;++x)
-        std::memcpy(&padded[(size_t(y)*rw+x)*4],rgba+(size_t(std::clamp(y-1,0,h-1))*w+std::clamp(x-1,0,w-1))*4,4);
+    std::vector<uint8_t> padded;
+    if(!unpackBuffer){
+        padded.resize(size_t(rw)*rh*4);
+        for(int y=0;y<rh;++y)for(int x=0;x<rw;++x)
+            std::memcpy(&padded[(size_t(y)*rw+x)*4],rgba+(size_t(std::clamp(y-1,0,h-1))*w+std::clamp(x-1,0,w-1))*4,4);
+    }
     glBindTexture(GL_TEXTURE_2D,chosen->first);current_=chosen->first;
     glPixelStorei(GL_UNPACK_ALIGNMENT,1);
-    glTexSubImage2D(GL_TEXTURE_2D,0,space.x,space.y,rw,rh,GL_RGBA,GL_UNSIGNED_BYTE,padded.data());
+    GLint previous=0;if(unpackBuffer){glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING,&previous);glBindBuffer(GL_PIXEL_UNPACK_BUFFER,unpackBuffer);}
+    glTexSubImage2D(GL_TEXTURE_2D,0,space.x,space.y,rw,rh,GL_RGBA,GL_UNSIGNED_BYTE,unpackBuffer?reinterpret_cast<const void*>(unpackOffset):padded.data());
+    if(unpackBuffer)glBindBuffer(GL_PIXEL_UNPACK_BUFFER,static_cast<GLuint>(previous));
     return {chosen->first,{space.x,space.y,rw,rh}};
 }
 void Gfx::atlasRelease(AtlasRegion region) {
@@ -221,6 +226,17 @@ GLuint Gfx::uploadSpriteTexture(const GafBitmap& bitmap,bool filterable) {
     }
 #endif
     return uploadTexture(bitmap,filterable);
+}
+GLuint Gfx::uploadFontTexture(const GafBitmap& bitmap,GLuint unpackBuffer,size_t unpackOffset) {
+#if VYRUZ_GLES
+    if(unpackBuffer&&bitmap.valid()){
+        const auto region=atlasUpload(nullptr,bitmap.width,bitmap.height,2,unpackBuffer,unpackOffset);
+        if(region.page){GLuint id=0;glGenTextures(1,&id);atlasSprites_[id]={region,{}};return id;}
+    }
+#else
+    (void)unpackBuffer;(void)unpackOffset;
+#endif
+    return uploadSpriteTexture(bitmap,false);
 }
 size_t Gfx::atlasTextureBytes() const {
 #if VYRUZ_GLES

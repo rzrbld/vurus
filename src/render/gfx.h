@@ -43,6 +43,7 @@ public:
     // retains standalone textures. Filterable frames borrow their source again
     // at beginQuads when filtering is enabled.
     GLuint uploadSpriteTexture(const GafBitmap&,bool filterable=true);
+    GLuint uploadFontTexture(const GafBitmap&,GLuint,size_t);
     size_t atlasTextureBytes() const;
     size_t spriteAtlasSlackBytes() const;
     void deleteTexture(GLuint tex);
@@ -102,7 +103,7 @@ private:
     size_t atlasWorldBytes_=0,atlasWorldUsed_=0,atlasFontBytes_=0;
     std::map<GLuint,AtlasPage> atlasPages_;
     std::map<GLuint,AtlasSprite> atlasSprites_;
-    AtlasRegion atlasUpload(const uint8_t*,int,int,int kind);
+    AtlasRegion atlasUpload(const uint8_t*,int,int,int kind,GLuint unpackBuffer=0,size_t unpackOffset=0);
     void atlasRelease(AtlasRegion);
     // Mapping resets at every beginQuads, including ordinary terrain/UI draws.
     float atlasU_=0,atlasV_=0,atlasW_=1,atlasH_=1;

@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 namespace vyruz {
 namespace {
 // Logical centered-menu coordinates, valid for desktop GL and GLES. Restore
@@ -84,6 +85,34 @@ bool HudRenderer::load(const ContentReader& read,const std::string& world,std::s
     for(size_t i=0;i<2;++i)if(bonus_.animation.sequences.size()>i+1)arrowCursors_[i].reset(bonus_.animation.sequences[i+1]);
     return true;
 }
+void HudRenderer::preloadNotificationFonts(Gfx& gfx) {
+#if VYRUZ_GLES
+    if(!notificationPreload_)return;
+    size_t frames=0,total=0;
+    const auto prepare=[&](Bank& bank,const auto& fonts) {
+        if(bank.glyphUploadBuffer)return;
+        std::vector<uint8_t> packed;
+        bank.glyphUploadOffsets.assign(bank.animation.frames.size(),SIZE_MAX);
+        for(const auto& font:fonts)for(const auto& glyph:font.records)for(const auto& layer:glyph.layers) {
+            if(layer.frameIndex>=bank.animation.frames.size()||bank.glyphUploadOffsets[layer.frameIndex]!=SIZE_MAX)continue;
+            const auto& image=bank.animation.frames[layer.frameIndex].image;if(!image.valid())continue;
+            const auto rgba=image.rgbaImage();const int w=image.width,h=image.height,rw=w+2,rh=h+2;
+            const size_t offset=packed.size();bank.glyphUploadOffsets[layer.frameIndex]=offset;packed.resize(offset+size_t(rw)*rh*4);
+            for(int y=0;y<rh;++y)for(int x=0;x<rw;++x)std::memcpy(packed.data()+offset+(size_t(y)*rw+x)*4,rgba.rgba.data()+(size_t(std::clamp(y-1,0,h-1))*w+std::clamp(x-1,0,w-1))*4,4);
+            ++frames;
+        }
+        if(packed.empty())return;
+        GLint previous=0;glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING,&previous);
+        glGenBuffers(1,&bank.glyphUploadBuffer);glBindBuffer(GL_PIXEL_UNPACK_BUFFER,bank.glyphUploadBuffer);
+        glBufferData(GL_PIXEL_UNPACK_BUFFER,static_cast<GLsizeiptr>(packed.size()),packed.data(),GL_STATIC_DRAW);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER,static_cast<GLuint>(previous));total+=packed.size();
+    };
+    prepare(panel_,fonts_);prepare(bonus_,bonusFonts_);
+    std::fprintf(stderr,"NOTIFICATION_GLYPH_STAGING frames=%zu bytes=%zu atlas_bytes=%zu\n",frames,total,gfx.atlasTextureBytes());
+#else
+    (void)gfx;
+#endif
+}
 void HudRenderer::beginDemoOverlay(){coinsRemainingMs_=500;coinsHidden_=false;}
 void HudRenderer::advanceDemoOverlay(double ms){
     if(!(ms>0)||!std::isfinite(ms))return;
@@ -146,6 +175,9 @@ void HudRenderer::setLevel(const Level& level) {
     levelMap_=makeLevelMap(level);mapWidth_=level.mapW*level.tileW;mapHeight_=level.mapH*level.tileH;
 }
 void HudRenderer::clear(Gfx& gfx) {
+#if VYRUZ_GLES
+    for(auto* bank:{&panel_,&bonus_})if(bank->glyphUploadBuffer){glDeleteBuffers(1,&bank->glyphUploadBuffer);bank->glyphUploadBuffer=0;bank->glyphUploadOffsets.clear();}
+#endif
     radarClassifications_.clear();
     gfx.deleteTexture(mapTexture_);mapTexture_=0;levelMap_={};
     for (auto* b:{&coins_,&score_,&panel_,&vPanel_,&pause_,&failed_,&inventory_,&menu_,&vMenu_,&cursor_,&bonus_,&surprise_,&darkness_,&surpriseFx_}) {for(auto t:b->textures)gfx.deleteTexture(t);*b={};}
@@ -427,7 +459,7 @@ void HudRenderer::textBank(Gfx& gfx,std::string_view value,float x,float y,Bank&
     // font page. Keep lazy per-string residency and the exact native layout.
     layout([&](size_t id,float,float){
         auto& texture=bank.textures[id];
-        if(!texture)texture=gfx.uploadSpriteTexture(bank.animation.frames[id].image,false);
+        if(!texture){texture=bank.glyphUploadBuffer&&id<bank.glyphUploadOffsets.size()&&bank.glyphUploadOffsets[id]!=SIZE_MAX?gfx.uploadFontTexture(bank.animation.frames[id].image,bank.glyphUploadBuffer,bank.glyphUploadOffsets[id]):gfx.uploadSpriteTexture(bank.animation.frames[id].image,false);}
     });
 #endif
     if(additive){glEnable(GL_ALPHA_TEST);glAlphaFunc(GL_GREATER,.5f);glBlendFunc(GL_ONE,GL_ONE);}

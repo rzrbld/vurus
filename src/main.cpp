@@ -518,6 +518,7 @@ bool loadLevelData(App& a, const std::string& path,const vyruz::SavedLevel* save
     nextHud.setLevel(a.level);
     if(entering)nextHud.inheritInventory(a.hud);
     a.hud.clear(a.gfx);a.hud=std::move(nextHud);a.deathPresented=false;a.presentationReturnMain=false;a.presentationReturnExtras=false;a.paused=false;a.inventory={};a.menu={};a.menu.debugEnabled=a.debugEnabled;a.menu.slidesAvailable=a.slidesAvailable;
+    a.hud.preloadNotificationFonts(a.gfx);
     a.world=std::move(validation);a.world.rebind(a.content,a.level);
     a.hud.rebuildMapMarkers(a.content,a.world);
     a.presentation.close();a.audio.device().stop(a.presentationVoice);a.presentationVoice=0;
