@@ -1003,3 +1003,10 @@ if(BUILD_TESTING)
   target_include_directories(player_contact_native_test PRIVATE src)
   add_test(NAME player_contact_native COMMAND player_contact_native_test)
 endif()
+
+# Circular emitter ammo/completion controls exercise the live World path.
+if(BUILD_TESTING)
+  add_executable(circular_ammo_world_test tests/circular_ammo_world_test.cpp ${VYRUZ_WORLD_TEST_SOURCES})
+  target_include_directories(circular_ammo_world_test PRIVATE src)
+  add_test(NAME circular_ammo_world COMMAND circular_ammo_world_test)
+endif()
