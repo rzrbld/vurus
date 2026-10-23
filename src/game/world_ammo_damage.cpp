@@ -29,6 +29,7 @@ void GameWorld::synchronizeActorCell(size_t id,bool requestPublication) {
     const auto p=scene_->objects[id].position;
     const auto destination=!actors_[id].nativeHeldOriginal && (actors_[id].alive||actors_[id].reactivateMs>=0)?
         actorCells_.coordinate(p.x,p.y):NativeActorCells::Missing;
+    if(collisionQueriesActive_ && destination==NativeActorCells::Missing)updateFallbackCollisionCoverage(id);
     if(id<actorCells_.cell.size() && actorCells_.cell[id]==destination)return;
     actorCells_.relocate(id,destination,destination==NativeActorCells::Missing?
         std::optional<std::uint64_t>{}:std::optional<std::uint64_t>{nextNativeCellOrder_++});

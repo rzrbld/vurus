@@ -196,7 +196,7 @@ void GameWorld::visitNativeActor(size_t id,float seconds,const WorldInput& input
                 motion_.velocityX=velocity.x;motion_.velocityZ=velocity.y;
                 if(auto* h=p.nativeMotionHistory()){const auto n=spiderSurfaceToNative(position.x,position.y);h->center={n.x,n.y};}
                 synchronizeActorCell(player_);
-                if(actorBoundsActive_)updateActorBounds(player_);
+                if(collisionQueriesActive_)updateActorBounds(player_);
                 else updateSpiderNavigation(player_);
             }
         }

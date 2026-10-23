@@ -33,7 +33,8 @@ SceneContent scene(ContentPosition p={500,500}){
  s.classes[2].properties={block("Energy",{value("Initial","10000")}),value("Bounding-box-size","10")};
  for(unsigned c:{3u,6u,7u})s.classes[c].properties={block("TYPE",{},"FX")};
  s.classes[3].sprite={"BOOM.GAF",{1}};
- s.classes[5].properties={value("Graphic-update-needed","1"),block("TYPE",{value("Hit-fx","Impact")},"Ammo"),block("TYPE",{value("Damage","1000"),value("Damage-zone","100"),value("Boom-fx","Boom")},"Explosion")};
+ // The point source must have an authored BBOX, including its visual body.
+ s.classes[5].properties={value("Sub-type","Ammo"),value("Bounding-box-size","1"),value("Graphic-update-needed","1"),block("TYPE",{value("Hit-fx","Impact")},"Ammo"),block("TYPE",{value("Damage","1000"),value("Damage-zone","100"),value("Boom-fx","Boom")},"Explosion")};
  for(auto& cls:s.classes)cls.properties.push_back(value("Managed","1"));
  place(s,0,{100,100});place(s,1,p);place(s,2,p);s.player=ObjectId{0};return s;
 }

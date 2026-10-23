@@ -21,21 +21,17 @@ namespace vyruz {struct AmmoImpactNativeTestAccess {
   w.initializeActorCells();w.initializeSpiderNavigation(true);
  }
  static void boundsCache(GameWorld&w,bool active){
-  w.actorBoundsActive_=false;w.actorBoundGroup_.assign(w.actors_.size(),SIZE_MAX);
+  w.collisionQueriesActive_=false;
   for(size_t id=0;id<w.actors_.size();++id)w.updateActorBounds(id);
-  w.actorBoundOrder_.clear();w.actorBoundGroups_.clear();
-  if(active){
-   auto group=w.actorBounds_.front();
-   for(size_t id=0;id<w.actors_.size();++id){const auto& b=w.actorBounds_[id];w.actorBoundOrder_.push_back(id);w.actorBoundGroup_[id]=0;group.minX=std::min(group.minX,b.minX);group.minY=std::min(group.minY,b.minY);group.maxX=std::max(group.maxX,b.maxX);group.maxY=std::max(group.maxY,b.maxY);}
-   w.actorBoundGroups_.push_back(group);
-  }
-  w.actorBoundsIndexedCount_=active?w.actors_.size():0;w.actorBoundsActive_=active;
+  w.prepareCollisionQueries();w.collisionQueriesActive_=active;
  }
  static void checkBounds(GameWorld&w,bool movingPlayer,bool active){
   if(!active)return;
-  const size_t id=movingPlayer?0:1;const auto p=w.scene_->objects[id].position;const auto& b=w.actorBounds_[id];const auto& g=w.actorBoundGroups_[0];
-  const double rx=double(w.actors_[id].radius)*1.266,ry=double(w.actors_[id].radius)*.633;
-  if(b.minX!=p.x-rx||b.maxX!=p.x+rx||b.minY!=p.y-ry||b.maxY!=p.y+ry||g.minX>b.minX||g.minY>b.minY||g.maxX<b.maxX||g.maxY<b.maxY)throw std::runtime_error("active movement rectangle/group stale");
+  const size_t id=movingPlayer?0:1;const auto p=w.scene_->objects[id].position;
+  const auto expectedCell=w.actorCells_.coordinate(p.x,p.y);
+  if(w.actorCells_.cell[id]!=expectedCell)throw std::runtime_error("active movement cell coverage stale");
+  const auto nearby=w.fallbackCollisionCandidates(p,p,0);
+  if(std::find(nearby.begin(),nearby.end(),id)==nearby.end())throw std::runtime_error("active movement collision candidate missing");
   const auto node=w.spiderNavigationActors_[id];if(node!=SIZE_MAX){const auto expected=w.actorNavigationBounds(id,w.nativeDamageSubtype(id));const auto actual=w.spiderNavigation_->objects[node].bounds;if(actual.minX!=expected.minX||actual.minY!=expected.minY||actual.maxX!=expected.maxX||actual.maxY!=expected.maxY)throw std::runtime_error("active movement navigation bounds stale");}
  }
  static NativeBodyContactQuery query(GameWorld&w,bool movingPlayer){return w.queryNativeBodyContacts(movingPlayer?0:1,{1500,500},{1520,500},8);}

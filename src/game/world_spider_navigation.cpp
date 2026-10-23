@@ -163,7 +163,7 @@ void GameWorld::updateSpiderNavigation(size_t id,std::optional<size_t> closestNo
     if(index==Missing){if(actorNavigationEnabled(actor,scene_->objects[id],subtype))index=insertNativeNavigationObject(*spiderNavigation_,id,bounds);}
     else updateNativeContactGraphObject(*spiderNavigation_,index,bounds,closestNonContact);
 }
-void GameWorld::updateSpiderProjectileNavigation(Projectile& shot){
+void GameWorld::updateSpiderProjectileNavigation(Projectile& shot,std::optional<size_t> closestNonContact){
     if(!spiderNavigation_)return;
     auto& node=shot.spiderGraphNode;
     if(!shot.alive||shot.visual||shot.radius<=0){
@@ -179,6 +179,7 @@ void GameWorld::updateSpiderProjectileNavigation(Projectile& shot){
     const bool disabled=!ammoContactEnabled(shot)||
         ((shot.phaseHidden||cls.flags.invisible.value_or(false))&&!keep);
     if(node==Missing)node=insertNativeNavigationObject(*spiderNavigation_,ProjectileBit,bounds);
+    else if(closestNonContact)updateNativeContactGraphObject(*spiderNavigation_,node,bounds,closestNonContact);
     else updateNativeNavigationObject(*spiderNavigation_,node,bounds);
     spiderNavigation_->objects[node].reference=ProjectileBit|
         (shot.nativeBodyIdentity?shot.nativeBodyIdentity:uint64_t(node))|(disabled?DisabledProjectileBit:0);

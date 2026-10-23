@@ -394,6 +394,7 @@ public:
     uint64_t shotsFired=0, pickupsTaken=0, actorsDestroyed=0;
 private:
     friend struct AmmoImpactNativeTestAccess;
+    friend struct CollisionIndexOracleAccess;
     friend struct SpiderNavigationPlayerTestAccess;
     friend struct NavigationItemMetadataTestAccess;
     friend struct SavingRoleIndexTestAccess;
@@ -498,6 +499,7 @@ private:
     void updateProjectile(size_t index,float seconds,bool nativeRouting);
     void updateProjectiles(float seconds);
     GrenadeNativeContactResult updateNativeGrenadeContacts(Projectile&,ProjectileDisplacement,float seconds);
+    GrenadeNativeContactResult updateNativeProjectileContacts(Projectile&,ContentPosition proposed,ProjectileDisplacement,float seconds);
     NativeAmmoContactObject nativeBodyContactObject(size_t actor) const;
     std::optional<NativeAmmoShapeTarget> resolveNativeBodyContact(uint64_t reference) const;
     NativeBodyContactQuery queryNativeBodyContacts(size_t sourceActor,ContactVelocity previous,
@@ -594,13 +596,23 @@ private:
     void updateCombatBonus(double milliseconds);
     void beginFinalEnding(size_t source);
     bool clearRoute(ContentPosition from,ContentPosition to,float radius) const;
+    bool collisionQueriesActive_=false;
+    float collisionMaximumRadius_=0;
+    size_t collisionCoverageCount_=0;
+    std::vector<uint8_t> collisionEligible_;
+    std::vector<size_t> collisionUnlocated_;
+    void updateActorBounds(size_t actor);
+    void updateFallbackCollisionCoverage(size_t actor);
+    void prepareCollisionQueries();
+    std::vector<size_t> fallbackCollisionCandidates(ContentPosition from,ContentPosition to,float radius,bool nativeBounds=false) const;
+#if VURUS_COLLISION_INDEX_ORACLE
+    // Private paired-test reference; absent from normal game/benchmark builds.
+    bool legacyCollisionIndex_=false;
     struct ActorBounds { double minX, minY, maxX, maxY; };
     std::vector<ActorBounds> actorBounds_, actorBoundGroups_;
     std::vector<size_t> actorBoundOrder_, actorBoundGroup_;
-    size_t actorBoundsIndexedCount_=0;
-    bool actorBoundsActive_=false;
-    void updateActorBounds(size_t actor);
     void updateActorCollisionBounds(size_t actor);
+#endif
     // Derived pending publication: one current row per ID, never serialized.
     // Immediate publishers do not consume requests for the next tick phase.
     std::vector<size_t> spatialDirtyActors_,spatialPublishBatch_;
@@ -617,7 +629,7 @@ private:
     void restoreSpiderNavigationIndex();
     void clearSpiderNavigationRoutes(size_t actor);
     void updateSpiderNavigation(size_t actor,std::optional<size_t> closestNonContact={},bool synchronizeCell=true);
-    void updateSpiderProjectileNavigation(Projectile& shot);
+    void updateSpiderProjectileNavigation(Projectile& shot,std::optional<size_t> closestNonContact={});
     void clearProjectileNavigation(Projectile& shot);
     std::optional<NativeNavObstacle> projectileNavigationObstacle(const Projectile&,std::optional<size_t> target,
         NativeNavPoint from,NativeNavPoint to,NativeNavPoint extent,bool overlap) const;

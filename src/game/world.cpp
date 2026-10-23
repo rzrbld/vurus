@@ -454,8 +454,12 @@ bool GameWorld::load(SceneContent& scene,const Level& level,std::string& error,i
     contactMines_.clear();ammoContactVictims_.clear();
     const size_t placed=scene.objects.size();nextRecordOrder_=placed;
     reserveRuntimeStorage(actors_);reserveRuntimeStorage(scene.objects);
+#if VURUS_COLLISION_INDEX_ORACLE
     reserveRuntimeStorage(actorBounds_);reserveRuntimeStorage(actorBoundGroup_);reserveRuntimeStorage(actorBoundOrder_);
     reserveRuntimeStorage(actorBoundGroups_,(RuntimeActorLimit+15)/16);
+#endif
+    collisionMaximumRadius_=0;collisionCoverageCount_=0;collisionQueriesActive_=false;
+    collisionEligible_.clear();collisionUnlocated_.clear();
     actors_.resize(placed);
     actorCells_.reset(std::max(0,level.mapW),std::max(0,level.mapH));
     reserveRuntimeStorage(actorCells_.cell);reserveRuntimeStorage(actorCells_.next);reserveRuntimeStorage(actorCells_.arrivalOrder);
@@ -559,8 +563,9 @@ bool GameWorld::clearRoute(ContentPosition from,ContentPosition to,float radius)
 }
 void GameWorld::updateActorBounds(size_t actor) {
     updateSpiderNavigation(actor);
-    updateActorCollisionBounds(actor);
+    updateFallbackCollisionCoverage(actor);
 }
+#if VURUS_COLLISION_INDEX_ORACLE
 void GameWorld::updateActorCollisionBounds(size_t actor) {
     //A factory append may move later in this same live pass. Its first bounds
     //update must grow the acceleration cache before writing the newborn slot.
@@ -571,46 +576,86 @@ void GameWorld::updateActorCollisionBounds(size_t actor) {
     const double rx=double(actors_[actor].radius)*1.266, ry=double(actors_[actor].radius)*.633;
     const ActorBounds b{p.x-rx,p.y-ry,p.x+rx,p.y+ry};
     actorBounds_[actor]=b;
-    if(actorBoundsActive_ && actorBoundGroup_[actor]!=std::numeric_limits<size_t>::max()) {
+    if(collisionQueriesActive_ && actorBoundGroup_[actor]!=std::numeric_limits<size_t>::max()) {
         // Expand after sequential actor movement; never hide a later collision.
         auto& group=actorBoundGroups_[actorBoundGroup_[actor]];
         group.minX=std::min(group.minX,b.minX);group.minY=std::min(group.minY,b.minY);
         group.maxX=std::max(group.maxX,b.maxX);group.maxY=std::max(group.maxY,b.maxY);
     }
 }
-bool GameWorld::dynamicBlocked(size_t actor,ContentPosition from,ContentPosition to,float radius,bool ignorePlayer,bool nativeBounds) const {
-    const double rx=double(radius)*1.266, ry=double(radius)*.633;
-    const double minX=std::min(from.x,to.x)-rx, maxX=std::max(from.x,to.x)+rx;
-    const double minY=std::min(from.y,to.y)-ry, maxY=std::max(from.y,to.y)+ry;
-    const auto outside=[&](const ActorBounds& b) {
-        // Stored groups enclose projected circles. Expanding by sqrt(2)
-        // conservatively encloses native squares too, including grouped bounds.
-        const double ex=nativeBounds?(b.maxX-b.minX)*.208:0;
-        const double ey=nativeBounds?(b.maxY-b.minY)*.208:0;
-        return maxX<b.minX-ex || minX>b.maxX+ex || maxY<b.minY-ey || minY>b.maxY+ey;
+#endif
+void GameWorld::updateFallbackCollisionCoverage(size_t id) {
+#if VURUS_COLLISION_INDEX_ORACLE
+    if(legacyCollisionIndex_){updateActorCollisionBounds(id);return;}
+#endif
+    if(id>=actors_.size())return;
+    collisionMaximumRadius_=std::max(collisionMaximumRadius_,actors_[id].radius);
+    if((id>=actorCells_.cell.size() || actorCells_.cell[id]==NativeActorCells::Missing) &&
+       std::find(collisionUnlocated_.begin(),collisionUnlocated_.end(),id)==collisionUnlocated_.end())
+        collisionUnlocated_.push_back(id);
+}
+void GameWorld::prepareCollisionQueries() {
+    collisionCoverageCount_=actors_.size();collisionMaximumRadius_=0;
+    collisionEligible_.assign(actors_.size(),0);collisionUnlocated_.clear();
+    for(size_t i=0;i<actors_.size();++i){
+        auto& a=actors_[i];a.nativeAmmoAbort=false;
+        const bool eligible=(a.alive || a.reactivateMs>=0) && ((!a.effect && !a.pooledTrail) || a.solid);
+        collisionEligible_[i]=eligible;
+        if(!eligible)continue;
+        collisionMaximumRadius_=std::max(collisionMaximumRadius_,a.radius);
+        if(i>=actorCells_.cell.size() || actorCells_.cell[i]==NativeActorCells::Missing)collisionUnlocated_.push_back(i);
+    }
+}
+std::vector<size_t> GameWorld::fallbackCollisionCandidates(ContentPosition from,ContentPosition to,
+        float radius,bool nativeBounds) const {
+    std::vector<size_t> result;
+    if(!collisionQueriesActive_){result.resize(actors_.size());for(size_t i=0;i<result.size();++i)result[i]=i;return result;}
+    const double rx=double(radius)*1.266,ry=double(radius)*.633;
+    const double x0=std::min(from.x,to.x)-rx,x1=std::max(from.x,to.x)+rx;
+    const double y0=std::min(from.y,to.y)-ry,y1=std::max(from.y,to.y)+ry;
+#if VURUS_COLLISION_INDEX_ORACLE
+    if(legacyCollisionIndex_){
+        const auto outside=[&](const ActorBounds& b){
+            const double ex=nativeBounds?(b.maxX-b.minX)*.208:0,ey=nativeBounds?(b.maxY-b.minY)*.208:0;
+            return x1<b.minX-ex || x0>b.maxX+ex || y1<b.minY-ey || y0>b.maxY+ey;
+        };
+        for(size_t g=0;g<actorBoundGroups_.size();++g)if(!outside(actorBoundGroups_[g]))
+            for(size_t n=g*16;n<std::min((g+1)*16,actorBoundOrder_.size());++n){const auto id=actorBoundOrder_[n];if(!outside(actorBounds_[id]))result.push_back(id);}
+        for(size_t id=collisionCoverageCount_;id<actors_.size();++id)result.push_back(id);
+        return result;
+    }
+#endif
+    // Retain the accepted continuous player/fixture solver, sourcing candidates
+    // from the already-maintained native64x32cell lists. No second spatial index.
+    const double factor=nativeBounds?1.416:1;
+    const double mx=double(collisionMaximumRadius_)*1.266*factor,my=double(collisionMaximumRadius_)*.633*factor;
+    const auto append=[&](size_t id){
+        if(id>=collisionCoverageCount_ || id>=collisionEligible_.size() || !collisionEligible_[id])return;
+        const auto p=scene_->objects[id].position;
+        const double tx=double(actors_[id].radius)*1.266,ty=double(actors_[id].radius)*.633;
+        const double ex=nativeBounds?(2*tx)*.208:0,ey=nativeBounds?(2*ty)*.208:0;
+        if(!(x1<p.x-tx-ex || x0>p.x+tx+ex || y1<p.y-ty-ey || y0>p.y+ty+ey))result.push_back(id);
     };
+    const auto clampCell=[](double coordinate,int count,int size){return int(std::clamp(std::floor(coordinate/size),0.0,double(std::max(0,count))));};
+    const int left=clampCell(x0-mx,actorCells_.width,64),right=clampCell(x1+mx,actorCells_.width,64);
+    const int top=clampCell(y0-my,actorCells_.height,32),bottom=clampCell(y1+my,actorCells_.height,32);
+    for(int y=top;y<=bottom&&y<actorCells_.height;++y)for(int x=left;x<=right&&x<actorCells_.width;++x){
+        const size_t cell=size_t(x)*size_t(actorCells_.height)+size_t(y);
+        for(size_t id=actorCells_.heads[cell];id!=NativeActorCells::Missing;id=actorCells_.next[id])append(id);
+    }
+    for(const auto id:collisionUnlocated_)append(id);
+    for(size_t id=collisionCoverageCount_;id<actors_.size();++id)result.push_back(id);
+    std::sort(result.begin(),result.end());result.erase(std::unique(result.begin(),result.end()),result.end());
+    return result;
+}
+bool GameWorld::dynamicBlocked(size_t actor,ContentPosition from,ContentPosition to,float radius,bool ignorePlayer,bool nativeBounds) const {
     const auto blocks=[&](size_t i) {
         if (i==actor || (ignorePlayer && i==player_) || !actors_[i].alive || !actors_[i].solid) return false;
         const auto q=scene_->objects[i].position;
         if(nativeBounds)return nativeBoundsBlock(from,to,q,actors_[i].radius);
         return sweptCircleContact(from.x,from.y,to.x,to.y,q.x,q.y,radius+actors_[i].radius).has_value();
     };
-    size_t unindexed=0;
-    if(actorBoundsActive_) {
-        // Spatially grouped compact bounds keep navigation queries away from
-        // distant actors' large state/property records. Exact tests are unchanged.
-        for(size_t g=0;g<actorBoundGroups_.size();++g) {
-            if(outside(actorBoundGroups_[g]))continue;
-            const size_t end=std::min((g+1)*16,actorBoundOrder_.size());
-            for(size_t n=g*16;n<end;++n) {
-                const auto i=actorBoundOrder_[n];
-                if(!outside(actorBounds_[i]) && blocks(i))return true;
-            }
-        }
-        unindexed=actorBoundsIndexedCount_;
-    }
-    // Newly spawned actors, or calls outside a tick, use the original scan.
-    for(size_t i=unindexed;i<actors_.size();++i)if(blocks(i))return true;
+    for(const auto i:fallbackCollisionCandidates(from,to,radius,nativeBounds))if(blocks(i))return true;
     return false;
 }
 void GameWorld::notifyAccessBlocked(size_t id) {
@@ -814,18 +859,7 @@ TerrainDisplacement GameWorld::move(size_t actor,float dx,float dy,bool physical
     // Reuse the crowded-level spatial bounds; moving passive Items must not
     // turn every active body into an all-actors collision scan.
     if(!shared) {
-    if(actorBoundsActive_) {
-        const double broadRadius=radius+(nativeBody?2.f:0.f);
-        const double rx=broadRadius*1.266,ry=broadRadius*.633;
-        const double x0=std::min(p.x,p.x+delta.x)-rx,x1=std::max(p.x,p.x+delta.x)+rx;
-        const double y0=std::min(p.y,p.y+delta.y)-ry,y1=std::max(p.y,p.y+delta.y)+ry;
-        const auto outside=[&](const ActorBounds& b){return x1<b.minX || x0>b.maxX || y1<b.minY || y0>b.maxY;};
-        for(size_t g=0;g<actorBoundGroups_.size();++g)if(!outside(actorBoundGroups_[g]))
-            for(size_t n=g*16;n<std::min((g+1)*16,actorBoundOrder_.size());++n) {
-                const auto i=actorBoundOrder_[n];if(!outside(actorBounds_[i]))consider(i);
-            }
-        for(size_t i=actorBoundsIndexedCount_;i<actors_.size();++i)consider(i);
-    } else for(size_t i=0;i<actors_.size();++i)consider(i);
+    for(const auto i:fallbackCollisionCandidates(p,{p.x+delta.x,p.y+delta.y},radius+(nativeBody?2.f:0.f)))consider(i);
     if(nativeBody) {
         const auto step=history?Displacement{proposed.x-source.x,proposed.y-source.y}:surfaceToNative(dx,dy);
         const double rx=double(radius+2)*1.266,ry=double(radius+2)*.633;
@@ -1097,10 +1131,10 @@ TerrainDisplacement GameWorld::move(size_t actor,float dx,float dy,bool physical
     //A separating return2 can leave bounds ahead of the rolled-back surface;
     //the next visit still needs the retained-center path.
     actors_[actor].nativeAmmoContinuation=continuing && lastSpiderSeparated_;
-    if(actorBoundsActive_) {
+    if(collisionQueriesActive_) {
         // Touch skips the hinted publication above and still needs the full wrapper.
         if(nativeTouchVictim)updateActorBounds(actor);
-        else updateActorCollisionBounds(actor);
+        else updateFallbackCollisionCoverage(actor);
     }
     if(pinballBouncePoint) {
         // Capture the native pre-response event above; construct after local
@@ -1207,7 +1241,7 @@ size_t GameWorld::spawn(ClassId id,ContentPosition position) {
         std::erase(contactMines_,created);std::erase(attachedProtectionActors_,created);
         // A recycled index can precede the tick's indexed prefix. Include it
         // in the newborn fallback until the next bounds rebuild.
-        actorBoundsIndexedCount_=std::min(actorBoundsIndexedCount_,created);
+        collisionCoverageCount_=std::min(collisionCoverageCount_,created);
     }
     const uint64_t revision=((nextRecordOrder_++ + 1)<<32) |
         (reused?((actors_[created].visualRevision+1)&0xffffffffu):0);
@@ -1745,9 +1779,9 @@ void GameWorld::fire(size_t id,bool held,bool sweep,std::optional<ContentPositio
 }
 void GameWorld::updateProjectile(size_t index,float seconds,bool nativeRouting) {
     auto& shot=projectiles_[index];
-    const auto syncNavigation=[&](Projectile& shot){
-        if(shot.visual)updateSpiderNavigation(*shot.visual);
-        updateSpiderProjectileNavigation(shot);
+    const auto syncNavigation=[&](Projectile& shot,std::optional<size_t> hint={}){
+        if(shot.visual)updateSpiderNavigation(*shot.visual,hint);
+        updateSpiderProjectileNavigation(shot,hint);
     };
     if (!shot.alive) {if(nativeRouting)syncNavigation(shot);return;}
     if (shot.visual && !actors_[*shot.visual].alive) { shot.alive=false;if(nativeRouting)syncNavigation(shot);return; }
@@ -1836,15 +1870,15 @@ void GameWorld::updateProjectile(size_t index,float seconds,bool nativeRouting) 
     }
     shot.velocity={(delta.x-delta.z)*.8944272f/seconds,(delta.x+delta.z)*.4472136f/seconds};
     ContentPosition to{from.x+shot.velocity.x*seconds,from.y+shot.velocity.y*seconds};
-    const auto nativeGrenade=!groundImpact && !fuseExpired?updateNativeGrenadeContacts(shot,delta,seconds):GrenadeNativeContactResult{};
-    if(nativeGrenade.used){
-        to={nativeGrenade.proposedX,nativeGrenade.proposedY};
+    const auto nativeContact=!groundImpact && !fuseExpired?updateNativeProjectileContacts(shot,to,delta,seconds):GrenadeNativeContactResult{};
+    if(nativeContact.used){
+        to={nativeContact.proposedX,nativeContact.proposedY};
         if(!shot.alive){if(nativeRouting)syncNavigation(shot);return;}
     }
     // 441884..441931 ->442ae9: moving nonplayer actors outside the
     // surface bounds are released before contacts/CREATE, without EXPL.
     // Fuse/ground termination takes the earlier440ebe path instead.
-    if(!nativeGrenade.used && !groundImpact && !fuseExpired && (delta.x!=0 || delta.z!=0) &&
+    if(!nativeContact.used && !groundImpact && !fuseExpired && (delta.x!=0 || delta.z!=0) &&
        (to.x<1 || to.y<1 || to.x>=level_->mapW*64.f || to.y>=level_->mapH*32.f)) {
         shot.alive=false;
         if(shot.visual){actors_[*shot.visual].alive=false;actors_[*shot.visual].solid=false;releaseNativeActorIdentity(*shot.visual);synchronizeActorCell(*shot.visual);}
@@ -1860,43 +1894,29 @@ void GameWorld::updateProjectile(size_t index,float seconds,bool nativeRouting) 
     const auto projectileRoute=[&](ContentPosition end) {
         return terrainMoveAllowed(*level_,from.x,from.y,end.x,end.y,shot.radius,overWater);
     };
-    float nearest=1;std::optional<size_t> target=nativeGrenade.target;
-    bool terrain=nativeGrenade.terminal&&!target;
-    if (!nativeGrenade.used && !groundImpact && !fuseExpired && !projectileRoute(to)) {
+    float nearest=1;std::optional<size_t> target=nativeContact.target;
+    bool terrain=nativeContact.terminal&&!target;
+    if (!nativeContact.used && !groundImpact && !fuseExpired && !projectileRoute(to)) {
         float low=0,high=1;
         for (int step=0;step<16;++step) { const float mid=(low+high)/2;
             if (projectileRoute({from.x+(to.x-from.x)*mid,from.y+(to.y-from.y)*mid})) low=mid; else high=mid; }
         nearest=high;terrain=true;
     }
-    if (!nativeGrenade.used && !groundImpact && !fuseExpired && ammoContactEnabled(shot)) {
+    if (!nativeContact.used && !groundImpact && !fuseExpired && ammoContactEnabled(shot)) {
         const auto check=[&](size_t i) {
             if (!actors_[i].alive || !actors_[i].solid || (shot.visual && i==*shot.visual) ||
                 (i==shot.owner && (shot.ignoreOwner || shot.ageMs<500))) return;
             const auto q=scene_->objects[i].position;
             const auto hit=sweptCircleContact(from.x,from.y,to.x,to.y,q.x,q.y,shot.radius+actors_[i].radius);
-            // Spatial iteration differs from ID order. Preserve the original
-            // lowest-ID winner for exact ties, and terrain's priority on ties.
+            // Legacy surface-only fixture fallback. Authored native shapes use
+            // the original graph selection above, not this swept tie policy.
             if (hit && (*hit<nearest || (*hit==nearest && target && i<*target))) {
                 nearest=*hit;target=i;terrain=false;
             }
         };
-        size_t unindexed=0;
-        if(actorBoundsActive_) {
-            const double rx=double(shot.radius)*1.266,ry=double(shot.radius)*.633;
-            const ActorBounds query{std::min(from.x,to.x)-rx,std::min(from.y,to.y)-ry,
-                std::max(from.x,to.x)+rx,std::max(from.y,to.y)+ry};
-            const auto overlaps=[&](const ActorBounds& b) {
-                return !(query.maxX<b.minX || query.minX>b.maxX || query.maxY<b.minY || query.minY>b.maxY);
-            };
-            for(size_t g=0;g<actorBoundGroups_.size();++g)if(overlaps(actorBoundGroups_[g]))
-                for(size_t n=g*16;n<std::min((g+1)*16,actorBoundOrder_.size());++n) {
-                    const auto id=actorBoundOrder_[n];if(overlaps(actorBounds_[id]))check(id);
-                }
-            unindexed=actorBoundsIndexedCount_;
-        }
-        for(size_t i=unindexed;i<actors_.size();++i)check(i);
+        for(const auto i:fallbackCollisionCandidates(from,to,shot.radius))check(i);
     }
-    if(!nativeGrenade.used)shot.position={from.x+(to.x-from.x)*nearest,from.y+(to.y-from.y)*nearest};
+    if(!nativeContact.used)shot.position={from.x+(to.x-from.x)*nearest,from.y+(to.y-from.y)*nearest};
     if(terrain && !target && shot.terrainBounce) {
         TerrainContacts contacts;
         const auto moved=moveOnTerrain(*level_,from.x,from.y,to.x-from.x,to.y-from.y,shot.radius,&contacts,false,overWater);
@@ -1942,7 +1962,7 @@ void GameWorld::updateProjectile(size_t index,float seconds,bool nativeRouting) 
         }
     }
     updateProjectileCreates(shot,from);
-    if(target && !nativeGrenade.used) {
+    if(target && !nativeContact.used) {
         // 43d7d0 moves Ammo to 4069d0's contact coordinate before its
         // radial hit and removal. Keep the accepted swept selection; only
         // use the traced narrow-phase point after the first actor is known.
@@ -1955,7 +1975,7 @@ void GameWorld::updateProjectile(size_t index,float seconds,bool nativeRouting) 
     if (groundImpact || terrain || target || (shot.fuseMs>0 && shot.damageRemainingMs<=0)) {
         if(shot.visual){scene_->objects[*shot.visual].position=shot.position;synchronizeActorCell(*shot.visual);}
         const auto finitePosition=shot.position;
-        if(nativeGrenade.impactSurface)shot.position=*nativeGrenade.impactSurface;
+        if(nativeContact.impactSurface)shot.position=*nativeContact.impactSurface;
         applyAmmoImpact(shot,target,terrain || target.has_value(),radialCenter,seconds*1000.f);
         shot.position=finitePosition;
         shot.alive=false;
@@ -1970,7 +1990,7 @@ void GameWorld::updateProjectile(size_t index,float seconds,bool nativeRouting) 
         spawnExplosions(object,shot.owner,propertyNumber(object.properties,"Altitude"),false,shot.nativeOwnerGeneration);
     }
     if(shot.alive) {
-        if(shot.nativeBareBody){
+        if(shot.nativeBareBody && !nativeContact.motionHandled){
             const auto previous=spiderNativeToSurface(shot.nativeBareBody->motion.center.x,shot.nativeBareBody->motion.center.y);
             shot.nativeBareBody->motion.previousSurface={previous.x,previous.y};
             const auto current=spiderSurfaceToNative(shot.position.x,shot.position.y);
@@ -1978,7 +1998,7 @@ void GameWorld::updateProjectile(size_t index,float seconds,bool nativeRouting) 
         }
         synchronizeBareAmmoCell(shot);
     }
-    if(nativeRouting)syncNavigation(shot);
+    if(nativeRouting || nativeContact.publicationPending)syncNavigation(shot,nativeContact.contactHint);
 }
 void GameWorld::updateProjectiles(float seconds) {
     const bool nativeRouting=std::any_of(projectiles_.begin(),projectiles_.end(),[](const auto& p){return p.guidanceClass.has_value();});
@@ -2321,7 +2341,10 @@ void GameWorld::tick(float seconds,const WorldInput& suppliedInput) {
     if(tripleTarget>0 && surprise_.tripleOffset==0)surprise_.tripleOffset=100;
     surprise_.tripleOffset=std::clamp(surprise_.tripleOffset+(tripleTarget>0?20.f:-50.f)*seconds/.014f,0.f,400.f);
     publishSpatialDirtyActors();
-    actorBounds_.resize(actors_.size());actorBoundsIndexedCount_=actors_.size();
+    prepareCollisionQueries();
+#if VURUS_COLLISION_INDEX_ORACLE
+    if(legacyCollisionIndex_) {
+    actorBounds_.resize(actors_.size());collisionCoverageCount_=actors_.size();
     for(size_t i=0;i<actors_.size();++i) {
         actors_[i].nativeAmmoAbort=false;
         // Stable dead identities stay in saves, but a fully unlinked body has
@@ -2352,8 +2375,10 @@ void GameWorld::tick(float seconds,const WorldInput& suppliedInput) {
             group.maxX=std::max(group.maxX,b.maxX);group.maxY=std::max(group.maxY,b.maxY);
         }
     }
-    actorBoundsActive_=true;
-    struct BoundsScope { bool& active; ~BoundsScope(){active=false;} } boundsScope{actorBoundsActive_};
+    }
+#endif
+    collisionQueriesActive_=true;
+    struct BoundsScope { bool& active; ~BoundsScope(){active=false;} } boundsScope{collisionQueriesActive_};
     elapsedMs_+=seconds*1000;
     actors_[player_].shieldPulse=surprise_.active(SurpriseKind::Shield)?shieldRegenPulse(elapsedMs_):0;
     notifications_.advance(seconds*1000.0);

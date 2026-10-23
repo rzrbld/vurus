@@ -57,8 +57,10 @@ int main(){try{
   if(kind>=2){state.objects[1].properties[0]=val("Sub-type","Item");state.actors[1].hudEnemy=false;state.actors[1].enemyTurn.reset();state.actors[1].ordinaryAI.reset();}
   if(kind==3)state.actors[1].indestructible=true;
   if(kind==4){state.objects[1].properties[0]=val("Sub-type","Decoration");}
-  Projectile shot;shot.classId={3};shot.owner=kind==1?3:0;shot.position=state.objects[1].position;shot.position.x-=5;shot.motionConfig.inertia=true;shot.motion.velocityX=1;shot.motion.velocityZ=-1;shot.motion.magnitude=std::sqrt(2.f);shot.radius=2;shot.damage=0;shot.ignoreOwner=true;
-  vyruz_test::appendProjectile(state,r.scene,shot);need(r.world.restoreSnapshot(state,r.error),r.error);r.ticks(1);
+  Projectile shot;shot.classId={3};shot.owner=kind==1?3:0;shot.position=state.objects[1].position;// Cross into the target from outside its BBOX; an initially overlapping
+  // source is not a native graph traversal/contact admission fixture.
+  shot.position.x-=30;shot.motionConfig.inertia=true;shot.motion.velocityX=15;shot.motion.velocityZ=-15;shot.motion.magnitude=std::sqrt(450.f);shot.radius=2;shot.damage=0;shot.ignoreOwner=true;
+  vyruz_test::appendProjectile(state,r.scene,shot);need(r.world.restoreSnapshot(state,r.error),r.error);r.world.tick(.014f,{});
   const bool hit=kind==0||kind==2;const bool miss=kind==3||kind==4;
   need(r.world.ammoHits()==unsigned(hit)&&r.world.ammoMisses()==unsigned(miss),"contact classification and direct player ownership");
   const auto saved=r.world.snapshot();const auto carry=r.world.carry();need(carry.ammoHits==unsigned(hit)&&carry.ammoMisses==unsigned(miss),"contact totals carried across levels");

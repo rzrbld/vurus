@@ -193,15 +193,62 @@ NativeAmmoCircleQueryResult queryNativeAmmoCircles(const NativeNavGraph& graph,
     }
     result.contact=selector.selected;return result;
 }
+//406e7e..406f6d point-source/circle-target branch. Preserve the independent
+//float spills of dz, center deltas, projection ratio and final X displacement.
+inline std::optional<ContactVelocity> nativeAmmoPointCircle(ContactVelocity previous,
+        ContactVelocity proposed,ContactVelocity center,float radius,bool originalSingular=false) {
+    const long double dx=static_cast<long double>(proposed.x)-previous.x;
+    const float dz=static_cast<float>(static_cast<long double>(proposed.z)-previous.z);
+    const float cx=static_cast<float>(static_cast<long double>(center.x)-previous.x);
+    const long double wideZ=static_cast<long double>(center.z)-previous.z;
+    const float cz=static_cast<float>(wideZ);
+    const long double r2=static_cast<long double>(radius)*radius;
+    if(previous.x==proposed.x && previous.z==proposed.z &&
+       static_cast<long double>(cx)*cx+static_cast<long double>(cz)*cz<=r2)return previous;
+    const long double ratio=(wideZ*dz+static_cast<long double>(cx)*dx)/(static_cast<long double>(dz)*dz+dx*dx);
+    const long double px=ratio*dx,pz=static_cast<long double>(static_cast<float>(ratio))*dz;
+    const long double ex=px-cx,ez=pz-cz,d2=ex*ex+ez*ez;
+    if(r2<d2)return {};
+    const long double factor=1.L-std::sqrt((r2-d2)/(pz*pz+px*px));
+    const float moveX=static_cast<float>(factor*px);
+    ContactVelocity hit{static_cast<float>(static_cast<long double>(moveX)+previous.x),
+                        static_cast<float>(factor*pz+previous.z)};
+    if(!originalSingular && (!std::isfinite(hit.x)||!std::isfinite(hit.z)))return proposed;
+    return hit;
+}
+//406c54..406e1d: point/axis edge crossing, in authored edge order. Point versus
+//rectangle returns the FIRST crossing edge, unlike the circle's closest-edge path.
+inline std::optional<ContactVelocity> nativeAmmoPointEdge(ContactVelocity previous,
+        ContactVelocity proposed,ContactVelocity a,ContactVelocity b) {
+    const auto between=[](float x,float a,float b){return (a<=x&&x<=b)||(b<=x&&x<=a);};
+    const long double dx=static_cast<long double>(proposed.x)-previous.x;
+    const float dz=static_cast<float>(static_cast<long double>(proposed.z)-previous.z);
+    long double ratio;
+    if(a.x==b.x) {
+        if(!between(a.x,previous.x,proposed.x))return {};
+        ratio=(static_cast<long double>(a.x)-previous.x)/dx;
+    }else {
+        if(!between(a.z,previous.z,proposed.z))return {};
+        ratio=(static_cast<long double>(a.z)-previous.z)/dz;
+    }
+    const float zStep=static_cast<float>(static_cast<long double>(static_cast<float>(ratio))*dz);
+    const ContactVelocity hit{static_cast<float>(ratio*dx+previous.x),
+        static_cast<float>(static_cast<long double>(zStep)+previous.z)};
+    // Native x87's C0/C3 tests admit unordered collinear intersections.
+    // Keep that result for the caller's established nonfinite impact boundary.
+    const auto nativeBetween=[](float x,float a,float b){return (!(x<a)&&!(x>b))||(!(x<b)&&!(x>a));};
+    if(a.x==b.x?nativeBetween(hit.z,a.z,b.z):nativeBetween(hit.x,a.x,b.x))return hit;
+    return {};
+}
 // Expanded circle-source query for native point/circle/axis-segment/rectangle
 // targets. Segment endpoints retain their authored order in minimum/maximum;
 // callers must not sort them because406fd0 has distinct descending branches.
 template<class Resolver>
 NativeAmmoCircleQueryResult queryNativeAmmoShapes(const NativeNavGraph& graph,
         size_t sourceNode,NativeAmmoContactObject source,ContactVelocity previous,ContactVelocity proposed,
-        float radius,Resolver&& resolve,bool originalSingular=false) {
+        float radius,Resolver&& resolve,bool originalSingular=false,bool allowPointSource=false) {
     NativeAmmoCircleQueryResult result;
-    if(source.shape!=5){result.unsupportedShape=true;return result;}
+    if(source.shape!=5 && !(allowPointSource&&source.shape==2)){result.unsupportedShape=true;return result;}
     if(sourceNode>=graph.objects.size())return result;
     NativeAmmoContactSelector selector;selector.proposed=proposed;
     const auto traversal=nativeAmmoPhysicalContactTraversal(graph,sourceNode,previous,proposed,radius);
@@ -210,6 +257,19 @@ NativeAmmoCircleQueryResult queryNativeAmmoShapes(const NativeNavGraph& graph,
         const auto target=resolve(reference);
         if(!target || target->disabled || !nativeAmmoContactAdmitted(source,target->filter))continue;
         std::optional<ContactVelocity> point;
+        if(source.shape==2) {
+            switch(target->filter.shape) {
+            case 1:break;
+            case 2:point=target->center;break;
+            case 3:point=nativeAmmoPointEdge(previous,proposed,target->minimum,target->maximum);break;
+            case 4:{const ContactVelocity corners[]={target->minimum,{target->maximum.x,target->minimum.z},target->maximum,{target->minimum.x,target->maximum.z}};
+                for(unsigned n=0;n<4 && !point;++n)
+                    point=nativeAmmoPointEdge(previous,proposed,corners[n],corners[(n+1)%4]);
+                break;}
+            case 5:point=nativeAmmoPointCircle(previous,proposed,target->center,target->radius,originalSingular);break;
+            default:result.unsupportedShape=true;break;
+            }
+        }else
         switch(target->filter.shape) {
         case 1:break;
         case 2:point=target->center;break;

@@ -330,8 +330,12 @@ bool GameWorld::restoreSnapshot(const WorldSnapshot& saved,std::string& error) {
     for(size_t id=0;id<actors_.size();++id)configureOrdinaryEnemyAI(actors_[id],scene_->objects[id],true);
     if(saved.actorCells)actorCells_=*saved.actorCells;else initializeActorCells();
     reserveRuntimeStorage(actorCells_.cell);reserveRuntimeStorage(actorCells_.next);reserveRuntimeStorage(actorCells_.arrivalOrder);
+#if VURUS_COLLISION_INDEX_ORACLE
     reserveRuntimeStorage(actorBounds_);reserveRuntimeStorage(actorBoundGroup_);reserveRuntimeStorage(actorBoundOrder_);
     reserveRuntimeStorage(actorBoundGroups_,(RuntimeActorLimit+15)/16);
+#endif
+    collisionMaximumRadius_=0;collisionCoverageCount_=0;collisionQueriesActive_=false;
+    collisionEligible_.clear();collisionUnlocated_.clear();
     if(saved.nativeAmmoLifecycleKnown)bareAmmoCells_=saved.bareAmmoCells;
     else {
         nextNativeCellOrder_=std::max(nextNativeCellOrder_,actorCells_.nextArrivalOrder);

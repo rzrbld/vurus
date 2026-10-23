@@ -1,0 +1,33 @@
+#define main vyruzApplicationMain
+#include "../src/main.cpp"
+#undef main
+#include "game/save_file.h"
+#include <fstream>
+#include <stdexcept>
+using namespace vyruz;
+namespace vyruz {struct CollisionIndexOracleAccess {static void select(GameWorld& w,bool value){w.legacyCollisionIndex_=!value;}};}
+void check(bool ok,const std::string& error){if(!ok)throw std::runtime_error(error);}
+std::vector<uint8_t> snap(App&a,bool renderer){SaveGame s;s.currentLevel=a.content.mapPath;s.levels[s.currentLevel].world=a.world.snapshot();if(renderer)s.levels[s.currentLevel].render=a.sceneRenderer.capture();std::vector<uint8_t>b;std::string e;check(encodeSave(s,b,e),e);return b;}
+std::vector<uint8_t> pixels(){std::vector<uint8_t>b(640*480*3);glPixelStorei(GL_PACK_ALIGNMENT,1);glReadPixels(0,0,640,480,GL_RGB,GL_UNSIGNED_BYTE,b.data());check(glGetError()==GL_NO_ERROR,"pixels");return b;}
+int main(int argc,char**argv){try{
+ check(argc==3||argc==4,"usage: collision_index_equivalence_audit DATA OUTPUT [TICKS]");const unsigned ticks=argc==4?std::stoul(argv[3]):180;std::filesystem::path out=argv[2];std::filesystem::create_directories(out);check(SDL_Init(SDL_INIT_VIDEO)==0,"SDL");
+ App a,b;SDL_GLContext contexts[2];App* apps[]={&a,&b};
+ for(unsigned i=0;i<2;++i){auto&x=*apps[i];x.retryPersistence=false;x.window=SDL_CreateWindow("Collision index equivalence",0,0,640,480,SDL_WINDOW_OPENGL|SDL_WINDOW_HIDDEN);check(x.window&&x.gfx.init(x.window),"GL");contexts[i]=SDL_GL_GetCurrentContext();x.gfx.setSwapEnabled(false);check(x.vfs.init(argv[1]),"VFS");}
+ std::ofstream log(out/"results.csv");log<<"map,tick,pixel_differences,world_equal,render_state_equal\n";unsigned frames=0,diffFrames=0,stateDiff=0;
+ struct Scene{const char*map;float x,y;};
+ const Scene scenes[]={{"CAVE/T1C2.3DG",5230,1080},{"UNDERGROUND/T2U1.3DG",4870,2180},{"HITEK/T1H1.3DG",3670,2570},{"HITEK/T2H2.3DG",4571,2841}};
+ for(const auto&spec:scenes){
+  for(unsigned i=0;i<2;++i){auto&x=*apps[i];SDL_GL_MakeCurrent(x.window,contexts[i]);check(loadLevelData(x,spec.map,nullptr,false,false,false,1),x.loadError);x.presentation.close();x.menu.close(x.paused);x.paused=false;x.world.setDebugGodMode(true);x.world.debugFillAmmo();x.world.setPlayerPosition(spec.x,spec.y);x.sceneRenderer.setNativeDrawCells(true);CollisionIndexOracleAccess::select(x.world,i==1);}
+  for(unsigned tick=0;tick<ticks;++tick){std::vector<uint8_t> pic[2];
+   for(unsigned i=0;i<2;++i){auto&x=*apps[i];SDL_GL_MakeCurrent(x.window,contexts[i]);x.previousPositions.clear();for(const auto&o:x.content.objects)x.previousPositions.push_back(o.position);WorldInput input;input.movement.forward=(tick/120)%2?1:0;input.fire=tick<600&&std::string(spec.map)!="HITEK/T2H2.3DG";x.world.setPlayerDirection((tick/30)%24);bindEffectCamera(x);x.world.tick(1.f/60,input);advanceSceneAnimation(x,1000./60,x.world.elapsedMilliseconds());check(!x.renderFailed,"animation");for(auto[id,rev]:x.sceneRenderer.finishedGates(x.world.actors()))x.world.finishGateAnimation(id,rev);for(auto id:x.sceneRenderer.finishedEffects(x.world.actors()))x.world.expireVisual(id);auto pos=x.world.playerPosition();x.worldX=pos.x;x.worldY=pos.y;x.motion.direction=x.world.player().direction;render(x,1);pic[i]=pixels();x.world.takeAudioEvents();x.sceneRenderer.takeAudioCues();}
+   const bool equal=snap(a,false)==snap(b,false);check(equal,"World diverged "+std::string(spec.map)+" tick"+std::to_string(tick));size_t changed=0;for(size_t n=0;n<pic[0].size();n+=3)changed+=pic[0][n]!=pic[1][n]||pic[0][n+1]!=pic[1][n+1]||pic[0][n+2]!=pic[1][n+2];bool re=snap(a,true)==snap(b,true);check(re,"Renderer state diverged");check(changed==0,"Pixels diverged");diffFrames+=changed>0;stateDiff+=!re;++frames;log<<spec.map<<','<<tick<<','<<changed<<','<<equal<<','<<re<<'\n';
+   if(tick+1==ticks||changed&&diffFrames==1){for(unsigned i=0;i<2;++i){auto&x=*apps[i];SDL_GL_MakeCurrent(x.window,contexts[i]);check(saveScreenshot((out/(std::string(i?"native-":"baseline-")+std::to_string(frames)+".ppm")).c_str(),640,480),"capture");}}
+   if(tick==90){
+    for(unsigned i=0;i<2;++i){auto&x=*apps[i];SDL_GL_MakeCurrent(x.window,contexts[i]);SaveGame saved,decoded;saved.currentLevel=x.content.mapPath;saved.levels[saved.currentLevel]={x.world.snapshot(),x.sceneRenderer.capture()};std::string e;auto path=(out/("checkpoint-"+std::to_string(i)+".vzs")).string();check(writeSaveFile(path,saved,e)&&readSaveFile(path,decoded,e),e);const auto& level=decoded.levels.at(saved.currentLevel);check(x.world.restoreSnapshot(level.world,e),e);check(x.sceneRenderer.restore(level.render,e),e);}
+    check(snap(a,false)==snap(b,false),"World differs after file reload");
+   }
+  }
+ }
+ std::cout<<"frames="<<frames<<" pixel_diff_frames="<<diffFrames<<" renderer_state_diff_frames="<<stateDiff<<" World byte-equal throughout\n";
+ return 0;
+}catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}

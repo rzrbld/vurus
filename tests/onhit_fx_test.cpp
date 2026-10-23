@@ -16,7 +16,8 @@ static SceneContent fixture(){
  const auto add=[&](std::string name,std::vector<TextNode> p){ObjectClass c;c.id={unsigned(s.classes.size())};c.name=name;c.properties=p;c.properties.push_back(value("Managed","1"));c.behaviours={"Fixed"};s.classes.push_back(c);};
  add("Player",{block("Energy",{value("Initial","1000")})});s.classes[0].behaviours={"Player"};
  add("Target",{value("Bounding-box-size","10"),block("Energy",{value("Initial","100000")})});
- add("Ammo",{block("TYPE",{value("Hit-fx","Impact")},"Ammo")});
+ // Give the visual body the same point BBOX as its Projectile adapter.
+ add("Ammo",{value("Sub-type","Ammo"),value("Bounding-box-size","1"),block("TYPE",{value("Hit-fx","Impact")},"Ammo")});
  add("Impact",{block("TYPE",{},"FX")});add("Bullet-Ground-Impact",{block("TYPE",{},"FX")});
  add("Water-Splash",{block("TYPE",{},"FX")});
  place(s,{0},{100,100});s.player=ObjectId{0};return s;
@@ -55,7 +56,7 @@ static Result run(SceneContent s,ClassId ammo,int mode,float altitude=24,bool vi
  // exercises the shipped Grenade's separate negative-water-halfwave path.
  w.tick(1.f/hz,{});
  const bool rebound=mode==1&&!w.projectiles().empty()&&w.projectiles()[0].terrainBounce;
- need(w.projectiles().empty()||rebound,"test projectile terminates: "+s.classes[ammo.value].name+" mode="+std::to_string(mode)+" hz="+std::to_string(hz));
+ need(w.projectiles().empty()||rebound,"test projectile terminates: "+s.classes[ammo.value].name+" mode="+std::to_string(mode)+" hz="+std::to_string(hz)+" visual="+std::to_string(visual)+" subtype="+propertyText(s.classes[ammo.value].properties,"Sub-type")+" owner="+std::to_string(owner));
  if(roundtrip){SaveGame game;game.currentLevel=s.mapPath;game.levels[s.mapPath].world=w.snapshot();std::vector<uint8_t>b;SaveGame decoded;
   need(encodeSave(game,b,e)&&decodeSave(b,decoded,e),e);need(w.restoreSnapshot(decoded.levels.at(s.mapPath).world,e),e);}
  auto result=w.snapshot();return {std::move(s),std::move(result)};
@@ -86,7 +87,10 @@ static void unit(){
  expect(run(fixture(),{2},3,-3,false),"Bullet-Ground-Impact",-3,0);
  s=fixture();s.classes[3].properties.clear();need(effects(run(s,{2},0)).empty(),"Hit-fx requires TYPE FX");
  s=fixture();s.classes[3].sprite.path="COMMON/THING/IMPACT.GAF";expect(run(s,{2},0),"Impact",24,0);
- for(const auto& kind:{"FX","Item","Lift","Gate"}){s=fixture();s.classes[2].properties.push_back(value("Sub-type",kind));need(effects(run(s,{2},0)).empty(),"excluded source subtype");}
+ // Non-Ammo bodies (notably FX/shape1) cannot be native projectile contact
+ // sources. Ground/fuse termination exercises the same subtype rejection at
+ // the effect boundary without inventing a collidable FX body.
+ for(const auto& kind:{"FX","Item","Lift","Gate"}){s=fixture();s.classes[2].properties.push_back(value("Sub-type",kind));need(effects(run(s,{2},3,0)).empty(),"excluded source subtype");}
  s=fixture();s.classes[2].properties.push_back(value("Vertical-Bounce","1"));
  const auto splash=run(s,{2},7);const auto splashIds=effects(splash);need(splashIds.size()==1,"bounced grenade emits hyphenated Water-Splash");
  need(splash.scene.classes[splash.scene.objects[splashIds[0]].classId.value].name=="Water-Splash"&&!splash.scene.objects[splashIds[0]].owner,"separate grenade water disposal creates ownerless splash");
