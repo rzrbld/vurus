@@ -114,10 +114,18 @@ std::optional<double> rss() {
 void sampleMemory(bench::Result& result) {
     if (auto value = rss()) result.sampledPeakRssMiB = std::max(result.sampledPeakRssMiB.value_or(0), *value);
 }
-bool cancelRequested(App& a) {
+bool cancelRequested(App& a, bench::Report& report) {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         a.controller.event(event);
+        if (event.type == SDL_WINDOWEVENT && event.window.windowID == SDL_GetWindowID(a.window) &&
+            (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED || event.window.event == SDL_WINDOWEVENT_RESIZED)) {
+            int width = 0, height = 0; SDL_GetWindowSize(a.window, &width, &height);
+            if (width > 0 && height > 0) a.gfx.resize(width, height);
+            SDL_GL_GetDrawableSize(a.window, &width, &height);
+            if (width != report.drawableWidth || height != report.drawableHeight)
+                nonstandard(report, "drawable size changed during benchmark");
+        }
         if (event.type == SDL_QUIT) { benchQuitRequested=true; return true; }
         if (event.type == SDL_KEYDOWN && !event.key.repeat && event.key.keysym.sym == SDLK_ESCAPE) return true;
         if (event.type == SDL_CONTROLLERBUTTONDOWN && event.cbutton.button == SDL_CONTROLLER_BUTTON_B) return true;
@@ -140,7 +148,7 @@ void initialize(Session& session, const std::string& data, bench::Report& report
 #endif
     a.options = report.options; a.retryPersistence = false;
     a.window = SDL_CreateWindow("Vurus benchmark", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        a.options.width, a.options.height, SDL_WINDOW_OPENGL);
+        a.options.width, a.options.height, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     require(a.window && a.gfx.init(a.window), std::string("Graphics initialization failed: ") + SDL_GetError());
     SDL_ShowCursor(SDL_DISABLE);
     require(a.vfs.init(data), a.vfs.error());
@@ -149,7 +157,19 @@ void initialize(Session& session, const std::string& data, bench::Report& report
     a.audio.device().setMasterVolume(.7f);
     const char* driver = SDL_GetCurrentAudioDriver(); report.audioBackend = driver ? driver : "unavailable";
     if (!driver || !std::strcmp(driver, "dummy") || !std::strcmp(driver, "disk")) nonstandard(report, "test or unavailable audio backend");
-    require(applyOptionsRuntime(a, a.options, error), "Cannot apply benchmark options: " + error);
+    bool displayFailure = false;
+    bool applied = applyOptionsRuntime(a, a.options, error, true, &displayFailure);
+    if (!applied && displayFailure) {
+        int width = 0, height = 0; SDL_GetWindowSize(a.window, &width, &height);
+        if (bench::useExistingWindowSize(a.options, width, height)) {
+            std::fprintf(stderr, "benchmark: requested window size unavailable; using %dx%d for this run\n", width, height);
+            applied = applyOptionsRuntime(a, a.options, error, false);
+        }
+    }
+    require(applied, "Cannot apply benchmark options: " + error);
+    // Report the effective geometry, including native fixed-display fallback.
+    // The preset marker and the default 640x480 comparability check remain intact.
+    report.options.width = a.options.width; report.options.height = a.options.height;
     report.swapInterval = SDL_GL_GetSwapInterval();
     SDL_GL_GetDrawableSize(a.window, &report.drawableWidth, &report.drawableHeight);
     if (a.gfx.vsyncEnabled() || report.swapInterval != 0) nonstandard(report, "driver VSync enabled");
@@ -193,7 +213,7 @@ bool runScene(Session& session, const bench::Scene& spec, size_t index, bench::R
     for (auto& sample : samples) sample.reserve(report.measured);
     const int steps = report.warmup + report.measured;
     for (int tick = 0; tick < steps; ++tick) {
-        if (cancelRequested(a)) return false;
+        if (cancelRequested(a, report)) return false;
         if (tick % 600 == 0) {
             a.world.debugFillAmmo();
             if (spec.generatorTour) {
@@ -353,8 +373,13 @@ int runBenchmark(int argc, char** argv, bool returnToMenu=false) {
                 SDL_Event event; bool done = false;
                 while (!done && SDL_WaitEvent(&event)) {
                     if (event.type == SDL_QUIT) { benchQuitRequested=true; done=true; }
-                    if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_EXPOSED)
+                    if (event.type == SDL_WINDOWEVENT &&
+                        (event.window.event == SDL_WINDOWEVENT_EXPOSED || event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
+                         event.window.event == SDL_WINDOWEVENT_RESIZED)) {
+                        int width = 0, height = 0; SDL_GetWindowSize(app.window, &width, &height);
+                        if (width > 0 && height > 0) app.gfx.resize(width, height);
                         resultsScreen(app, report, runDirectory, returnToMenu);
+                    }
                     if (event.type == SDL_KEYDOWN && !event.key.repeat &&
                         (event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_ESCAPE)) done = true;
                     if (event.type == SDL_CONTROLLERBUTTONDOWN &&

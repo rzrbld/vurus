@@ -26,6 +26,21 @@ int main() {
     const auto gles = resolveOptions(&menu, true);
     assert(gles.width == 1920 && gles.groundDetails && !gles.crt && !gles.crtRetro && !gles.crtBright);
     assert(!gles.fxaa && !gles.smaa && !gles.bloom && !gles.sharpen);
+    auto native = resolveOptions(&menu, true);
+    native.windowMode = 0;
+    const auto nativeBefore = native;
+    assert(useExistingWindowSize(native, 480, 320));
+    assert(native.width == 480 && native.height == 320);
+    auto geometryOnly = nativeBefore; geometryOnly.width = 480; geometryOnly.height = 320;
+    assert(native == geometryOnly && menu == snapshot);
+    assert(!useExistingWindowSize(native, 480, 320));
+    assert(!useExistingWindowSize(native, 0, 320));
+    assert(!useExistingWindowSize(native, 480, -1));
+    for (int mode : {1, 2}) {
+        native.windowMode = mode; const auto unchanged = native;
+        assert(!useExistingWindowSize(native, 640, 480) && native == unchanged);
+    }
+    native.windowMode = 3; assert(useExistingWindowSize(native, 640, 480));
     std::vector<double> samples;
     for (int n = 100; n >= 1; --n) samples.push_back(n);
     const auto stats = summarize(samples);

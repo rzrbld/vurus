@@ -96,6 +96,16 @@ all effective visual settings, requested/actual size and the preset; compare
 scores only when those settings and actual resolution match. JSON schema3 records
 these fields plus the Burner crossfire workload and overlapping-fire counters.
 
+The benchmark window is resizable, like the game. Fixed-display backends that
+refuse the requested window size can use their existing native window instead;
+reports record the effective dimensions without changing the menu settings file.
+On a 480×320 handheld, use **User Settings** for a native-resolution benchmark.
+Scoring still requires the driver to honor VSync off. The
+**Default** preset still requests 640×480; if the display cannot provide that,
+the run completes as nonstandard without a comparable default score. Resizing
+the window during measurement also marks the run nonstandard. Resizing the
+finished results screen does not change the saved report.
+
 ## Score and workload
 
 **1,000 points = 60 complete benchmark steps per second.** Each scene contributes

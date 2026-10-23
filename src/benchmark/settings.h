@@ -23,4 +23,13 @@ inline GameOptions resolveOptions(const GameOptions* menu, bool gles) {
     if (gles) out.crt = out.crtRetro = out.crtBright = out.fxaa = out.smaa = out.bloom = out.sharpen = false;
     return out;
 }
+// Fixed-display SDL backends can create a usable native-sized window while
+// refusing the requested window size. Retry only windowed size failures; do
+// not hide unsupported fullscreen modes or mutate the saved menu settings.
+inline bool useExistingWindowSize(GameOptions& options, int width, int height) {
+    if ((options.windowMode != 0 && options.windowMode != 3) || width <= 0 || height <= 0 ||
+        (options.width == width && options.height == height)) return false;
+    options.width = width; options.height = height;
+    return true;
+}
 } // namespace vyruz::benchmark
