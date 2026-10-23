@@ -44,11 +44,11 @@ std::vector<SceneAudioCue> SceneRenderer::takeAudioCues() {
     auto result=std::move(audioCues_);audioCues_.clear();queuedAudioStarts_=0;return result;
 }
 void SceneRenderer::queueAudio(Channel& c,const GafSubframe& frame) {
-    if(c.shadow || !(frame.command&1) || !frame.sample || (frame.command&0x10000) || queuedAudioStarts_>=256)return;
+    if(c.shadow || !(frame.command&1) || !frame.sample || queuedAudioStarts_>=256)return;
     const auto* selected=c.generatorBank?c.generatorBank:c.bank;
     for(const auto& [path,bank]:banks_)if(&bank==selected){
         if(!c.audioIdentity){if(!nextAudioIdentity_)++nextAudioIdentity_;c.audioIdentity=nextAudioIdentity_++;}
-        audioCues_.push_back({c.object,path,frame.sample,SceneAudioCueKind::Play,c.audioIdentity});
+        audioCues_.push_back({c.object,path,frame.sample,SceneAudioCueKind::Play,c.audioIdentity,{},bool(frame.command&0x10000)});
         ++queuedAudioStarts_;break;
     }
 }
@@ -386,10 +386,10 @@ void SceneRenderer::advanceTerrain(double milliseconds,const EnemyAnimationView&
         if(c.audioIdentity && !(current.flags&8) && current.remaining>milliseconds)
             audioCues_.push_back({SIZE_MAX,{},0,SceneAudioCueKind::Held,c.audioIdentity,source});
         c.cursor.advance(c.bank->animation.sequences[c.sequence-1],milliseconds,false,[&](const auto& frame) {
-            if(!(frame.command&1) || !frame.sample || (frame.command&0x10000) || queuedAudioStarts_>=256)return;
+            if(!(frame.command&1) || !frame.sample || queuedAudioStarts_>=256)return;
             if(!c.audioIdentity){if(!nextAudioIdentity_)++nextAudioIdentity_;c.audioIdentity=nextAudioIdentity_++;}
             for(const auto& [path,bank]:banks_)if(&bank==c.bank) {
-                audioCues_.push_back({SIZE_MAX,path,frame.sample,SceneAudioCueKind::Play,c.audioIdentity,source});
+                audioCues_.push_back({SIZE_MAX,path,frame.sample,SceneAudioCueKind::Play,c.audioIdentity,source,bool(frame.command&0x10000)});
                 ++queuedAudioStarts_;break;
             }
         });

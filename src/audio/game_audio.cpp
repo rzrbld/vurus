@@ -48,7 +48,7 @@ AudioClipPtr GameAudio::preload(const std::string& path,const ContentReader& rea
     if(!result)diagnostics_.push_back("Unavailable audio: "+path);
     clips_[key]=result;return result;
 }
-bool GameAudio::load(const SceneContent& scene,const ContentReader& read,const std::string& language,std::string& error,const NativeTileBodyCatalog* terrain) {
+bool GameAudio::load(const SceneContent& scene,const ContentReader& read,const std::string& language,std::string& error,const NativeTileBodyCatalog* terrain,const std::string& sharedSampleBank) {
     reset();diagnostics_.clear();weapons_.clear();language_=folded(language)=="french"?"FRENCH":"ENGLISH";
     std::set<std::string> neededClips,neededBanks;
     auto keepClip=[&](const std::string& path,const ContentReader& reader){
@@ -95,29 +95,35 @@ bool GameAudio::load(const SceneContent& scene,const ContentReader& read,const s
         if(!path.empty())paths.insert(path);
         return true;
     });
-    for(const auto& path:paths) {
-        const auto key=normalized(path);neededBanks.insert(key);if(banks_.contains(key))continue;
+    const auto keepBank=[&](const std::string& path) {
+        const auto key=normalized(path);neededBanks.insert(key);if(banks_.contains(key))return;
         std::vector<uint8_t> bytes;std::vector<Wave> waves;std::vector<AudioClipPtr> clips;
         if(!read(path,bytes)||!decodeGafSamples(bytes,waves,error))diagnostics_.push_back("Unavailable embedded audio: "+path+" "+error);
-        else for(auto& wave:waves) clips.push_back(makeAudioClip(std::move(wave),error));
+        else {decodedSampleBanks_.insert(key);for(auto& wave:waves)clips.push_back(makeAudioClip(std::move(wave),error));}
         banks_[key]=std::move(clips);
-    }
+    };
+    for(const auto& path:paths)keepBank(path);
     if(scene.player){
         const std::string path="COMMON/DATA/PANEL/PANEL.GAF",key=normalized(path);
         neededBanks.insert(key);
-        if(!banks_.contains(key)){
+        if(!banks_.contains(key) || shieldSequence_.subframes.empty()){
             std::vector<uint8_t> bytes;std::vector<Wave> waves;GafAnimation animation;
             if(read(path,bytes)&&decodeGafSamples(bytes,waves,error)&&decodeGafAnimation(bytes,animation,GafDecodeMode::Metadata)&&!animation.sequences.empty()){
                 std::vector<AudioClipPtr> samples;
                 for(auto& wave:waves)samples.push_back(makeAudioClip(std::move(wave),error));
-                banks_[key]=std::move(samples);shieldSequence_=animation.sequences.front();
+                decodedSampleBanks_.insert(key);banks_[key]=std::move(samples);shieldSequence_=animation.sequences.front();
             }else diagnostics_.push_back("Unavailable HUD audio: "+path);
         }
     }
+    // Bind after the HUD's metadata load, including when it is the shared bank.
+    if(!sharedSampleBank.empty())keepBank(sharedSampleBank);
     // Preserve shared samples needed by this map, release earlier-map and
     // previous-language PCM. Re-loading the same map still needs no I/O.
     std::erase_if(clips_,[&](const auto& entry){return !neededClips.contains(entry.first);});
     std::erase_if(banks_,[&](const auto& entry){return !neededBanks.contains(entry.first);});
+    std::erase_if(decodedSampleBanks_,[&](const auto& key){return !neededBanks.contains(key);});
+    const auto sharedKey=normalized(sharedSampleBank);
+    sharedSampleBank_=decodedSampleBanks_.contains(sharedKey)?sharedKey:std::string{};
     if(!scene.player)shieldSequence_={};
     fullShieldAlarm_.reset(shieldSequence_);
     error.clear();return true;
@@ -265,7 +271,11 @@ void GameAudio::consume(GameWorld& world,const SceneContent& scene,const std::ve
             continue;
         }
         if(!cue.sample||(!cue.source&&(cue.object>=scene.objects.size()||cue.object>=world.actors().size())))continue;
-        const auto bank=banks_.find(normalized(cue.bankPath));if(bank==banks_.end()||cue.sample>bank->second.size())continue;
+        // 45ea70: use shared only when registered; otherwise use local even
+        // for command0x10000. An invalid index in a present shared bank does
+        // not fall back to local. All samples were cached during load().
+        const auto key=cue.sharedBank&&!sharedSampleBank_.empty()?sharedSampleBank_:normalized(cue.bankPath);
+        const auto bank=banks_.find(key);if(bank==banks_.end()||cue.sample>bank->second.size())continue;
         const auto source=cue.source?*cue.source:audioPosition(scene,world,cue.object);
         const int volume=nativeSpatialVolume({},source,listener);if(volume<=0)continue;
         //417aa0 initializes kind4's sample mask and priority directly, without

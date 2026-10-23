@@ -38,6 +38,7 @@ struct SceneAudioCue {
     // Transient ANM identity, independent of object/vector addresses and saves.
     uint64_t animation=0;
     std::optional<std::array<float,3>> source; // Compact scenery has no ActorState.
+    bool sharedBank=false; // ANM command0x10000; resolved by the audio consumer.
 };
 class SceneRenderer {
 public:

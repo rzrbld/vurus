@@ -12,6 +12,7 @@
 #include <vector>
 #include <array>
 #include <optional>
+#include <set>
 namespace vyruz {
 class GameWorld;
 struct SceneAudioCue;
@@ -19,7 +20,7 @@ struct NativeTileBodyCatalog;
 class GameAudio {
 public:
     AudioDevice& device() { return device_; }
-    bool load(const SceneContent&, const ContentReader&, const std::string& language, std::string& error,const NativeTileBodyCatalog* terrain=nullptr);
+    bool load(const SceneContent&, const ContentReader&, const std::string& language, std::string& error,const NativeTileBodyCatalog* terrain=nullptr,const std::string& sharedSampleBank={});
     void reset();
     void consume(GameWorld&, const SceneContent&, const std::vector<SceneAudioCue>&);
     void cue(const std::string& filename, bool voice=false);
@@ -57,6 +58,9 @@ private:
     std::string language_="ENGLISH";
     std::map<std::string,AudioClipPtr> clips_;
     std::map<std::string,std::vector<AudioClipPtr>> banks_;
+    // A successfully decoded empty bank is present; a failed bank is absent.
+    std::set<std::string> decodedSampleBanks_;
+    std::string sharedSampleBank_; // Explicit binding; no inferred resource path.
     std::map<std::string,WeaponSound> weapons_;
     std::map<size_t,NativeWeaponAudioState> firing_;
     std::vector<size_t> weaponActors_;
