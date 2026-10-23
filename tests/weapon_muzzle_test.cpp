@@ -11,10 +11,10 @@ using namespace vyruz;
 static void need(bool b,const std::string& why){if(!b)throw std::runtime_error(why);}
 static TextNode value(std::string k,std::string v){TextNode n;n.key=std::move(k);n.kind=TextKind::Assignment;n.values={std::move(v)};return n;}
 static TextNode block(std::string k,std::vector<TextNode> c,std::string type={}){TextNode n;n.key=std::move(k);n.kind=TextKind::Block;n.children=std::move(c);if(!type.empty())n.arguments={std::move(type)};return n;}
-static SceneContent fixture(bool unique=false,float start=250,float gap=0){
+static SceneContent fixture(bool unique=false,float start=250,float gap=0,int sides=3,bool alternate=false){
  SceneContent s;s.mapPath="TEST/MUZZLE.3DG";
  ObjectClass player;player.id={0};player.name="Player";player.behaviours={"Player"};player.properties={value("Bounding-box-size","25"),value("Altitude","24"),block("Energy",{value("Initial","1000"),value("Max","1000")}),block("ADD",{value("Name","Gun")},"Weapon"),block("ADD",{value("Name","Bullet"),value("Count","100"),value("Max","100")},"Ammo")};
- ObjectClass gun;gun.id={1};gun.name="Gun";gun.properties={block("TYPE",{value("Ammo","Bullet"),value("Delay","100"),value("Start-distance",std::to_string(start)),value("Weapons-gap",std::to_string(gap)),value("Left-side","1"),value("Right-side","1"),value("Fire-altitude","100"),value("Smoke-fx","Smoke"),value("Smoke-altitude","7")},"Weapon")};
+ ObjectClass gun;gun.id={1};gun.name="Gun";gun.properties={block("TYPE",{value("Ammo","Bullet"),value("Delay","100"),value("Start-distance",std::to_string(start)),value("Weapons-gap",std::to_string(gap)),value("Left-side",sides&1?"1":"0"),value("Right-side",sides&2?"1":"0"),value("Alternated-fire",alternate?"1":"0"),value("Fire-altitude","100"),value("Smoke-fx","Smoke"),value("Smoke-altitude","7")},"Weapon")};
  ObjectClass ammo;ammo.id={2};ammo.name="Bullet";ammo.behaviours={"Straight"};ammo.properties={value("Speed-max","0"),block("TYPE",{value("Ignore-owner","1"),value("Damage-after","50"),value("On-hit","1")},"Ammo")};
  ObjectClass smoke;smoke.id={3};smoke.name="Smoke";smoke.behaviours={"Fixed"};smoke.properties={value("Graphic-update-needed","1"),value("Bounding-box-size","0"),value("Life-time","1000"),value("Uniq-at-xy",unique?"1":"0"),block("TYPE",{},"FX")};
  player.properties.push_back(value("Managed","1"));ammo.properties.push_back(value("Managed","1"));smoke.properties.push_back(value("Managed","1"));
@@ -33,7 +33,7 @@ static void units(){
  for(bool unique:{false,true})for(float gap:{0.f,20.f})for(float start:{0.f,250.f})for(unsigned mode:{0u,0x8000u,0x10000u}){
   auto s=fixture(unique,start,gap);const auto original=s;const auto l=arena();GameWorld w;load(w,s,l);NativeEffectCamera camera;camera.offsetX=-100000;camera.modeFlags=mode;w.setEffectCamera(camera);NativeRandomState expected;
   shot(w);const auto ids=smokeIds(w,s,{3});const size_t count=gap?2:1;need(ids.size()==count&&w.projectiles().size()==count,"one smoke per emitted barrel, even outside camera");
-  for(size_t i=0;i<count;++i){const auto& p=w.projectiles()[i];const auto offset=projectileStartOffset(9,nativeWeaponStartDistance(start,50,50,mode,expected));const float side=gap?(i?-1:1)*gap*.5f:0;const auto h=nativeHeading(9);const auto norm=std::hypot(h.x,h.y);const float nx=h.x/norm,nz=h.y/norm;const ContentPosition pos{1000+offset.x+(-nz-nx)*.8944272f*side,1000+offset.y+(-nz+nx)*.4472136f*side};need(p.position.x==pos.x&&p.position.y==pos.y,"per-barrel native forward offset with accepted player barrel positions");const auto& o=s.objects[ids[i]];need(o.position.x==p.position.x&&o.position.y==p.position.y&&!o.owner,"muzzle product exact point and ownerless");need(w.actors()[ids[i]].projectileAltitude==33,"smoke uses shooter altitude, not Fire-altitude100");need(p.slopeAltitude==100,"independent Ammo Fire-altitude retained");}
+  for(size_t i=0;i<count;++i){const auto& p=w.projectiles()[i];const auto offset=projectileStartOffset(9,nativeWeaponStartDistance(start,50,50,mode,expected));const float side=gap?(i?-1:1)*gap*.5f:0;const auto barrel=projectileBarrelOffset(9,side);const ContentPosition pos{1000+offset.x+barrel.x,1000+offset.y+barrel.y};need(p.position.x==pos.x&&p.position.y==pos.y,"per-barrel native forward offset and original barrel side");const auto& o=s.objects[ids[i]];need(o.position.x==p.position.x&&o.position.y==p.position.y&&!o.owner,"muzzle product exact point and ownerless");need(w.actors()[ids[i]].projectileAltitude==33,"smoke uses shooter altitude, not Fire-altitude100");need(p.slopeAltitude==100,"independent Ammo Fire-altitude retained");}
   need(w.snapshot().nativeWorldRandom.seed==expected.seed&&w.snapshot().nativeWorldRandom.counter==expected.counter,"exact RNG draw count");
   for(auto id:ids)need(w.actors()[id].effect,"muzzle FX participates in renderer animation completion");
   const auto beforeCount=s.objects.size();w.tick(.02f,{});need(s.objects.size()==beforeCount,"release does not produce muzzle smoke");shot(w,.001f);need(s.objects.size()==beforeCount,"cadence-rejected held attempt has no smoke or RNG draw");
@@ -41,6 +41,18 @@ static void units(){
   for(int n=0;n<10;++n)w.tick(.01f,{});need(w.projectiles().empty()&&smokeIds(w,s,{3}).size()==count,"muzzle product outlives expired carrier");
   if(start==250&&gap==0&&mode==0){shot(w);need(smokeIds(w,s,{3}).size()==(unique?1:2),"Uniq-at-xy suppresses exact duplicate only");
    SaveGame saved;std::string e;need(decodeSave(disk(w),saved,e),e);auto clone=original;GameWorld resumed;load(resumed,clone,l);resumed.setEffectCamera(camera);need(resumed.restoreSnapshot(saved.levels.begin()->second.world,e),e);resumed.setDebugEnemyAI(false);resumed.setDebugGodMode(true);for(int n=0;n<120;++n){w.tick(.01f,{});resumed.tick(.01f,{});}need(disk(w)==disk(resumed),"independent smoke disk continuation");need(smokeIds(w,s,{3}).empty(),"independent smoke lifetime expiry");
+  }
+ }
+ // Flame's left-only muzzle and Missile's first-left/second-right alternation
+ // use the universal native barrel transform at every logical heading.
+ for(int heading=0;heading<24;++heading)for(bool alternate:{false,true}) {
+  auto s=fixture(false,250,20,alternate?3:1,alternate);const auto l=arena();GameWorld w;load(w,s,l);w.setPlayerDirection(heading);
+  for(int volley=0;volley<2;++volley) {
+   shot(w);need(w.projectiles().size()==1,"one authored left-only/alternating barrel");
+   const auto start=projectileStartOffset(heading,250);
+   const auto side=projectileBarrelOffset(heading,alternate&&volley? -10.f:10.f);
+   need(w.projectiles().front().position.x==1000+start.x+side.x&&w.projectiles().front().position.y==1000+start.y+side.y,"World native barrel side and order across24 headings");
+   w.tick(.1f,{});
   }
  }
  for(int special=0;special<3;++special){auto s=fixture();if(special==0){s.classes[3].flags.inGround=true;s.classes[3].properties.push_back(value("In-ground","1"));}if(special==1)s.classes[3].properties.erase(std::remove_if(s.classes[3].properties.begin(),s.classes[3].properties.end(),[](const auto&n){return contentNameIs(n.key,"type");}),s.classes[3].properties.end());if(special==2)s.objects[0].position={1,1};const auto l=arena();GameWorld w;load(w,s,l);if(special==2)w.setPlayerDirection(21);shot(w);const auto ids=smokeIds(w,s,{3});need(ids.size()==1&&w.actors()[ids[0]].projectileAltitude==33,"native muzzle producer has no TYPE/ground restriction");if(special==2)need(s.objects[ids[0]].position.x<0,"muzzle smoke is not clamped to terrain extents");}

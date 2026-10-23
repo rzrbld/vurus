@@ -47,9 +47,9 @@ struct ShotPositionOffset { float x=0,y=0; };
 // Zero leaves placement unchanged; the separate native randomized-zero branch
 // needs the shooter's rendered bounds and is not represented by this helper.
 ShotPositionOffset projectileStartOffset(int direction,float distance);
-// 443d0a: positive lateralOffset is the original Left barrel. Enemy-only
-// integration leaves the accepted player multishot presentation unchanged.
-ShotPositionOffset enemyProjectileBarrelOffset(int direction,float lateralOffset);
+// 443d0a: positive lateralOffset is the original Left barrel. Player and
+// enemy emitters share this transform, retaining native barrel order.
+ShotPositionOffset projectileBarrelOffset(int direction,float lateralOffset);
 
 // Confirmed ordinary horizontal solver (438b20). Velocities are internal world
 // displacement per native 14 ms unit; direction must be an internal unit vector.

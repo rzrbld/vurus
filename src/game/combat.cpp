@@ -20,7 +20,7 @@ ShotPositionOffset projectileStartOffset(int direction,float distance) {
     return {table[direction].x*distance,table[direction].y*distance};
 }
 
-ShotPositionOffset enemyProjectileBarrelOffset(int direction,float lateralOffset) {
+ShotPositionOffset projectileBarrelOffset(int direction,float lateralOffset) {
     if(direction<0 || direction>=24 || !std::isfinite(lateralOffset))return {};
     const long double angle=direction*static_cast<long double>(-.2617993950843811f);
     const float cx=static_cast<float>(std::cos(angle)*lateralOffset);

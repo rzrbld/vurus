@@ -1630,9 +1630,8 @@ void GameWorld::fire(size_t id,bool held,bool sweep,std::optional<ContentPositio
         projectile.slopeAltitude=std::trunc(launchAltitude);projectile.slopeHeight=projectile.slopeAltitude;
         float nx=heading.x,nz=heading.y;
         const float norm=std::hypot(nx,nz);nx/=norm;nz/=norm;
-        const auto side=id==player_?ShotPositionOffset{(-nz-nx)*.8944272f*shot.lateralOffset,
-                                                       (-nz+nx)*.4472136f*shot.lateralOffset}
-                                  :enemyProjectileBarrelOffset(firingDirection,shot.lateralOffset);
+        //443d0a: player and enemy barrels use the same native Left/Right transform.
+        const auto side=projectileBarrelOffset(firingDirection,shot.lateralOffset);
         projectile.position={position.x+start.x+origin.x+side.x,
                              position.y+start.y+origin.y+side.y};
         projectile.directionX=nx;projectile.directionZ=nz;

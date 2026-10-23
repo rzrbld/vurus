@@ -48,11 +48,11 @@ int main(){try{
   {4.09229040145874f,7.636313438415527f},
   {7.905696868896484f,6.846531391143799f},
  };
- for(int h=0;h<24;++h){const auto left=enemyProjectileBarrelOffset(h,12.5f),right=enemyProjectileBarrelOffset(h,-12.5f);
+ for(int h=0;h<24;++h){const auto left=projectileBarrelOffset(h,12.5f),right=projectileBarrelOffset(h,-12.5f);
   need(std::abs(left.x-originalLeft[h].x)<.000002f&&std::abs(left.y-originalLeft[h].y)<.000002f,"native all-heading barrel golden values");
   need(right.x==-left.x&&right.y==-left.y,"native opposite barrel signs");
  }
- const auto left=enemyProjectileBarrelOffset(0,12.5f),right=enemyProjectileBarrelOffset(0,-12.5f);
+ const auto left=projectileBarrelOffset(0,12.5f),right=projectileBarrelOffset(0,-12.5f);
  need(std::abs(left.x-11.18034f)<.00001f&&std::abs(left.y-5.59017f)<.00001f,"original left barrel side");
  need(right.x==-left.x&&right.y==-left.y,"original right barrel side");
  WeaponConfig config;config.initialSlope=-.75f;config.slopeStep=.01f;config.delayMs=100;
