@@ -67,7 +67,12 @@ int main(){try{
   r.world.tick(.014f,input);resumed.world.tick(.014f,input);
   const auto after=r.world.snapshot();need(std::abs(after.motion.velocityX-expectedX)<.00001f&&std::abs(after.motion.velocityZ-expectedZ)<.00001f,
    "next native propulsion admits thrust from cache4 even though reflected speed6 exceeds4.5");
-  need(bytes(r.world)==bytes(resumed.world),"Pinball cache/FX disk continuation differs");
+  // Disk saves deliberately remove Surprise effects. Compare two normalized
+  // worlds, independently of the active-Pinball propulsion assertion above.
+  auto normalized=before;normalizeSavedSurprise(normalized);
+  Run normalizedRun(1000,true);normalizedRun.restore(normalized);
+  normalizedRun.world.tick(.014f,input);
+  need(bytes(normalizedRun.world)==bytes(resumed.world),"normalized Pinball cache/FX disk continuation differs");
  }
  {Run r(1000,true);const auto origin=r.world.playerPosition();
   for(unsigned q=0;q<4;++q){const ContentPosition point{origin.x+(q&1?30.f:-30.f),origin.y+(q&2?15.f:-15.f)};
@@ -85,7 +90,12 @@ int main(){try{
  {Run r(-1);need(AmmoImpactNativeTestAccess::responseSkippedWithoutCommand(r.world),"uncommanded stalled contact must not multiply bounce");}
  for(float clearance:{-1.f,0.f,1.f,8.f})for(int heading:{0,3,6,9,15,21}){
   Run r(clearance);r.world.setPlayerDirection(heading);auto s=r.world.snapshot();auto h=nativeHeading(heading);s.motion.velocityX=h.x*40;s.motion.velocityZ=h.y*40;s.motion.magnitude=4;s.motion.thrust=20;r.restore(s);
-  for(int tick=0;tick<1260;++tick){WorldInput input;input.movement.forward=1;input.movement.strafe=tick<300?1:0;const auto before=r.world.playerPosition();r.world.tick(1.f/60,input);const auto after=r.world.playerPosition();need(terrainMoveAllowed(r.level,before.x,before.y,after.x,after.y,25),"Pinball crossed authored corridor wall");const auto speed=r.world.playerNativeSpeed();const auto pos=r.world.playerPosition();need(pos.x>=0&&pos.x<6400&&pos.y>=0&&pos.y<3200,"Pinball bypassed accepted map boundary");need(std::isfinite(speed)&&speed<1000,"narrow-corridor response ran away (this fixture previously exceeded65536)");}
+  for(int tick=0;tick<1260;++tick){WorldInput input;input.movement.forward=1;input.movement.strafe=tick<300?1:0;const auto before=r.world.playerPosition();r.world.tick(1.f/60,input);const auto after=r.world.playerPosition();
+   // This fixture protects the accepted active-Pinball swept containment.
+   // After expiry, ordinary Player deliberately uses original shape queries;
+   // an initially penetrating rectangle can admit departure under that policy.
+   // Ordinary contact selection/crossing is covered by the native World matrix.
+   if(r.world.surprise().active(SurpriseKind::Pinball))need(terrainMoveAllowed(r.level,before.x,before.y,after.x,after.y,25),"Pinball crossed authored corridor wall");const auto speed=r.world.playerNativeSpeed();const auto pos=r.world.playerPosition();need(pos.x>=0&&pos.x<6400&&pos.y>=0&&pos.y<3200,"Pinball bypassed accepted map boundary");need(std::isfinite(speed)&&speed<1000,"narrow-corridor response ran away (this fixture previously exceeded65536)");}
   need(!r.world.surprise().active(SurpriseKind::Pinball),"effect expiry must keep advancing during contacts");
  }
  // A single endpoint can land beyond both walls. Sweep must still reject it.

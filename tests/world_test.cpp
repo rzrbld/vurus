@@ -558,6 +558,9 @@ int main() try {
     ObjectClass area;area.id={static_cast<uint32_t>(scene.classes.size())};area.name="Saving-Plot-Area";
     area.properties={assignment("Saving-zone","1"),assignment("Bounding-box-size","64"),block("TYPE",{assignment("Only-for-player","1")},"Item")};
     scene.classes.push_back(area);scene.objects.resize(1);place(terminal.id.value,1000,1000);place(area.id.value,1000,1000);
+    // Authored Saving-Plot-Area is invisible; graph admission consumes the
+    // resolved placement flag, independently of its saving-role sensor.
+    scene.objects.back().flags.invisible=true;
     check(loadFixture(world,scene,level,error),"saving terminal fixture");
     check(world.notifications().savingPrices().size()==1 && world.notifications().savingPrices().front().notice.text=="Save your game for 100000 $",
           "terminal registers authored fee label");

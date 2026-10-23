@@ -37,6 +37,12 @@ void GameWorld::cancelSurprise() {
         if(surprise_.kind==SurpriseKind::Ammo)restoreAmmoBaseline(p.ammo,surprise_.savedAmmo);
         if(surprise_.kind==SurpriseKind::Drone) {
             scene_->objects[player_].position=surprise_.droneOrigin;
+            // The ordinary Player now retains native contact coordinates.
+            // Restore both spaces when the Drone returns to its parked body.
+            if(auto* history=p.nativeMotionHistory()) {
+                const auto n=spiderSurfaceToNative(surprise_.droneOrigin.x,surprise_.droneOrigin.y);
+                *history={{n.x,n.y},surprise_.droneOrigin};
+            }
             synchronizeActorCell(player_);
             scene_->objects[player_].flags.invisible=surprise_.originalInvisible;
             p.solid=surprise_.originalSolid && p.alive;

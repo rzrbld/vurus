@@ -261,9 +261,11 @@ ContactVelocity GameWorld::contactVelocity(size_t actor) const {
 ContactVelocity GameWorld::effectiveContactVelocity(size_t actor) const {
     //436ac0 also applies to Vyruz: a blocked commanded visit derives its
     //effective collision velocity from thrust, never the prior amplified bounce.
-    if(actor==player_ && surprise_.active(SurpriseKind::Pinball)) {
+    if(actor==player_) {
         const auto p=scene_->objects[actor].position;
-        if(p.x==nativePlayerPreviousSurface_.x && p.y==nativePlayerPreviousSurface_.y && playerMoveCommanded_) {
+        const auto* history=surprise_.active(SurpriseKind::Pinball)?nullptr:actors_[actor].nativeMotionHistory();
+        const auto previous=history?history->previousSurface:nativePlayerPreviousSurface_;
+        if(p.x==previous.x && p.y==previous.y && playerMoveCommanded_) {
             const auto h=nativeHeading(motion_.direction);return {h.x*motion_.thrust,h.y*motion_.thrust};
         }
     }
@@ -282,9 +284,7 @@ void GameWorld::setContactVelocity(size_t actor,ContactVelocity v) {
     if(actor==player_) {
         motion_.velocityX=v.x;motion_.velocityZ=v.z;
         //4367d0/436dd0 leave +148 at the propulsion result.438b20 reads
-        //that cached magnitude for the NEXT acceleration decision. Preserve
-        //the accepted ordinary collision adapter outside active Pinball.
-        if(!surprise_.active(SurpriseKind::Pinball))motion_.magnitude=std::hypot(v.x,v.z);
+        //that cache on the next acceleration decision, also for ordinary Player.
     }
     else {
         auto& a=actors_[actor];a.contactVelocity=v;
@@ -683,15 +683,19 @@ TerrainDisplacement GameWorld::move(size_t actor,float dx,float dy,bool physical
     markSpatialDirty(actor);
     lastSpiderSeparated_=false;
     auto& p=scene_->objects[actor].position;const auto from=p;
+    const ContentPosition surfaceStep{dx,dy};
     const auto radius=actors_[actor].radius;
     TerrainContacts terrain;
     std::optional<ContentPosition> pinballBouncePoint;
     ContentPosition pinballBounceSource{};
     const bool nativeSpider=physical && nativeDamageSubtype(actor)==0x1f;
     const bool nativePlayerPinball=actor==player_ && surprise_.active(SurpriseKind::Pinball);
-    // Keep the accepted continuous player wall sweep. Native endpoint body
-    // queries can miss a thin wall entirely under amplified Pinball momentum.
-    const bool nativeBody=physical && actor!=player_ && actors_[actor].contactConfig.nativeEnemy;
+    // Ordinary authored Player uses the original graph's shape-specific selection,
+    // including 407360 edge crossing. Retain accepted Pinball containment and
+    // surface-only fixture adapters; neither is claimed as this migration.
+    const bool nativePlayer=physical && actor==player_ && !nativePlayerPinball && level_->hasTerrainCollision &&
+        (!level_->nativeNavigationDecor.empty() || level_->collisionEdges.empty());
+    const bool nativeBody=physical && (nativePlayer || (actor!=player_ && actors_[actor].contactConfig.nativeEnemy));
     const bool continuing=physical && actors_[actor].nativeAmmoContinuation;
     const auto convertedStep=surfaceToNative(dx,dy);
     const ContactVelocity rawStep=nativeStep?*nativeStep:ContactVelocity{convertedStep.x,convertedStep.y};
@@ -704,7 +708,7 @@ TerrainDisplacement GameWorld::move(size_t actor,float dx,float dy,bool physical
     }
     if(nativeBody && !actors_[actor].nativeMotionHistory()) {
         const auto n=spiderSurfaceToNative(p.x,p.y);
-        actors_[actor].nativeMotion=SpiderMotionHistory{{n.x,n.y},p};
+        actors_[actor].nativeMotion=SpiderMotionHistory{{n.x,n.y},actor==player_?nativePlayerPreviousSurface_:p};
     }
     auto* history=nativeBody || continuing?actors_[actor].nativeMotionHistory():nullptr;
     Displacement source{},proposed{},proposedSurface{};
@@ -712,6 +716,12 @@ TerrainDisplacement GameWorld::move(size_t actor,float dx,float dy,bool physical
         source={history->center.x,history->center.y};
         const auto step=Displacement{rawStep.x,rawStep.z};
         proposedSurface=spiderNativeToSurface(source.x+step.x,source.y+step.y);
+        if(nativePlayer) {
+            //441884..441960: clamp the Player's proposed surface center before
+            //41b4b0 rebuilds proposed native bounds; no radius-dependent sweep.
+            proposedSurface.x=std::clamp(proposedSurface.x,1.f,level_->mapW*64.f-1.f);
+            proposedSurface.y=std::clamp(proposedSurface.y,1.f,level_->mapH*32.f-1.f);
+        }
         proposed=spiderSurfaceToNative(proposedSurface.x,proposedSurface.y);
         dx=proposedSurface.x-p.x;dy=proposedSurface.y-p.y;
         if(continuing){
@@ -758,9 +768,15 @@ TerrainDisplacement GameWorld::move(size_t actor,float dx,float dy,bool physical
     }
     if(physical && (nativeBody || actor==player_ || actors_[actor].contactConfig.enabled))
         sharedContact=queryNativeBodyContacts(actor,oldBody,nextBody,radius);
-    // Accepted player/passive movement stays unchanged when the local common
-    //query has no Ammo contact. When Ammo competes, consume the single winner
-    //for walls/actors/Items too; a second proximity sweep would bypass priority.
+    //441e24 dispatches Item handling before ordinary physical response.
+    //Non-solid pickups/sensors keep their graph priority, but collection/save
+    //sensing owns their effects; never ram/damage them as solid actor bodies.
+    if(nativePlayer && sharedContact.selectedShape && sharedContact.selected &&
+       sharedContact.selectedShape->filter.kind==3 && sharedContact.selectedShape->filter.subtype==0x12 &&
+       sharedContact.selected->reference<actors_.size() && !actors_[sharedContact.selected->reference].solid)
+        sharedContact.callerIgnored=true;
+    // Physical native bodies, including Player, consume the graph's single
+    //winner. Legacy/surface-only adapters enter this path when Ammo competes.
     const bool shared=sharedContact.used && (nativeBody || continuing || sharedContact.hasAmmoCandidate);
     if(shared) {
         delta={dx,dy,false};
@@ -940,6 +956,9 @@ TerrainDisplacement GameWorld::move(size_t actor,float dx,float dy,bool physical
         }
     }
     }
+    // The fixed-step adapter retains canonical14ms velocity units, as native
+    // enemy contacts do. Travel is separately scaled in nativeStep; no global
+    // timestep/propulsion-unit migration is part of Player contact adoption.
     // 4449f0 rolls back surface coordinates before436ac0 compares history.
     // Native bounds stay separate, including the return2 commit below.
     if(history && nativeContactPoint) {
@@ -977,8 +996,29 @@ TerrainDisplacement GameWorld::move(size_t actor,float dx,float dy,bool physical
     }
     delta.x*=t;delta.y*=t;
     if(history) {
-        if(!nativeContactPoint){p.x=proposedSurface.x;p.y=proposedSurface.y;const auto previous=spiderNativeToSurface(source.x,source.y);history->previousSurface={previous.x,previous.y};}
-        if(!nativeContactPoint || lastSpiderSeparated_)history->center={proposed.x,proposed.y};
+        bool keepSurfaceStep=false;
+        if(nativePlayer && !nativeContactPoint && !continuing) {
+            const auto published=spiderSurfaceToNative(from.x,from.y);
+            ContentPosition next=from;
+            // Retain the accepted clear-step float additions without running
+            // a second collision solver or changing the native graph winner.
+            const float distance=std::hypot(surfaceStep.x,surfaceStep.y);
+            const int steps=std::isfinite(distance) && distance<=65536.f?
+                std::max(1,static_cast<int>(std::ceil(distance/2.f))):1;
+            for(int n=0;n<steps;++n){next.x+=surfaceStep.x/steps;next.y+=surfaceStep.y/steps;}
+            keepSurfaceStep=source.x==published.x && source.y==published.y &&
+                next.x>=1 && next.y>=1 && next.x<=level_->mapW*64.f-1 && next.y<=level_->mapH*32.f-1;
+            if(keepSurfaceStep) {
+                // Preserve accepted collision-free surface integration exactly.
+                // A divergent native center from a separating contact still
+                // owns its next reconciliation, and map clamps stay native.
+                p=next;delta.x=next.x-from.x;delta.y=next.y-from.y;
+                history->previousSurface=from;
+                const auto center=spiderSurfaceToNative(p.x,p.y);history->center={center.x,center.y};
+            }
+        }
+        if(!nativeContactPoint && !keepSurfaceStep){p.x=proposedSurface.x;p.y=proposedSurface.y;const auto previous=spiderNativeToSurface(source.x,source.y);history->previousSurface={previous.x,previous.y};}
+        if((!nativeContactPoint && !keepSurfaceStep) || lastSpiderSeparated_)history->center={proposed.x,proposed.y};
     } else {p.x+=delta.x;p.y+=delta.y;}
     if(physical) {
         auto velocity=contactVelocity(actor);
@@ -1009,8 +1049,16 @@ TerrainDisplacement GameWorld::move(size_t actor,float dx,float dy,bool physical
             ActorContactVelocities response;bool writeFirst=true,writeSecond=true;
             if(!nativeTouchVictim && !alreadyResponded && !lastSpiderSeparated_) {
                 if(nativeBody && !nativeSpider && nativeContactPoint) {
+                    const auto targetShape=nativePlayer?resolveNativeBodyContact(i):std::nullopt;
+                    const auto sourceCenter=nativePlayer?oldBody:ContactVelocity{};
+                    const auto targetCenter=targetShape?targetShape->center:ContactVelocity{normal.x,normal.y};
+                    const auto point=nativePlayer?ContactVelocity{oldBody.x+nativeContactPoint->x,oldBody.z+nativeContactPoint->z}:*nativeContactPoint;
+                    // Keep the selected absolute float stores when finite;
+                    // retain the portable finite fallback for singular inputs.
+                    const auto absolutePoint=nativePlayer && sharedContact.selected &&
+                        finiteContactVector(sharedContact.selected->point)?sharedContact.selected->point:point;
                     const auto native=resolveNativeActorContact(effectiveContactVelocity(actor),effectiveContactVelocity(i),
-                        {},{normal.x,normal.y},*nativeContactPoint,first.weight,second.weight,elasticity,second.elasticity,
+                        sourceCenter,targetCenter,absolutePoint,first.weight,second.weight,elasticity,second.elasticity,
                         first.frictionX!=0,second.enabled && second.frictionX!=0);
                     response={native.first,native.second,native.applied};writeFirst=native.writeFirst;writeSecond=native.writeSecond;
                 } else response=nativeSpider && nativeContactPoint?
@@ -1045,10 +1093,9 @@ TerrainDisplacement GameWorld::move(size_t actor,float dx,float dy,bool physical
             }
             // 4367d0 only changes velocity when436ac0 returned moving or
             // commanded; the impact latch is set even in the stationary case.
-            const bool playerStationary=actor==player_ && nativePlayerPinball &&
-                p.x==nativePlayerPreviousSurface_.x && p.y==nativePlayerPreviousSurface_.y;
-            const bool commanded=actor==player_?
-                (nativePlayerPinball?playerMoveCommanded_:motion_.thrust!=0):actors_[actor].enemyMoveCommand!=0;
+            const auto previousPlayer=history?history->previousSurface:nativePlayerPreviousSurface_;
+            const bool playerStationary=actor==player_ && p.x==previousPlayer.x && p.y==previousPlayer.y;
+            const bool commanded=actor==player_?playerMoveCommanded_:actors_[actor].enemyMoveCommand!=0;
             const bool moved=actor==player_?!playerStationary:actors_[actor].enemyMovedLastStep;
             if(!lastSpiderSeparated_ && (moved || commanded)) {
                 const auto response=resolveNativeTerrainContact(effectiveContactVelocity(actor),

@@ -8,7 +8,15 @@ using namespace vyruz;
 namespace vyruz { struct AmmoImpactNativeTestAccess {
  static void touch(GameWorld& w) {w.surprise_.kind=SurpriseKind::Touch;w.surprise_.remainingMs=8000;w.surprise_.applied=true;}
  static void moveTouch(GameWorld& w,bool physical) {
-  w.move(w.player_,500,0,physical);
+  if(physical) {
+   // Native physical contacts use the endpoint body/graph and defer death to
+   // the victim's visit. Supply a real Player bbox and an overlapping endpoint,
+   // rather than the legacy adapter's 500-pixel swept touch fixture.
+   const auto target=w.scene_->objects[1].position;
+   w.actors_[w.player_].radius=25;w.setPlayerPosition(target.x-100,target.y);
+   w.move(w.player_,100,0,true);
+   if(w.actors_[1].nativeDamagePending){bool locked=false;w.visitNativeActor(1,.014f,{},locked);}
+  } else w.move(w.player_,500,0,false);
   auto victims=std::move(w.touchVictims_);w.touchVictims_.clear();
   for(auto id:victims)w.destroy(id,w.player_);
  }

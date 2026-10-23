@@ -233,6 +233,10 @@ inline void normalizeSavedSurprise(WorldSnapshot& s) {
         if(s.surprise.active(SurpriseKind::Ammo))restoreAmmoBaseline(actor.ammo,s.surprise.savedAmmo);
         if(s.surprise.active(SurpriseKind::Drone)) {
             s.objects[s.player].position=s.surprise.droneOrigin;
+            if(auto* history=actor.nativeMotionHistory()) {
+                const auto n=spiderSurfaceToNative(s.surprise.droneOrigin.x,s.surprise.droneOrigin.y);
+                *history={{n.x,n.y},s.surprise.droneOrigin};
+            }
             s.objects[s.player].flags.invisible=s.surprise.originalInvisible;
             actor.solid=s.surprise.originalSolid;
             s.motion.velocityX=s.motion.velocityZ=s.motion.magnitude=s.motion.thrust=0;
