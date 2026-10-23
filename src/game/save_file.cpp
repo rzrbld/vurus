@@ -27,7 +27,7 @@ template<class K,class V> struct Map<std::map<K,V>>:std::true_type{};
 template<class T> struct Set:std::false_type{};
 template<class T> struct Set<std::set<T>>:std::true_type{};
 struct Archive {
- uint32_t version=35;
+ uint32_t version=36;
  bool reading; std::vector<uint8_t> bytes; std::span<const uint8_t> input; size_t pos=0,depth=0,allocationRemaining=1024*1024*1024;
  Archive():reading(false){} explicit Archive(std::span<const uint8_t> in):reading(true),input(in){}
  uint64_t integer(uint64_t n,size_t size){
@@ -60,7 +60,15 @@ struct Archive {
    }
   }
   else if constexpr(Optional<T>::value||Indirect<T>::value){bool present=v.has_value();value(present);if(reading){if(present){if constexpr(Indirect<T>::value)allocate(1,sizeof(typename T::value_type));v.emplace();}else v.reset();}if(present)value(*v);}
-  else if constexpr(std::is_same_v<T,NativeNavGraphAxis>){uint64_t n=v.size();value(n);if(n>MaxCount||(reading&&n>input.size()-pos))throw Failure("Save graph limit exceeded");if(reading){allocate(size_t(n),sizeof(NativeNavGraphAxis::Node)+sizeof(size_t)*3);v.resize(size_t(n));}for(auto& x:v)value(x);}
+  else if constexpr(std::is_same_v<T,NativeNavGraphAxis>){
+   uint64_t n=v.size();value(n);if(n>MaxCount||(reading&&n>input.size()-pos))throw Failure("Save graph limit exceeded");
+   if(reading){allocate(size_t(n),sizeof(NativeNavGraphAxis::Node)+sizeof(size_t)*3);v.resize(size_t(n));for(auto& edge:v)value(edge);}
+   else {const auto& axis=v;for(const auto& edge:axis){auto copy=edge;value(copy);}}
+   if(version>=36){
+    auto state=v.insertionState();(*this)(state.native,state.pivot,state.balance);
+    if(reading&&!v.restoreInsertionState(state))throw Failure("Invalid graph insertion state");
+   }else if(reading)v.useLegacyInsertionPolicy();
+  }
   else if constexpr(Vector<T>::value){uint64_t n=v.size();value(n);if(n>MaxCount||(reading&&n>input.size()-pos))throw Failure("Save collection limit exceeded");if(reading){allocate(size_t(n),sizeof(typename T::value_type));v.resize(size_t(n));}for(auto& x:v)value(x);}
   else if constexpr(Map<T>::value){uint64_t n=v.size();value(n);if(n>MaxCount||(reading&&n>input.size()-pos))throw Failure("Save map limit exceeded");if(reading){allocate(size_t(n),sizeof(typename T::value_type)+48);v.clear();for(uint64_t i=0;i<n;++i){typename T::key_type k{};typename T::mapped_type x{};(*this)(k,x);if(!v.emplace(std::move(k),std::move(x)).second)throw Failure("Duplicate save map key");}}else for(auto& [key,x]:v){auto k=key;(*this)(k,x);}}
   else if constexpr(Set<T>::value){uint64_t n=v.size();value(n);if(n>MaxCount||(reading&&n>input.size()-pos))throw Failure("Save set limit exceeded");if(reading){allocate(size_t(n),sizeof(typename T::value_type)+48);v.clear();for(uint64_t i=0;i<n;++i){typename T::value_type x{};value(x);if(!v.insert(x).second)throw Failure("Duplicate save set entry");}}else for(auto x:v)value(x);}
@@ -408,7 +416,7 @@ bool decodeSave(std::span<const uint8_t> bytes,SaveGame& out,std::string& error)
   if(!complete)throw Failure("Invalid compressed save data");
   bytes=inflated; // The normal magic/checksum/validation below also rejects nested envelopes.
  }
- Archive header(bytes);for(size_t i=0;i<8;++i)if(header.integer(0,1)!=uint8_t(Magic[i]))throw Failure("Not a Vyruz port save");auto version=header.integer(0,4);if(version!=1&&version!=2&&version!=3&&version!=4&&version!=5&&version!=6&&version!=7&&version!=8&&version!=9&&version!=10&&version!=11&&version!=12&&version!=13&&version!=14&&version!=15&&version!=16&&version!=17&&version!=18&&version!=19&&version!=20&&version!=21&&version!=22&&version!=23&&version!=24&&version!=25&&version!=26&&version!=27&&version!=28&&version!=29&&version!=30&&version!=31&&version!=32&&version!=33&&version!=34&&version!=35)throw Failure("Unsupported save version");auto size=header.integer(0,8),checksum=header.integer(0,8);auto payload=bytes.subspan(header.pos);if(size!=payload.size())throw Failure("Invalid save payload length");if(hash(payload)!=checksum)throw Failure("Save checksum mismatch");Archive a(payload);a.version=uint32_t(version);SaveGame s;a(s);if(a.pos!=payload.size())throw Failure("Trailing save data");validate(s);out=std::move(s);error.clear();return true;}catch(const std::exception& e){error=e.what();return false;}}
+ Archive header(bytes);for(size_t i=0;i<8;++i)if(header.integer(0,1)!=uint8_t(Magic[i]))throw Failure("Not a Vyruz port save");auto version=header.integer(0,4);if(version!=1&&version!=2&&version!=3&&version!=4&&version!=5&&version!=6&&version!=7&&version!=8&&version!=9&&version!=10&&version!=11&&version!=12&&version!=13&&version!=14&&version!=15&&version!=16&&version!=17&&version!=18&&version!=19&&version!=20&&version!=21&&version!=22&&version!=23&&version!=24&&version!=25&&version!=26&&version!=27&&version!=28&&version!=29&&version!=30&&version!=31&&version!=32&&version!=33&&version!=34&&version!=35&&version!=36)throw Failure("Unsupported save version");auto size=header.integer(0,8),checksum=header.integer(0,8);auto payload=bytes.subspan(header.pos);if(size!=payload.size())throw Failure("Invalid save payload length");if(hash(payload)!=checksum)throw Failure("Save checksum mismatch");Archive a(payload);a.version=uint32_t(version);SaveGame s;a(s);if(a.pos!=payload.size())throw Failure("Trailing save data");validate(s);out=std::move(s);error.clear();return true;}catch(const std::exception& e){error=e.what();return false;}}
 uint64_t catalogFingerprint(const SceneContent& content){auto classes=content.classes;auto paths=content.paths;Archive a;a(classes,paths);return hash(a.bytes);}
 bool writeSaveFile(const std::string& path,const SaveGame& s,std::string& error){
  std::vector<uint8_t> bytes;if(!encodeStoredSave(s,bytes,error))return false;

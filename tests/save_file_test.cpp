@@ -25,6 +25,38 @@ std::vector<uint8_t> squareMarker(const std::optional<NativeGeneratorSquareState
  std::vector<uint8_t> marker{uint8_t(state.has_value())};if(state)for(float value:{state->centerX,state->centerZ,state->minX,state->minZ,state->maxX,state->maxZ})
   for(unsigned byte=0;byte<8;++byte)marker.push_back(uint8_t(uint64_t(std::bit_cast<uint32_t>(value))>>(8*byte)));return marker;
 }
+// v36 adds exact insertion history after each axis. Tag only that history to
+// locate real fields, including empty/legacy axes, without guessing offsets.
+std::vector<uint8_t> insertionMarker(const NativeNavGraphAxis::InsertionState& state){
+ std::vector<uint8_t> bytes{uint8_t(state.native),uint8_t(state.pivot.has_value())};
+ if(state.pivot){for(unsigned byte=0;byte<8;++byte)bytes.push_back(uint8_t(uint64_t(state.pivot->object)>>(8*byte)));bytes.push_back(state.pivot->maximum);}
+ for(unsigned byte=0;byte<8;++byte)bytes.push_back(uint8_t(uint64_t(int64_t(state.balance))>>(8*byte)));
+ return bytes;
+}
+void strip36AxisFields(std::vector<uint8_t>& bytes,const SaveGame& fixture){
+ if(bytes[8]<=35)return;
+ check(bytes[8]==36,"v36 graph-history converter input");std::string error;std::vector<uint8_t> expected;
+ check(encodeSave(fixture,expected,error)&&bytes==expected,"v36 converter starts with actual writer payload");
+ auto tagged=fixture;
+ struct Record {std::vector<uint8_t> tagged,original;size_t position=0;};std::vector<Record> records;
+ const auto world=[&](WorldSnapshot& state){if(!state.spiderNavigation)return;
+  for(auto* axis:{&state.spiderNavigation->xEdges,&state.spiderNavigation->yEdges}){
+   auto original=insertionMarker(axis->insertionState());NativeNavGraphAxis::InsertionState tag;
+   const auto& ordered=*axis;if(!ordered.empty())tag.pivot=*ordered.begin();
+   tag.balance=0x12345000+int32_t(records.size());
+   check(axis->restoreInsertionState(tag),"Valid uniquely tagged native insertion state");
+   records.push_back({insertionMarker(tag),std::move(original),0});
+  }
+ };
+ for(auto&[path,level]:tagged.levels)world(level.world);if(tagged.restartLevel)world(tagged.restartLevel->world);
+ std::vector<uint8_t> taggedBytes;check(encodeSave(tagged,taggedBytes,error),error.c_str());
+ for(auto& record:records){auto at=std::search(taggedBytes.begin()+28,taggedBytes.end(),record.tagged.begin(),record.tagged.end());
+  check(at!=taggedBytes.end()&&std::search(at+1,taggedBytes.end(),record.tagged.begin(),record.tagged.end())==taggedBytes.end(),"Unique v36 graph-state marker");record.position=size_t(at-taggedBytes.begin());}
+ std::sort(records.begin(),records.end(),[](const auto&a,const auto&b){return a.position<b.position;});size_t delta=0;
+ for(auto& record:records){record.position-=delta;check(record.position+record.original.size()<=bytes.size()&&std::equal(record.original.begin(),record.original.end(),bytes.begin()+record.position),"Actual insertion state at mapped axis boundary");delta+=record.tagged.size()-record.original.size();}
+ for(auto record=records.rbegin();record!=records.rend();++record)bytes.erase(bytes.begin()+record->position,bytes.begin()+record->position+record->original.size());
+ bytes[8]=35;for(unsigned byte=0;byte<8;++byte)bytes[12+byte]=uint8_t((bytes.size()-28)>>(8*byte));reseal(bytes);
+}
 // Derive genuine v34 actor layout without guessing offsets through variable
 // nativeMotion/Spider/actions/held state. A tagged copy changes ONLY the v35
 // optional to unique known49byte values, locating absent and present fields.
@@ -32,15 +64,17 @@ std::vector<uint8_t> squareMarker(const std::optional<NativeGeneratorSquareState
 // descending byte order. This preserves all preexisting legacy assertions.
 void strip35ActorFields(std::vector<uint8_t>& bytes,const SaveGame& fixture){
  if(bytes[8]==34)return;
+ strip36AxisFields(bytes,fixture);
  check(bytes[8]==35,"v35 generator-square converter input");std::string error;std::vector<uint8_t> expected;
- check(encodeSave(fixture,expected,error)&&bytes==expected,"v35 legacy converter begins with actual unmodified writer payload");
+ check(encodeSave(fixture,expected,error),error.c_str());strip36AxisFields(expected,fixture);
+ check(bytes==expected,"v35 legacy converter begins with actual unmodified writer payload");
  auto tagged=fixture;for(auto&[path,level]:tagged.levels)normalizeSavedSurprise(level.world);if(tagged.restartLevel)normalizeSavedSurprise(tagged.restartLevel->world);
  struct Record {std::vector<uint8_t> tagged,original;size_t position=0;};std::vector<Record> records;unsigned ordinal=0;
  const auto tag=[&](ActorState& actor){const auto original=squareMarker(actor.nativeGeneratorSquare);const float base=21001.25f+128.f*ordinal++;
   actor.nativeGeneratorSquare=NativeGeneratorSquareState{base,base+16,base-1,base+15,base+1,base+17};records.push_back({squareMarker(actor.nativeGeneratorSquare),original,0});};
  const auto world=[&](WorldSnapshot& state){for(auto& actor:state.actors)tag(actor);for(auto& held:state.heldItems)tag(held.actor);};
  for(auto&[path,level]:tagged.levels)world(level.world);if(tagged.restartLevel)world(tagged.restartLevel->world);
- std::vector<uint8_t> taggedBytes;check(encodeSave(tagged,taggedBytes,error),error.c_str());
+ std::vector<uint8_t> taggedBytes;check(encodeSave(tagged,taggedBytes,error),error.c_str());strip36AxisFields(taggedBytes,tagged);
  for(auto& record:records){const auto at=std::search(taggedBytes.begin()+28,taggedBytes.end(),record.tagged.begin(),record.tagged.end());
   check(at!=taggedBytes.end()&&std::search(at+1,taggedBytes.end(),record.tagged.begin(),record.tagged.end())==taggedBytes.end(),"Unique actual v35 generator-square optional marker");record.position=size_t(at-taggedBytes.begin());}
  std::sort(records.begin(),records.end(),[](const auto&a,const auto&b){return a.position<b.position;});size_t delta=0;
@@ -139,7 +173,7 @@ int main(){
  const auto& legacyWorld=migrated.levels.at("LEVEL/A.3DG").world;const auto& motion=legacyWorld.motion;check(legacyWorld.difficulty==1,"Version 1 defaults to normal difficulty");
  check(legacyWorld.catalogHash==789&&motion.direction==17&&motion.turnSeconds==.003f,"Version 1 preserves catalog and turn state");
  check(std::abs(motion.velocityX-.46957427f)<.000001f&&std::abs(motion.velocityZ+1.40872283f)<.000001f&&motion.thrust==0&&motion.magnitude==std::hypot(motion.velocityX,motion.velocityZ),"Version 1 screen velocity migrates into native per-14-ms motion");
- std::vector<uint8_t> upgraded;check(encodeSave(migrated,upgraded,migrationError)&&upgraded[8]==35,"Migrated saves are rewritten as version 35");
+ std::vector<uint8_t> upgraded;check(encodeSave(migrated,upgraded,migrationError)&&upgraded[8]==36,"Migrated saves are rewritten as version 36");
  SaveGame upgradedRead;check(decodeSave(upgraded,upgradedRead,migrationError)&&upgradedRead.levels.at("LEVEL/A.3DG").world.motion.velocityZ==motion.velocityZ,"Migrated native velocity survives version 3 round trip");
  // V15 adds absent ending source (1 byte) and countdown (8 bytes) before
  // this fixture's empty renderer (16 bytes) and absent retry (1 byte).
@@ -211,8 +245,8 @@ int main(){
   check(encodeSave(checkpoint,encoded,error)&&encoded==bytes,"Shared property encoder retains exact bytes");
   check(props.read().data()==shared&&checkpoint.levels.begin()->second.world.objects[0].properties.read().data()==shared,"Encoding never detaches or mutates shared definitions");
  }
-{auto owned=original;std::vector<uint8_t> movedBytes;check(encodeSave(std::move(owned),movedBytes,error)&&movedBytes==bytes,"Owned encoder preserves exact v35 bytes");}
- SaveGame decoded;check(decodeSave(bytes,decoded,error),error.c_str());std::vector<uint8_t> again;check(encodeSave(decoded,again,error)&&bytes==again,"Round trip retains every serialized field and navigation heap order");auto& restored=decoded.levels.at(original.currentLevel);check(!restored.render.effects,"Native-style disk load drops transient live renderer effects");check(restored.world.projectiles[0].fuseMs==83&&restored.world.actors[0].gateState.flags==GateClosing&&restored.render.channels[0].cursor.remaining==5.25,"Pending projectile, gate and animation state survives");check(bytes[8]==35&&restored.world.motion.thrust==4.5f&&restored.world.motion.magnitude==w.motion.magnitude&&restored.world.motion.velocityZ==-3,"Version35 retains native magnitude, thrust and both velocity axes");check(restored.world.difficulty==3,"Difficulty survives version 3 round trip");check(restored.world.savePlot==0&&restored.world.saveDwellMs==5500&&restored.world.saveAttempted,"Save terminal dwell and attempt latch survive");
+{auto owned=original;std::vector<uint8_t> movedBytes;check(encodeSave(std::move(owned),movedBytes,error)&&movedBytes==bytes,"Owned encoder preserves exact v36 bytes");}
+ SaveGame decoded;check(decodeSave(bytes,decoded,error),error.c_str());std::vector<uint8_t> again;check(encodeSave(decoded,again,error)&&bytes==again,"Round trip retains every serialized field and navigation heap order");auto& restored=decoded.levels.at(original.currentLevel);check(!restored.render.effects,"Native-style disk load drops transient live renderer effects");check(restored.world.projectiles[0].fuseMs==83&&restored.world.actors[0].gateState.flags==GateClosing&&restored.render.channels[0].cursor.remaining==5.25,"Pending projectile, gate and animation state survives");check(bytes[8]==36&&restored.world.motion.thrust==4.5f&&restored.world.motion.magnitude==w.motion.magnitude&&restored.world.motion.velocityZ==-3,"Version36 retains native magnitude, thrust and both velocity axes");check(restored.world.difficulty==3,"Difficulty survives version 3 round trip");check(restored.world.savePlot==0&&restored.world.saveDwellMs==5500&&restored.world.saveAttempted,"Save terminal dwell and attempt latch survive");
  for(const auto* savedActor : {&restored.world.actors[0],&restored.world.heldItems[0].actor})
   check(savedActor->spiderPatrolTurning&&savedActor->enemyMoveCommand==208&&savedActor->enemyMovedLastStep&&savedActor->enemyMotionInitialized&&savedActor->enemyThrust==7.25f&&savedActor->enemyMagnitude==3.75f&&savedActor->driveSegmentStart->x==12&&savedActor->driveSegmentEnd->y==78,"World and held enemy propulsion state survives version20");
  for(const auto* savedActor : {&restored.world.actors[0],&restored.world.heldItems[0].actor})
@@ -315,7 +349,7 @@ int main(){
   world.actors[0].nativeGeneratorSquare=NativeGeneratorSquareState{123456.25f,-54321.75f,123400.125f,-54400.5f,123500.875f,-54200.25f};
   world.heldItems[0].actor.nativeGeneratorSquare=NativeGeneratorSquareState{23456.125f,34567.25f,23400.5f,34500.75f,23500.875f,34600.125f};
   source.restartLevel=source.levels.begin()->second;source.restartLevel->world.transition.reset();source.restartLevel->world.actors[0].nativeGeneratorSquare=NativeGeneratorSquareState{456.25f,789.5f,450.125f,780.25f,460.875f,790.75f};
-  std::vector<uint8_t> packet;SaveGame read;check(encodeSave(source,packet,error)&&decodeSave(packet,read,error),"v35 native square actor/held encode/decode");check(packet[8]==35,"Native square uses v35 writer schema");
+  std::vector<uint8_t> packet;SaveGame read;check(encodeSave(source,packet,error)&&decodeSave(packet,read,error),"v35 native square actor/held encode/decode");check(packet[8]==36,"Native square uses current v36 writer schema");
   const auto same=[](const NativeGeneratorSquareState&a,const NativeGeneratorSquareState&b){return squareMarker(a)==squareMarker(b);};
   const auto& result=read.levels.begin()->second.world;
   check(result.actors[0].nativeGeneratorSquare&&result.heldItems[0].actor.nativeGeneratorSquare&&same(*world.actors[0].nativeGeneratorSquare,*result.actors[0].nativeGeneratorSquare)&&same(*world.heldItems[0].actor.nativeGeneratorSquare,*result.heldItems[0].actor.nativeGeneratorSquare),"All six square fields retain exact bits and native serialized order for actors and held bodies");
@@ -332,7 +366,7 @@ int main(){
   auto old34=packet;strip35ActorFields(old34,source);check(decodeSave(old34,read,error),error.c_str());const auto& legacy=read.levels.begin()->second.world;
   check(!legacy.actors[0].nativeGeneratorSquare&&!legacy.heldItems[0].actor.nativeGeneratorSquare&&legacy.actors[0].nativeMotion->center.x==13579.5f&&legacy.actors[0].reactivateMs==world.actors[0].reactivateMs,"Actual v34 payload omits present/absent v35 square fields without shifting prior actor/held fields");
   check(read.restartLevel&&!read.restartLevel->world.actors[0].nativeGeneratorSquare&&!read.restartLevel->world.heldItems[0].actor.nativeGeneratorSquare,"Genuine v34 retry actor and held layouts omit v35 state independently");
-  std::vector<uint8_t> rewritten;check(encodeSave(read,rewritten,error)&&rewritten[8]==35,"Genuine v34 reader rewrites v35 without inventing unknown square history");
+  std::vector<uint8_t> rewritten;check(encodeSave(read,rewritten,error)&&rewritten[8]==36,"Genuine v34 reader rewrites v36 without inventing unknown square history");
  }
  // Remove V5 reactivation and V6/V7 absent Explosion/altitude/trail optionals from a
  // one-actor/no-projectile fixture to exercise the genuine V4 actor layout.
@@ -412,7 +446,7 @@ int main(){
         !old.actors[0].nativeGeneratorSquare&&!old.actors[0].nativeHit&&!old.actors[0].nativeFireRequested&&old.actors[0].nativePoolSlot==SIZE_MAX&&
         old.projectiles[0].nativePoolSlot==SIZE_MAX&&!old.projectiles[0].nativeBareBody->nativeHit,
         "v33 migration preserves old RNG and leaves v34 manager/Hit/pool/replay state absent");
-  check(encodeSave(read,packet,error)&&packet[8]==35,"v33 reader rewrites current v35 schema");
+  check(encodeSave(read,packet,error)&&packet[8]==36,"v33 reader rewrites current v36 schema");
  }
  strip31WorldFields(timerBytes,v4Source);
  // Derive the actual one-actor V27 packet by removing V28's absent optional
@@ -520,6 +554,80 @@ int main(){
  for(int field=0;field<5;++field){auto invalidSlope=original;auto& state=invalidSlope.levels.begin()->second.world;float* value=field==0?&state.actors[0].weapons[0].state.slopeRadians:field==1?&state.heldItems[0].actor.weapons[0].state.slopeRadians:field==2?&state.projectiles[0].slopeRadians:field==3?&state.projectiles[0].slopeHeight:&state.projectiles[0].slopeAltitude;*value=std::numeric_limits<float>::quiet_NaN();auto previous=bytes;check(!encodeSave(invalidSlope,previous,error)&&previous==bytes,"Nonfinite weapon/projectile slope rejected transactionally");}
  auto invalidDifficulty=original;invalidDifficulty.levels.begin()->second.world.difficulty=4;std::vector<uint8_t> rejected;check(!encodeSave(invalidDifficulty,rejected,error),"Invalid difficulty cannot enter save");
  auto invalid=original;invalid.levels.begin()->second.world.motion.velocityX=std::numeric_limits<float>::quiet_NaN();auto output=bytes;check(!encodeSave(invalid,output,error)&&output==bytes,"Nonfinite values rejected without replacing output");invalid=original;invalid.currentLevel="../escape.3DG";check(!encodeSave(invalid,output,error),"Traversal path rejected");check(!validSaveLevelPath("/absolute.3DG")&&!validSaveLevelPath("C:/LEVEL.3DG")&&!validSaveLevelPath("LEVEL\\A.3DG")&&validSaveLevelPath("LEVEL/A.3dg"),"Level path restrictions");
+ // v36 preserves history affecting native pivot selection, rather than
+ // reconstructing a median from the saved endpoint order. All bodies here use
+ // synthetic tagged references; this is a real disk-codec helper regression,
+ // not an authored-map or gameplay encounter claim.
+ {
+  const auto sameAxis=[](const NativeNavGraphAxis& a,const NativeNavGraphAxis& b){
+   if(a.size()!=b.size()||insertionMarker(a.insertionState())!=insertionMarker(b.insertionState()))return false;
+   auto j=b.begin();for(auto edge:a){if(edge.object!=j->object||edge.maximum!=j->maximum)return false;++j;}return true;
+  };
+  const auto sameGraph=[&](const NativeNavGraph& a,const NativeNavGraph& b){return sameAxis(a.xEdges,b.xEdges)&&sameAxis(a.yEdges,b.yEdges);};
+  const auto fixture=[](){NativeNavGraph graph;insertNativeNavigationObject(graph,uint64_t(1)<<63,{0,0,100,100});
+   for(unsigned i=0;i<4;++i){const float x=4+i*2;insertNativeNavigationObject(graph,(uint64_t(1)<<63)|(i+1),{x,0,x,0});}return graph;};
+  auto source=original;source.levels.erase("LEVEL/NEXT.3DG");source.restartLevel.reset();
+  auto& graph=source.levels.begin()->second.world.spiderNavigation.emplace(fixture());
+  updateNativeNavigationObject(graph,0,{20,0,120,100});
+  check(graph.xEdges.usesNativeInsertion()&&graph.yEdges.usesNativeInsertion(),"Fresh graph uses native insertion policy");
+  std::vector<uint8_t> packet;SaveGame read;check(encodeSave(source,packet,error)&&packet[8]==36&&decodeSave(packet,read,error),error.c_str());
+  auto& resumed=*read.levels.begin()->second.world.spiderNavigation;
+  check(sameGraph(graph,resumed),"Exact endpoint identity, native pivot and signed balance survive disk codec");
+  const auto start=insertNativeNavigationPoint(graph,{9,0}),goal=insertNativeNavigationPoint(graph,{11,0});
+  const auto restoredStart=insertNativeNavigationPoint(resumed,{9,0}),restoredGoal=insertNativeNavigationPoint(resumed,{11,0});
+  size_t startRank=0;const auto& bornAxis=resumed.xEdges;for(auto edge:bornAxis){if(edge.object==restoredStart.graphNode)break;++startRank;}
+  check(startRank==7,"Native finite point birth retains original rank seven after disk load");
+  const auto hit=queryNativeNavigation(graph,start,goal,{0,0},false,{},true);
+  const auto restoredHit=queryNativeNavigation(resumed,restoredStart,restoredGoal,{0,0},false,{},true);
+  check(hit&&restoredHit&&hit->minX==10&&restoredHit->minX==10&&hit->maxX==10&&restoredHit->maxX==10&&hit->minY==0&&restoredHit->minY==0&&hit->maxY==0&&restoredHit->maxY==0,
+        "Native finite unordered-head query remains blocked after save/load and point births");
+  check(sameGraph(graph,resumed),"Point births retain exact pivot continuation after save/load");
+  removeNativeNavigationObject(graph,4);removeNativeNavigationObject(resumed,4);
+  insertNativeNavigationObject(graph,(uint64_t(1)<<63)|99,{12,0,12,0});insertNativeNavigationObject(resumed,(uint64_t(1)<<63)|99,{12,0,12,0});
+  updateNativeNavigationObject(graph,1,{5,0,5,0});updateNativeNavigationObject(resumed,1,{5,0,5,0});
+  check(sameGraph(graph,resumed),"Deletes, recycled births and local movement retain exact saved graph continuation");
+  // The independent native control has eleven X endpoints, pivot rank four,
+  // balance zero: its pivot cannot be inferred as the middle endpoint.
+  graph=fixture();updateNativeNavigationObject(graph,0,{-120,0,-20,100});insertNativeNavigationPoint(graph,{0,0});
+  const auto state=graph.xEdges.insertionState();size_t pivotRank=0;const auto& axis=graph.xEdges;
+  for(auto edge:axis){if(state.pivot&&edge.object==state.pivot->object&&edge.maximum==state.pivot->maximum)break;++pivotRank;}
+  check(axis.size()==11&&pivotRank==4&&state.balance==0,"Native noncanonical pivot fixture matches retained original instructions");
+  check(encodeSave(source,packet,error)&&decodeSave(packet,read,error)&&sameGraph(graph,*read.levels.begin()->second.world.spiderNavigation),
+        "Nonmedian native pivot survives actual save/load");
+  // Remove actual v36 graph fields, preserving every prior v35 byte. This
+  // exercises the v35 reader with populated axes, not a relabeled v36 stream.
+  auto old35=packet;strip36AxisFields(old35,source);SaveGame legacy;
+  check(decodeSave(old35,legacy,error),error.c_str());auto& legacyGraph=*legacy.levels.begin()->second.world.spiderNavigation;
+  check(!legacyGraph.xEdges.usesNativeInsertion()&&!legacyGraph.yEdges.usesNativeInsertion(),"v35 graph explicitly retains legacy insertion policy");
+  auto control=graph;control.xEdges.useLegacyInsertionPolicy();control.yEdges.useLegacyInsertionPolicy();
+  insertNativeNavigationPoint(control,{9,0});insertNativeNavigationPoint(legacyGraph,{9,0});
+  check(sameGraph(control,legacyGraph),"Legacy graph insertion continues with historical stopping policy");
+  std::vector<uint8_t> rewritten;check(encodeSave(legacy,rewritten,error)&&decodeSave(rewritten,read,error)&&sameGraph(legacyGraph,*read.levels.begin()->second.world.spiderNavigation),
+        "v35 legacy graph policy remains explicit when rewritten as v36");
+  // Unique native metadata marker makes corruption offsets independent of
+  // variable actor and property payloads. Arbitrary int32 balances are codec
+  // values; no canonical-balance assumption is imposed by this test.
+  auto tagged=graph.xEdges.insertionState();tagged.balance=0x34567812;
+  check(graph.xEdges.restoreInsertionState(tagged)&&encodeSave(source,packet,error),error.c_str());const auto marker=insertionMarker(tagged);
+  const auto at=std::search(packet.begin()+28,packet.end(),marker.begin(),marker.end());
+  check(at!=packet.end()&&std::search(at+1,packet.end(),marker.begin(),marker.end())==packet.end(),"Unique populated native insertion-state payload");const size_t offset=size_t(at-packet.begin());
+  for(int fault=0;fault<6;++fault){auto corrupt=packet;
+   if(fault==0){for(unsigned byte=0;byte<8;++byte)corrupt[offset+2+byte]=255;} // out-of-range identity
+   if(fault==1)corrupt[offset]=0; // legacy policy cannot retain a native pivot
+   if(fault==2){corrupt[offset+1]=0;corrupt.erase(corrupt.begin()+offset+2,corrupt.begin()+offset+11);} // nonempty native needs pivot
+   if(fault==3){for(unsigned byte=0;byte<8;++byte)corrupt[offset+11+byte]=uint8_t(uint64_t(0x80000000ULL)>>(byte*8));} // int32 overflow
+   // For the membership fault choose an identity absent from this otherwise
+   // valid graph, independently of whether the current pivot is a point.
+   if(fault==4){for(unsigned byte=0;byte<8;++byte)corrupt[offset+2+byte]=uint8_t(uint64_t(9999)>>(byte*8));}
+   if(fault==5){corrupt[offset]=0;corrupt[offset+1]=0;corrupt.erase(corrupt.begin()+offset+2,corrupt.begin()+offset+11);} // legacy balance must be zero
+   for(unsigned byte=0;byte<8;++byte)corrupt[12+byte]=uint8_t((corrupt.size()-28)>>(8*byte));reseal(corrupt);
+   SaveGame sentinel;sentinel.currentLevel="unchanged";check(!decodeSave(corrupt,sentinel,error)&&sentinel.currentLevel=="unchanged","Invalid graph policy/pivot/balance rejected transactionally");
+  }
+  graph=NativeNavGraph{};NativeNavGraphAxis::InsertionState empty;empty.balance=-1;
+  check(graph.xEdges.restoreInsertionState(empty)&&encodeSave(source,packet,error)&&decodeSave(packet,read,error)&&
+        read.levels.begin()->second.world.spiderNavigation->xEdges.insertionState().balance==-1,
+        "Native empty axis retains signed post-delete balance instead of inventing zero");
+ }
  {
   auto native=original;auto& w=native.levels.begin()->second.world;
   w.spiderNavigation=NativeNavGraph{{{0,{12,34,12,34},true,true}},{{0,false}},{{0,false}}};

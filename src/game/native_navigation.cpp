@@ -144,7 +144,7 @@ size_t allocateGraphObject(NativeNavGraph& g,NativeNavGraphObject object){
 }
 size_t graphInsertionStop(const NativeNavGraphAxis& edges,float coordinate,size_t start){
  auto node=start;
- while(node!=NativeNavGraphAxis::none&&!(coordinate<=edges.coordinate(node)))node=edges.next(node);
+ while(node!=NativeNavGraphAxis::none&&(edges.usesNativeInsertion()?coordinate>edges.coordinate(node):!(coordinate<=edges.coordinate(node))))node=edges.next(node);
  return node;
 }
 size_t insertGraphEdgeAt(NativeNavGraph& g,NativeNavGraphAxis& edges,bool x,NativeNavGraphEdge e,size_t stop){
@@ -155,7 +155,12 @@ size_t insertGraphEdgeAt(NativeNavGraph& g,NativeNavGraphAxis& edges,bool x,Nati
   if(std::bit_cast<uint32_t>(expected)!=std::bit_cast<uint32_t>(actual))throw std::runtime_error("Endpoint coordinate cache drift");
  }
  auto expected=edges.first();
- while(expected!=NativeNavGraphAxis::none&&!(coordinate<=graphCoordinate(g,edges.edge(expected),x)))expected=edges.next(expected);
+ if(edges.usesNativeInsertion()){
+  const auto state=edges.insertionState();
+  if(edges.last()!=NativeNavGraphAxis::none&&coordinate>graphCoordinate(g,edges.edge(edges.last()),x))expected=NativeNavGraphAxis::none;
+  else if(state.pivot&&coordinate>graphCoordinate(g,*state.pivot,x))expected=edges.endpoint(state.pivot->object,state.pivot->maximum);
+ }
+ while(expected!=NativeNavGraphAxis::none&&(edges.usesNativeInsertion()?coordinate>graphCoordinate(g,edges.edge(expected),x):!(coordinate<=graphCoordinate(g,edges.edge(expected),x))))expected=edges.next(expected);
  if(stop!=expected)throw std::runtime_error("Paired insertion stopping handle drift");
 #endif
  const auto inserted=edges.insertBeforeWithCoordinate(stop,e,coordinate);edges.rememberInsertion(inserted,coordinate);return inserted;
@@ -169,7 +174,7 @@ struct GraphInsertionPair {bool valid=false;size_t lower=NativeNavGraphAxis::non
 GraphInsertionPair planGraphInsertionPair(NativeNavGraph& g,NativeNavGraphAxis& edges,bool x,float lower,float upper){
  // Reuse only identical prefixes. Axis lists may be locally unordered; the
  // first lower stop still cannot follow the first upper stop when lower<upper.
- if(!std::isfinite(lower)||!std::isfinite(upper)||!(lower<upper)||edges.insertionStart(lower)!=edges.insertionStart(upper))return {};
+ if(edges.usesNativeInsertion()||!std::isfinite(lower)||!std::isfinite(upper)||!(lower<upper)||edges.insertionStart(lower)!=edges.insertionStart(upper))return {};
  edges.prepareCoordinates([&](auto edge){return graphCoordinate(g,edge,x);});
  const auto lo=graphInsertionStop(edges,lower,edges.insertionStart(upper));
  return {true,lo,graphInsertionStop(edges,upper,lo)};
@@ -202,11 +207,14 @@ void updateNativeNavigationObject(NativeNavGraph& g,size_t id,NativeNavObstacle 
  const auto old=g.objects[id].bounds;
  if(old.minX==b.minX&&old.minY==b.minY&&old.maxX==b.maxX&&old.maxY==b.maxY)return;
  g.xEdges.invalidateInsertionHint();g.yEdges.invalidateInsertionHint();
+ g.xEdges.prepareCoordinates([&](auto e){return graphCoordinate(g,e,true);});
+ g.yEdges.prepareCoordinates([&](auto e){return graphCoordinate(g,e,false);});
  g.objects[id].bounds=b;
  g.xEdges.publishCoordinates(id,b.minX,b.maxX);g.yEdges.publishCoordinates(id,b.minY,b.maxY);
  // Write all four coordinates first; retain40e630's endpoint selection and
  // its unordered head-min/tail-max histories.
  for(bool x:{true,false}){auto& edges=x?g.xEdges:g.yEdges;
+  if(g.objects[id].point){reorderGraphEdge(g,edges,x,id,false);continue;}
   const auto lo=edges.endpoint(id,false),hi=edges.endpoint(id,true);if(lo==NativeNavGraphAxis::none||hi==NativeNavGraphAxis::none)continue;
   const auto ordered=[&](size_t n){const auto p=edges.previous(n),q=edges.next(n);const float c=graphCoordinate(g,edges.edge(n),x);return(p==NativeNavGraphAxis::none||graphCoordinate(g,edges.edge(p),x)<=c)&&(q==NativeNavGraphAxis::none||c<=graphCoordinate(g,edges.edge(q),x));};
   if(lo!=edges.first()&&!ordered(lo)){reorderGraphEdge(g,edges,x,id,false);reorderGraphEdge(g,edges,x,id,true);}
@@ -215,6 +223,8 @@ void updateNativeNavigationObject(NativeNavGraph& g,size_t id,NativeNavObstacle 
 }
 void removeNativeNavigationObject(NativeNavGraph& g,size_t id){
  if(id>=g.objects.size()||!g.objects[id].alive)return;
+ g.xEdges.prepareCoordinates([&](auto e){return graphCoordinate(g,e,true);});
+ g.yEdges.prepareCoordinates([&](auto e){return graphCoordinate(g,e,false);});
  const bool indexed=g.indexedObjectCount==g.objects.size();g.objects[id].alive=false;
  for(auto* edges:{&g.xEdges,&g.yEdges}){edges->eraseNode(edges->endpoint(id,false));edges->eraseNode(edges->endpoint(id,true));}
  if(indexed){g.freeObjects.push_back(id);std::push_heap(g.freeObjects.begin(),g.freeObjects.end(),std::greater<size_t>());}

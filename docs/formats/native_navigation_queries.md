@@ -86,3 +86,37 @@ An additional460 radius30 graph-wave/order/selection records and13,122 query
 controls match the repaired helper. These are synthetic instruction and port
 World checks; they do not measure natural campaign frequency, original Windows
 runtime behavior, or Helicopter/Dragon performance.
+
+## Insertion pivot history (2026-10-24)
+
+Fresh axes retain the original head/tail/pivot and signed balance semantics.
+40e360 appends above the tail; otherwise it scans from the pivot when the new
+coordinate exceeds the pivot coordinate, or from the head. After each endpoint
+birth40e100/40e150 maintain the pivot. Deletion40e1a0 runs before unlinking;
+ordinary adjacent repairs exchange pivot identity with crossed nodes, while
+hinted40ea10 performs deletion notification, detach, rebalance, anchored insertion,
+insertion notification and adjacent repair. Box birth remains maxX,maxY,minX,minY.
+The index pool and derived coordinate cache remain in use.
+
+The pivot is historical state, not necessarily the current middle endpoint.
+A finite integer counterexample starts with bounds0..100 and zero-extent bodies
+at4,6,8,10. Moving the first body to20..120 leaves an unordered head minimum.
+Native insertion puts a route point9 after the8 endpoints; the previous port
+head-prefix shortcut put it before20. A9-to11 query then missed body10 in the
+port while the original found it. This difference requires no extended-precision
+arithmetic: the comparisons use exactly representable coordinates. It can change
+obstacle selection and subsequent navigation/contact decisions; natural campaign
+frequency and visible symptoms have not been established.
+
+`native_graph_pivot_test` checks355 deterministic mixed original-instruction
+histories, including points, bounds, ordinary/hinted moves, ties, deletion,
+empty/single-node transitions and slot reuse. Both complete endpoint lists,
+binary32 coordinates, pivot identity and signed balance enter the fingerprint.
+It also asserts the reproduced consumer query. These are synthetic instruction
+and port controls, not an original Windows playthrough or FPS measurement.
+Writer36 checkpoints retain the exact policy, optional pivot endpoint and signed
+balance after each axis list. Readers1–35 keep their graphs under the previous
+port insertion policy until a fresh graph is built; their missing pivot history
+is not guessed. Invalid pivot membership or legacy metadata is rejected before
+session replacement. `save_file_test` covers native birth/delete continuation,
+nonmedian pivot preservation, actual v35 migration and transactional rejection.
