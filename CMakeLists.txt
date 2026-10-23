@@ -934,3 +934,13 @@ if(BUILD_TESTING)
   target_include_directories(spider_navigation_player_test PRIVATE src)
   add_test(NAME spider_navigation_player COMMAND spider_navigation_player_test)
 endif()
+
+if(BUILD_TESTING)
+  add_executable(native_render_cells_test tests/native_render_cells_test.cpp)
+  target_include_directories(native_render_cells_test PRIVATE src)
+  add_test(NAME native_render_cells COMMAND native_render_cells_test)
+  # Opt-in real-resource camera, audio and save/reload regression probe.
+  add_executable(native_cell_camera_audit EXCLUDE_FROM_ALL tests/native_cell_camera_audit.cpp $<TARGET_OBJECTS:vyruz_save_audit_core>)
+  target_include_directories(native_cell_camera_audit PRIVATE src)
+  target_link_libraries(native_cell_camera_audit PRIVATE SDL2::SDL2 OpenGL::GL indeo)
+endif()

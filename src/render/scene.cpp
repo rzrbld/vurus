@@ -1,3 +1,4 @@
+#include "render/native_render_cells.h"
 #include "render/sprite_reachability.h"
 #include "render/presentation.h"
 #include "render/scene.h"
@@ -254,7 +255,7 @@ bool SceneRenderer::restore(const SceneRendererState& state,std::string& error) 
     for(auto& c:restored)c.audioIdentity=0;
     for(auto& c:restoredFire)c.audioIdentity=0;
     for(auto& c:restoredTerrain)c.audioIdentity=0;
-    channels_=std::move(restored);rebuildEnemyObjectChannels();enemyOrbits_=std::move(restoredOrbits);enemyFire_=std::move(restoredFire);
+    channels_=std::move(restored);enemyOrbits_=std::move(restoredOrbits);enemyFire_=std::move(restoredFire);rebuildEnemyObjectChannels();
     terrain_=std::move(restoredTerrain);
     terrainClockMs_=restoredTerrainClock;
     playerTurn_={};
@@ -411,6 +412,8 @@ void SceneRenderer::advanceTerrain(double milliseconds,const EnemyAnimationView&
 }
 bool SceneRenderer::sync(const SceneContent& scene,std::string& error) {
     const size_t previousChannels=channels_.size();
+    objectChannels_.resize(scene.objects.size());
+    objectFireChannels_.resize(scene.objects.size(),SIZE_MAX);
     const std::optional<size_t> player=scene.player?std::optional<size_t>(scene.player->value):std::nullopt;
     if(playerObject_!=player){playerObject_=player;playerTurn_={};}
     std::set<unsigned> unsupported;
@@ -525,8 +528,11 @@ bool SceneRenderer::sync(const SceneContent& scene,std::string& error) {
         if(!sequence||bank==banks_.end()||bank->second.animation.sequences.size()<sequence)continue;
         Channel fire{id,false,&bank->second,sequence,{}};fire.firing=true;
         fire.derivedInvisible=object.flags.invisible.value_or(false);
+        objectFireChannels_[id]=enemyFire_.size();
         enemyFire_.push_back(std::move(fire));
     }
+    for(size_t i=previousChannels;i<channels_.size();++i)
+        {objectChannels_[channels_[i].object].push_back(i);markDrawBinding(i);}
     if(channels_.size()!=previousChannels)refreshChannelScan(previousChannels);
     for(size_t i=0;i<channelScan_.size();++i)if(channelScan_[i].helicopter)
         channels_[i].flightPosition=scene.objects[channelScan_[i].object].position;
@@ -555,6 +561,7 @@ void SceneRenderer::releaseTextures(Gfx& gfx) {
     for(auto& [path,bank]:banks_)for(auto& texture:bank.textures){gfx.deleteTexture(texture);texture=0;}
 }
 void SceneRenderer::clear(Gfx& gfx) {
+    objectChannels_.clear();objectFireChannels_.clear();pendingDrawBindings_.clear();nativeDrawView_.reset();
     spriteProperties_.clear();
     sequenceUses_.clear();
     releaseTextures(gfx);
@@ -565,6 +572,12 @@ void SceneRenderer::clear(Gfx& gfx) {
     audioCues_.clear();queuedAudioStarts_=0;enemyObjectChannels_.clear();channels_.clear();enemyFire_.clear();resetEnemyFire_=false; banks_.clear(); objectCount_=0;read_={};enemyOrbits_.clear();orbitTimeMs_=0;
 }
 void SceneRenderer::rebuildEnemyObjectChannels() {
+    objectChannels_.assign(objectCount_,{});objectFireChannels_.assign(objectCount_,SIZE_MAX);
+    pendingDrawBindings_.clear();
+    for(size_t i=0;i<channels_.size();++i){channels_[i].drawBindingPending=false;markDrawBinding(i);}
+    for(size_t i=0;i<channels_.size();++i)if(channels_[i].object<objectCount_)objectChannels_[channels_[i].object].push_back(i);
+    for(size_t i=0;i<enemyFire_.size();++i)if(enemyFire_[i].object<objectCount_)objectFireChannels_[enemyFire_[i].object]=i;
+    nativeDrawView_.reset();
     refreshChannelScan();
     enemyObjectChannels_.resize(objectCount_);
     for(auto& indices:enemyObjectChannels_)indices.clear();
@@ -593,6 +606,7 @@ void SceneRenderer::syncActors(const std::vector<ActorState>& actors) {
         auto& scan=channelScan_[i];
         const bool wasInactive=scan.inactive;
         const auto* actor=scan.object<actors.size()?&actors[scan.object]:nullptr;
+        if(actor&&scan.visualRevision!=actor->visualRevision)markDrawBinding(i);
         if(actor && scan.passive&&!actor->gate&&!actor->lift&&scan.visualRevision==actor->visualRevision) {
             if(!actor->alive && !scan.inactive)channels_[i].pendingAudio.clear();
             scan.inactive=!actor->alive;
@@ -735,6 +749,7 @@ void SceneRenderer::advanceEnemyPhase(double milliseconds,const std::vector<Acto
     const EnemyAnimationView& view,EnemyAnimationPhase phase,std::optional<size_t> awakeActor) {
     if(!std::isfinite(milliseconds)||milliseconds<0)return;
     nativeEnemyPhases_=true;
+    if(phase==EnemyAnimationPhase::Draw)nativeDrawView_=view;
     if(phase==EnemyAnimationPhase::VisibleUpdate)advanceTerrain(milliseconds,view);
     if(phase==EnemyAnimationPhase::Draw)for(const auto& indices:enemyObjectChannels_)
         for(const auto i:indices)channels_[i].enemyDrawAdmitted=false;
@@ -973,8 +988,50 @@ void SceneRenderer::draw(Gfx& gfx,const SceneContent& scene,const Level& level,f
         const float altitude=actor && actor->projectileAltitude?*actor->projectileAltitude:spriteProperties(object).altitude;
         return envelope.outside(anchor.x,anchor.y,cameraX,cameraY,gfx.viewport().width,gfx.viewport().height,altitude);
     };
-    for(const auto index:workingChannels_)if(auto& channel=channels_[index];!channel.firing) {
-        if(bodyOutside(channel)) {
+    std::vector<size_t> nativeChannels,nativeFire;
+    const auto* drawView=nativeDrawCells_&&nativeDrawView_&&!nativeDrawView_->unboundedOracle?&*nativeDrawView_:nullptr;
+    const bool nativeCells=actors&&drawView&&drawView->cells&&
+        drawView->cells->width==level.mapW&&drawView->cells->height==level.mapH;
+    if(nativeCells) {
+        // The old global preparation also copied World-owned explosion cursors
+        // on their birth/rebind frame. Keep that draw-time mirror synchronization
+        // outside visibility admission, after finishedEffects has been queried.
+        // No timer advancement or World mutation occurs here.
+        for(const auto index:pendingDrawBindings_) {
+            auto& c=channels_[index];
+            if(c.shadow||c.firing||c.object>=actors->size())continue;
+            const auto& actor=(*actors)[c.object];
+            if(!actor.alive||!actor.explosion||!actor.explosion->initialized)continue;
+            const auto& object=scene.objects[c.object];
+            const bool player=scene.player&&object.id==*scene.player;
+            if((nativeEnemyPhases_&&c.nativeEnemy&&!c.enemyDrawAdmitted)||
+               (playerOnly&&!player)||(!playerOnly&&player&&surprise&&surprise->active(SurpriseKind::Darkness))||
+               actor.turretOnlyBase||(!groundDetails&&object.flags.detail.value_or(false))||
+               (c.derivedInvisible&&object.flags.invisible.value_or(false)&&!actor.enemyRevealed&&c.visibility<1))continue;
+            const auto chosen=object.sprite.sequence.value;
+            if(!chosen||chosen>c.bank->animation.sequences.size())continue;
+            const auto& sequence=c.bank->animation.sequences[chosen-1];
+            if(c.sequence!=chosen) {
+                c.sequence=chosen;c.pendingAudio.clear();forgetAudio(c);
+                c.cursor.reset(sequence,[&](const auto& frame){if(c.pendingAudio.size()<256)c.pendingAudio.push_back(frame);});
+            }
+            c.cursor.restore(sequence,actor.explosion->animation);
+        }
+        const auto window=nativeRenderWindow(static_cast<int32_t>(-cameraX),static_cast<int32_t>(-cameraY),
+            uint32_t(gfx.viewport().width),uint32_t(gfx.viewport().height),level.mapW,level.mapH);
+        for(bool ground:{true,false})visitNativeRenderCells(*drawView->cells,window,[&](size_t id){
+            if(id>=actors->size()||!(*actors)[id].alive||id>=objectChannels_.size()||objectChannels_[id].empty())return;
+            if(playerOnly&&(!scene.player||id!=scene.player->value))return;
+            if(channels_[objectChannels_[id].front()].nativeInGround!=ground)return;
+            for(auto index:objectChannels_[id])nativeChannels.push_back(index);
+            if(id<objectFireChannels_.size()&&objectFireChannels_[id]!=SIZE_MAX)nativeFire.push_back(objectFireChannels_[id]);
+        });
+    }
+    for(const auto index:pendingDrawBindings_)channels_[index].drawBindingPending=false;
+    pendingDrawBindings_.clear();
+    const auto& drawChannels=nativeCells?nativeChannels:workingChannels_;
+    for(const auto index:drawChannels)if(auto& channel=channels_[index];!channel.firing) {
+        if(!nativeCells&&bodyOutside(channel)) {
             continue;
         }
         const bool body=scene.player && channel.object==scene.player->value && !channel.shadow;
@@ -1008,8 +1065,9 @@ void SceneRenderer::draw(Gfx& gfx,const SceneContent& scene,const Level& level,f
         if(body!=ordered.end() && pose>=20 && pose<=41)ordered.insert(body,{&channel});
         else if(body!=ordered.end())ordered.insert(body+1,{&channel});
     };
-    for(const auto index:workingChannels_)if(auto& channel=channels_[index];channel.firing)insertFire(channel);
-    for(auto& channel:enemyFire_)insertFire(channel);
+    for(const auto index:drawChannels)if(auto& channel=channels_[index];channel.firing)insertFire(channel);
+    if(nativeCells){for(auto index:nativeFire)insertFire(enemyFire_[index]);}
+    else for(auto& channel:enemyFire_)insertFire(channel);
     if(surprise && scene.player) {
         const auto originals=ordered;
         for(auto submission:originals)if(submission.channel->object==scene.player->value) {

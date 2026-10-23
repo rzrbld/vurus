@@ -60,6 +60,7 @@ public:
     // fixtures. Gameplay enables this protocol and supplies every native phase.
     void setNativeEnemyPhases(bool enabled=true) { nativeEnemyPhases_=enabled; }
     bool nativeEnemyPhases() const { return nativeEnemyPhases_; }
+    void setNativeDrawCells(bool enabled) { nativeDrawCells_=enabled; }
     void advanceEnemyPhase(double milliseconds,const std::vector<ActorState>&,
         const EnemyAnimationView&,EnemyAnimationPhase,std::optional<size_t> awakeActor={});
     void syncActors(const std::vector<ActorState>&);
@@ -96,9 +97,20 @@ private:
         bool enemyDrawAdmitted=false;
         int enemyLean=0,leanSubtype=0; // Renderer4333f0 state, independent of gameplay.
         uint64_t audioIdentity=0;
+        bool drawBindingPending=false;
     };
     bool nativeEnemyPhases_=false;
     std::vector<std::vector<size_t>> enemyObjectChannels_;
+    std::vector<std::vector<size_t>> objectChannels_;
+    std::vector<size_t> objectFireChannels_;
+    std::vector<size_t> pendingDrawBindings_;
+    void markDrawBinding(size_t index) {
+        if(!channels_[index].drawBindingPending) {
+            channels_[index].drawBindingPending=true;pendingDrawBindings_.push_back(index);
+        }
+    }
+    std::optional<EnemyAnimationView> nativeDrawView_;
+    bool nativeDrawCells_=true;
     void rebuildEnemyObjectChannels();
     void syncActorChannel(Channel&,const ActorState&);
     void advanceEnemyChannels(size_t,double,const std::vector<ActorState>&,EnemyAnimationPhase,bool visibilityStep);
