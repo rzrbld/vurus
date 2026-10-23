@@ -260,7 +260,7 @@ void advanceSceneAnimation(App& a,double milliseconds,double worldTimeMs) {
             return a.sceneRenderer.itemCursor(id,key.held->object.sprite.sequence.value);
         return {};
     });
-    a.sceneRenderer.advance(milliseconds,&a.world.actors(),worldTimeMs,&a.world.surprise());
+    a.sceneRenderer.advance(milliseconds,&a.world.actors(),worldTimeMs,&a.world.surprise(),a.world.renderActorRevision());
     std::string error;
     if(!a.sceneRenderer.sync(a.content,error)) {
         std::fprintf(stderr,"render update failed: %s\n",error.c_str());a.renderFailed=true;return;
@@ -1509,7 +1509,7 @@ void render(App& a,float alpha=1) {
                        x + kTileW, y + kTileH, uEnd, vEnd,
                        x, y + kTileH, u, vEnd);
             a.gfx.endQuads();
-        }, &a.world.actors(),&a.previousPositions,alpha,&a.world.surprise());
+        }, &a.world.actors(),&a.previousPositions,alpha,&a.world.surprise(),false,a.world.renderActorRevision());
     } else if (a.storyTex) {
         glPushMatrix();glTranslatef(view.uiX(),view.uiY(),0);
         a.gfx.beginQuads(a.storyTex);
@@ -1527,7 +1527,7 @@ void render(App& a,float alpha=1) {
                 player=vyruz::presentationPosition(a.previousPositions[a.world.playerIndex()],player,alpha);
             a.sceneRenderer.draw(a.gfx,a.content,a.level,a.camX,a.camY,player.x,player.y,
                 a.motion.direction,a.forcedStep,[](const vyruz::ForegroundTile&){},
-                &a.world.actors(),&a.previousPositions,alpha,&a.world.surprise(),true);
+                &a.world.actors(),&a.previousPositions,alpha,&a.world.surprise(),true,a.world.renderActorRevision());
         }
         a.gfx.applySceneEffects();
         if(a.options.vignette)a.hud.drawScreenBorders(a.gfx);

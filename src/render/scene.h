@@ -55,7 +55,7 @@ public:
     void clear(Gfx&);
     // Discard reproducible GPU copies while retaining images and animation state.
     void releaseTextures(Gfx&);
-    void advance(double milliseconds,const std::vector<ActorState>* actors=nullptr,double worldTimeMs=-1,const SurpriseState* surprise=nullptr);
+    void advance(double milliseconds,const std::vector<ActorState>* actors=nullptr,double worldTimeMs=-1,const SurpriseState* surprise=nullptr,std::optional<uint64_t> actorRevision=std::nullopt);
     // Legacy advance remains an unbounded single-pass adapter for isolated art
     // fixtures. Gameplay enables this protocol and supplies every native phase.
     void setNativeEnemyPhases(bool enabled=true) { nativeEnemyPhases_=enabled; }
@@ -64,13 +64,15 @@ public:
     void advanceEnemyPhase(double milliseconds,const std::vector<ActorState>&,
         const EnemyAnimationView&,EnemyAnimationPhase,std::optional<size_t> awakeActor={});
     void syncActors(const std::vector<ActorState>&);
+    // Test oracle; ordinary callers without a World epoch keep full synchronization.
+    void setActorSyncReuse(bool enabled) { reuseActorSync_=enabled;actorSyncValid_=false; }
     std::vector<std::pair<size_t,uint64_t>> finishedGates(const std::vector<ActorState>&) const;
     std::vector<size_t> finishedEffects(const std::vector<ActorState>&) const;
     void draw(Gfx&, const SceneContent&, const Level&, float cameraX, float cameraY,
               float playerX, float playerY, int direction, int forcedBitmap,
               const std::function<void(const ForegroundTile&)>& drawTile,
               const std::vector<ActorState>* actors=nullptr,
-              const std::vector<ContentPosition>* previous=nullptr,float alpha=1,const SurpriseState* surprise=nullptr,bool playerOnly=false);
+              const std::vector<ContentPosition>* previous=nullptr,float alpha=1,const SurpriseState* surprise=nullptr,bool playerOnly=false,std::optional<uint64_t> actorRevision=std::nullopt);
 private:
     // Indexed by placement, refreshed lazily when its shared snapshot changes.
     // No pointers into the growable scene.objects vector or saved cache state.
@@ -100,6 +102,12 @@ private:
         bool drawBindingPending=false;
     };
     bool nativeEnemyPhases_=false;
+    bool reuseActorSync_=true,actorSyncValid_=false;
+    const std::vector<ActorState>* synchronizedActors_=nullptr;
+    size_t synchronizedActorCount_=0;
+    uint64_t synchronizedActorRevision_=0;
+    bool actorsAlreadySynchronized(const std::vector<ActorState>&,std::optional<uint64_t>) const;
+    void rememberActorSync(const std::vector<ActorState>&,std::optional<uint64_t>);
     std::vector<std::vector<size_t>> enemyObjectChannels_;
     std::vector<std::vector<size_t>> objectChannels_;
     std::vector<size_t> objectFireChannels_;

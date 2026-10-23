@@ -39,11 +39,13 @@ bool actorNavigationEnabled(const ActorState& a,const ObjectPlacement& o,uint32_
 }
 void GameWorld::markSpatialDirty(size_t id){
     if(id>=actors_.size())return;
+    invalidateRenderActors();
     if(spatialDirtyFlags_.size()<actors_.size())spatialDirtyFlags_.resize(actors_.size());
     if(spatialDirtyFlags_[id])return;
     spatialDirtyActors_.push_back(id);spatialDirtyFlags_[id]=1;
 }
 void GameWorld::resetSpatialPublications(){
+    invalidateRenderActors();
     spatialDirtyActors_.clear();spatialPublishBatch_.clear();
     spatialDirtyFlags_.assign(actors_.size(),1);
     spatialDirtyActors_.reserve(actors_.size());

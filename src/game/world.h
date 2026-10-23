@@ -380,6 +380,8 @@ public:
     const std::vector<ActorState>& actors() const { return actors_; }
     const std::vector<Projectile>& projectiles() const { return projectiles_; }
     size_t playerIndex() const { return player_; }
+    // Derived renderer-cache epoch; never serialized or used by simulation.
+    uint64_t renderActorRevision() const { return renderActorRevision_; }
     const ActorState& player() const { return actors_.at(player_); }
     void consumePlayerHitForRender(bool animationOnly=false,int pass=0);
     ContentPosition playerPosition() const { return scene_->objects[player_].position; }
@@ -393,6 +395,8 @@ public:
     const std::string& message() const { return message_; }
     uint64_t shotsFired=0, pickupsTaken=0, actorsDestroyed=0;
 private:
+    uint64_t renderActorRevision_=1;
+    void invalidateRenderActors() { if(++renderActorRevision_==0)++renderActorRevision_; }
     friend struct AmmoImpactNativeTestAccess;
     friend struct CollisionIndexOracleAccess;
     friend struct SpiderNavigationPlayerTestAccess;

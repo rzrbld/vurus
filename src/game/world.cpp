@@ -547,7 +547,7 @@ bool GameWorld::debugAddMoney() {
     money+=amount;return true;
 }
 void GameWorld::setPlayerPosition(float x,float y) { scene_->objects[player_].position={x,y}; motion_.velocityX=motion_.velocityZ=motion_.magnitude=motion_.thrust=0;actors_[player_].nativeAmmoContinuation=false;nativePlayerFacing_=initializeNativePlayerFacing(motion_.direction);nativePlayerPreviousSurface_={x,y};if(auto* h=actors_[player_].nativeMotionHistory()){const auto p=spiderSurfaceToNative(x,y);*h={{p.x,p.y},{x,y}};}synchronizeActorCell(player_); }
-void GameWorld::setPlayerDirection(int direction) { motion_.direction=(direction%24+24)%24;actors_[player_].direction=motion_.direction;nativePlayerFacing_=initializeNativePlayerFacing(motion_.direction); }
+void GameWorld::setPlayerDirection(int direction) { invalidateRenderActors(); motion_.direction=(direction%24+24)%24;actors_[player_].direction=motion_.direction;nativePlayerFacing_=initializeNativePlayerFacing(motion_.direction); }
 bool GameWorld::selectPlayerWeaponSlot(unsigned slot) {
     auto& actor=actors_[player_];
     if(slot>=actor.weapons.size())return false;
@@ -2099,6 +2099,7 @@ PlayerCarry GameWorld::carry() const {
     return {p.vitals,ammunition,p.keys,p.heldKeys,p.weapons.empty()?"":p.weapons[p.selectedWeapon].name,playerKills_,elapsedMs_,p.weapons.empty()?std::nullopt:p.weapons[p.selectedWeapon].ammoSlot,std::move(held),ammoHits_,ammoMisses_};
 }
 void GameWorld::restore(const PlayerCarry& carry) {
+    invalidateRenderActors();
     audioInput_.reset();audioMotorAttempt_=false;playerMoveCommanded_=false;
     playerKills_=carry.kills;ammoHits_=carry.ammoHits;ammoMisses_=carry.ammoMisses;elapsedMs_=carry.elapsedMs;
     auto& p=actors_[player_];p.vitals=carry.vitals;p.ammo=carry.ammo;p.keys=carry.keys;p.heldKeys=carry.heldKeys;
@@ -2318,6 +2319,7 @@ bool GameWorld::advanceActorAI(size_t i,float seconds) {
 void GameWorld::tick(float seconds,const WorldInput& suppliedInput) {
     audioInput_.reset();audioMotorAttempt_=false;playerMoveCommanded_=false;
     if (!(seconds>0) || !std::isfinite(seconds) || seconds>0.1f || !scene_) return;
+    invalidateRenderActors();
     collectReleasedTransientRecords();
     currentTickMilliseconds_=seconds*1000.f;
     const WorldInput input=endingSource_?WorldInput{}:suppliedInput;

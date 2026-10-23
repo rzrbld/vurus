@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
 project(vurus LANGUAGES CXX)
+option(VURUS_ACTOR_SYNC_PROFILE "Enable actor synchronization audit counters" OFF)
+if(VURUS_ACTOR_SYNC_PROFILE)
+  add_compile_definitions(VURUS_ACTOR_SYNC_PROFILE=1)
+endif()
 
 # Validation-only reference implementation; normal builds contain no extra bounds index.
 option(VURUS_COLLISION_INDEX_ORACLE "Enable the legacy collision-index comparison audit" OFF)
@@ -967,4 +971,10 @@ if(BUILD_TESTING)
     target_include_directories(collision_index_equivalence_audit PRIVATE src)
     target_link_libraries(collision_index_equivalence_audit PRIVATE SDL2::SDL2 OpenGL::GL indeo)
   endif()
+endif()
+
+if(BUILD_TESTING AND VURUS_ACTOR_SYNC_PROFILE)
+  add_executable(actor_channel_sync_audit EXCLUDE_FROM_ALL tests/actor_channel_sync_audit.cpp $<TARGET_OBJECTS:vyruz_save_audit_core>)
+  target_include_directories(actor_channel_sync_audit PRIVATE src)
+  target_link_libraries(actor_channel_sync_audit PRIVATE SDL2::SDL2 OpenGL::GL indeo)
 endif()

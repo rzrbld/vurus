@@ -1,3 +1,4 @@
+#include "render/actor_sync_profile.h"
 #include "render/native_render_cells.h"
 #include "render/sprite_reachability.h"
 #include "render/presentation.h"
@@ -101,6 +102,7 @@ SceneRendererState SceneRenderer::capture() const {
     return result;
 }
 bool SceneRenderer::restore(const SceneRendererState& state,std::string& error) {
+    actorSyncValid_=false;
     if(state.objectCount!=objectCount_ || state.channels.size()!=static_cast<size_t>(std::count_if(channels_.begin(),channels_.end(),[](const auto& c){return !c.derivedInvisible;}))) {
         error="saved render channels do not match scene";return false;
     }
@@ -561,6 +563,7 @@ void SceneRenderer::releaseTextures(Gfx& gfx) {
     for(auto& [path,bank]:banks_)for(auto& texture:bank.textures){gfx.deleteTexture(texture);texture=0;}
 }
 void SceneRenderer::clear(Gfx& gfx) {
+    actorSyncValid_=false;synchronizedActors_=nullptr;
     objectChannels_.clear();objectFireChannels_.clear();pendingDrawBindings_.clear();nativeDrawView_.reset();
     spriteProperties_.clear();
     sequenceUses_.clear();
@@ -585,6 +588,7 @@ void SceneRenderer::rebuildEnemyObjectChannels() {
         enemyObjectChannels_[channels_[index].object].push_back(index);
 }
 void SceneRenderer::refreshChannelScan(size_t first) {
+    actorSyncValid_=false;
     workingOrderDirty_=true;
     if(first>channelScan_.size())first=channelScan_.size();
     channelScan_.resize(first);
@@ -597,7 +601,23 @@ void SceneRenderer::refreshChannelScan(size_t first) {
     workingChannels_.resize(channels_.size());
     for(size_t i=0;i<channels_.size();++i)workingChannels_[i]=i;
 }
+bool SceneRenderer::actorsAlreadySynchronized(const std::vector<ActorState>& actors,std::optional<uint64_t> revision) const {
+    // Native enemy channels own their phase-specific selectors. Legacy fixtures
+    // may reset stateful Spider/generator channels even with unchanged actors.
+    return reuseActorSync_&&nativeEnemyPhases_&&actorSyncValid_&&revision&&
+        synchronizedActors_==&actors&&synchronizedActorCount_==actors.size()&&
+        synchronizedActorRevision_==*revision;
+}
+void SceneRenderer::rememberActorSync(const std::vector<ActorState>& actors,std::optional<uint64_t> revision) {
+    actorSyncValid_=revision.has_value()&&nativeEnemyPhases_;
+    synchronizedActors_=&actors;synchronizedActorCount_=actors.size();
+    synchronizedActorRevision_=revision.value_or(0);
+}
 void SceneRenderer::syncActors(const std::vector<ActorState>& actors) {
+#if VURUS_ACTOR_SYNC_PROFILE
+    actorSyncProfile::Scope profile(channelScan_.size());
+#endif
+    actorSyncValid_=false;
     if(resetEnemyFire_) {
         for(auto& c:enemyFire_)if(c.object<actors.size())c.fireRevision=actors[c.object].fireRevision;
         resetEnemyFire_=false;
@@ -634,6 +654,7 @@ void SceneRenderer::syncActors(const std::vector<ActorState>& actors) {
         std::stable_sort(workingChannels_.begin(),workingChannels_.end(),[&](size_t a,size_t b){return channelScan_[a].orderKey<channelScan_[b].orderKey;});
         workingOrderDirty_=false;
     }
+
 }
 void SceneRenderer::syncActorChannel(Channel& c,const ActorState& actor) {
         if(c.visualRevision!=actor.visualRevision) {
@@ -794,12 +815,12 @@ void SceneRenderer::advanceEnemyPhase(double milliseconds,const std::vector<Acto
         }
     }
 }
-void SceneRenderer::advance(double milliseconds,const std::vector<ActorState>* actors,double worldTimeMs,const SurpriseState* surprise) {
+void SceneRenderer::advance(double milliseconds,const std::vector<ActorState>* actors,double worldTimeMs,const SurpriseState* surprise,std::optional<uint64_t> actorRevision) {
     if(!std::isfinite(milliseconds)||milliseconds<=0)return;
     if(actors && playerObject_ && *playerObject_<actors->size())
         playerTurn_.advance((*actors)[*playerObject_].direction,milliseconds,
                             surprise?surprise->circularRemaining:-1);
-    if(actors)syncActors(*actors);
+    if(actors){syncActors(*actors);rememberActorSync(*actors,actorRevision);}
     orbitTimeMs_=worldTimeMs>=0?worldTimeMs:orbitTimeMs_+milliseconds;
     terrainClockMs_+=milliseconds;
     // 43f8df..43f91b selects mask1 on the three player-only passes. GameWorld
@@ -829,6 +850,9 @@ void SceneRenderer::advance(double milliseconds,const std::vector<ActorState>* a
         orbit.state.advance(orbit.config,milliseconds,orbitTimeMs_,orbit.parent,orbit.altitude,!actor.enemyRevealed,orbit.visibility);
     }
     if(!actors)refreshChannelScan();
+#if VURUS_ACTOR_SYNC_PROFILE
+    if(actorSyncProfile::enabled)actorSyncProfile::counts.advanceVisits+=workingChannels_.size();
+#endif
     for (const auto channelIndex:workingChannels_) {
         auto& channel=channels_[channelIndex];
         if(channel.skipNewbornAdvance){channel.skipNewbornAdvance=false;continue;}
@@ -916,7 +940,7 @@ std::vector<size_t> SceneRenderer::finishedEffects(const std::vector<ActorState>
 void SceneRenderer::draw(Gfx& gfx,const SceneContent& scene,const Level& level,float cameraX,float cameraY,
                          float playerX,float playerY,int direction,int forcedBitmap,
                          const std::function<void(const ForegroundTile&)>& drawTile,
-                         const std::vector<ActorState>* actors,const std::vector<ContentPosition>* previous,float alpha,const SurpriseState* surprise,bool playerOnly) {
+                         const std::vector<ActorState>* actors,const std::vector<ContentPosition>* previous,float alpha,const SurpriseState* surprise,bool playerOnly,std::optional<uint64_t> actorRevision) {
     textureResidency_.beginDraw();
     if(!playerOnly)playerBodyCenter_.reset();
     // Draw calls never advance player turn state (including the Darkness second pass).
@@ -958,7 +982,11 @@ void SceneRenderer::draw(Gfx& gfx,const SceneContent& scene,const Level& level,f
             sprites.push_back({c.bank,frame->frameIndex,frame->flags});
         }
     }
-    if(actors)syncActors(*actors);
+    const bool reuse=actors&&actorsAlreadySynchronized(*actors,actorRevision);
+#if VURUS_ACTOR_SYNC_PROFILE
+    if(reuse&&actorSyncProfile::enabled)++actorSyncProfile::counts.skips;
+#endif
+    if(actors && !reuse){syncActors(*actors);rememberActorSync(*actors,actorRevision);}
     // These directional layers have no running cursor and deliberately do not
     // add persisted channels: older checkpoints retain their channel identity.
     struct Submission { Channel* channel; uint32_t overlay=0; float dx=0,dy=0; bool tripleBody=false; };
