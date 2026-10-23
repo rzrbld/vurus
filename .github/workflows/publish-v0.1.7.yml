@@ -1,0 +1,107 @@
+name: Build and publish desktop v0.1.7
+'on':
+  push:
+    branches:
+    - publish-v0.1.7-20261023
+    paths:
+    - .github/workflows/publish-v0.1.7.yml
+permissions:
+  actions: write
+  contents: write
+concurrency:
+  group: publish-v0.1.7
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_SHA: 6ea86e96afba015e18cfaa0998be2c90035e5202
+      BUILD_WORKFLOW: build-desktop.yml
+      RELEASE_TAG: v0.1.7
+      EXPECTED_JOBS: '5'
+      STREAM: desktop
+    steps:
+    - name: Build, validate and publish exact source
+      shell: bash
+      run: "#!/usr/bin/env bash\nset -euo pipefail\ntest \"$(gh api \"repos/$GH_REPO/git/commits/$BUILD_SHA\" --jq .sha)\"\
+        \ = \"$BUILD_SHA\"\nif gh api \"repos/$GH_REPO/git/ref/tags/$RELEASE_TAG\" > existing-tag.json 2>/dev/null; then\n\
+        \  echo 'Release tag already exists; refusing to replace it.' >&2\n  exit 1\nfi\ngh api --method POST \"repos/$GH_REPO/git/refs\"\
+        \ -f ref=\"refs/tags/$RELEASE_TAG\" -f sha=\"$BUILD_SHA\" > tag.json\ntest \"$(jq -r .object.sha tag.json)\" = \"\
+        $BUILD_SHA\"\n# Token-created tag pushes do not trigger builds; dispatch exactly once explicitly.\ngh workflow run\
+        \ \"$BUILD_WORKFLOW\" --ref \"$RELEASE_TAG\"\nBUILD_RUN=''\nfor attempt in $(seq 1 60); do\n  gh run list --workflow\
+        \ \"$BUILD_WORKFLOW\" --branch \"$RELEASE_TAG\" --commit \"$BUILD_SHA\" --event workflow_dispatch --limit 10 --json\
+        \ databaseId > runs.json\n  BUILD_RUN=$(jq -r '.[0].databaseId // empty' runs.json)\n  if [ -n \"$BUILD_RUN\" ]; then\
+        \ break; fi\n  sleep 10\ndone\ntest -n \"$BUILD_RUN\"\necho \"Build: https://github.com/$GH_REPO/actions/runs/$BUILD_RUN\"\
+        \nfor attempt in $(seq 1 240); do\n  gh api \"repos/$GH_REPO/actions/runs/$BUILD_RUN\" > run.json\n  if [ \"$(jq -r\
+        \ .status run.json)\" = completed ]; then break; fi\n  sleep 30\ndone\njq -e --arg sha \"$BUILD_SHA\" --arg branch\
+        \ \"$RELEASE_TAG\" --arg path \".github/workflows/$BUILD_WORKFLOW\" '.status == \"completed\" and .conclusion == \"\
+        success\" and .head_sha == $sha and .head_branch == $branch and .event == \"workflow_dispatch\" and .path == $path'\
+        \ run.json\n# Job metadata may lag the run summary. Wait for the expected successful set.\nfor attempt in $(seq 1\
+        \ 30); do\n  gh api \"repos/$GH_REPO/actions/runs/$BUILD_RUN/jobs?filter=all&per_page=100\" > jobs.json\n  if jq -e\
+        \ --argjson count \"$EXPECTED_JOBS\" '.jobs | sort_by(.id) | group_by(.name) | map(last) | length == $count and all(.status\
+        \ == \"completed\" and .conclusion == \"success\")' jobs.json; then break; fi\n  sleep 10\ndone\njq -e --argjson count\
+        \ \"$EXPECTED_JOBS\" '.jobs | sort_by(.id) | group_by(.name) | map(last) | length == $count and all(.status == \"\
+        completed\" and .conclusion == \"success\")' jobs.json\ntest \"$(gh api \"repos/$GH_REPO/git/ref/tags/$RELEASE_TAG\"\
+        \ --jq .object.sha)\" = \"$BUILD_SHA\"\ngh api \"repos/$GH_REPO/releases?per_page=100\" | jq -e --arg tag \"$RELEASE_TAG\"\
+        \ '[.[] | select(.tag_name == $tag)] | if length == 1 then .[0] else error(\"Expected exactly one existing release\"\
+        ) end' > draft.json\njq -e --arg tag \"$RELEASE_TAG\" '.draft == true and .tag_name == $tag' draft.json\nmkdir packages\n\
+        jq -r '.assets[] | [.id, .name] | @tsv' draft.json > assets.tsv\nwhile IFS=$'\\t' read -r asset_id asset_name; do\n\
+        \  case \"$asset_name\" in\n    vurus-linux.tar.gz|vurus-windows-amd64.zip|vurus-darwin-arm64.zip|vurus-darwin-x86_64.zip|vurus-portmaster.zip|SHA256SUMS.txt)\
+        \ ;;\n    *) echo 'Unexpected asset name' >&2; exit 1 ;;\n  esac\n  gh api \"repos/$GH_REPO/releases/assets/$asset_id\"\
+        \ -H 'Accept: application/octet-stream' > \"packages/$asset_name\"\ndone < assets.tsv\npython3 - <<'PY'\nimport os,json,tarfile,zipfile\n\
+        from pathlib import Path,PurePosixPath\ndesktop=os.environ['STREAM']=='desktop'\nexpected={'vurus-linux.tar.gz','vurus-windows-amd64.zip','vurus-darwin-arm64.zip','vurus-darwin-x86_64.zip'}\
+        \ if desktop else {'vurus-portmaster.zip'}\nexpected.add('SHA256SUMS.txt')\ndraft=json.loads(Path('draft.json').read_text())\n\
+        assert draft['prerelease']==(not desktop)\nassert {a['name'] for a in draft['assets']}==expected\nassert {p.name for\
+        \ p in Path('packages').iterdir()}==expected\nmanifest=Path('packages/SHA256SUMS.txt').read_text().splitlines()\n\
+        assert {line.split()[-1].removeprefix('*') for line in manifest}==expected-{'SHA256SUMS.txt'}\nfor p in Path('packages').iterdir():\n\
+        \ if p.suffix=='.txt':continue\n if p.suffix=='.zip':\n  with zipfile.ZipFile(p) as z:\n   assert z.testzip() is None\n\
+        \   names=z.namelist()\n else:\n  with tarfile.open(p) as t:names=t.getnames()\n for name in names:\n  q=PurePosixPath(name)\n\
+        \  assert not q.is_absolute() and '..' not in q.parts,name\n  assert not any(part.lower() in {'work','.git','.agents','.codex','.aws','saves','data'}\
+        \ for part in q.parts),name\n  assert q.suffix.lower() not in {'.iso','.bin','.rsc','.gaf','.vzs','.cfg'},name\n assert\
+        \ any('license' in n.lower() for n in names),p\n assert any(PurePosixPath(n).name in {'vurus-bench','vurus-bench.exe','vurus-bench.aarch64'}\
+        \ for n in names),p\n assert any(PurePosixPath(n).name=='benchmark-README.txt' for n in names),p\n print(p.name,'validated',len(names),'entries')\n\
+        PY\n(cd packages && sha256sum --check SHA256SUMS.txt)\ncat > notes.md <<'NOTES'\nThis update reduces repeated world,\
+        \ navigation and renderer work and adds the benchmark to Extras.\n\n- Reuse graph coordinates and insertion searches,\
+        \ publish only changed spatial state, and visit ordered pickup/saving candidates.\n- Cache radar/AI metadata and animation\
+        \ ordering; reject offscreen body and shadow preparation earlier.\n- Match retained original navigation boundaries\
+        \ and headings across enemy types.\n- Run the shared benchmark from Extras with Default or User Settings; view the\
+        \ score and export HTML/JSON reports. Standalone benchmark binaries remain included.\n- Correct player Flame and alternating\
+        \ Missile muzzle origins, retain the pending Circular Fire slope correction, and refresh the repository logo and measured\
+        \ performance report.\n\nOriginal game resources are required and are not included. Preserve your imported data, saves\
+        \ and settings when updating. Packages include engine and third-party notices; verify downloads with SHA256SUMS.txt.\
+        \ Automated CI and scoped H700 checks do not establish full-game parity or a universal FPS guarantee.\nNOTES\nif [\
+        \ \"$STREAM\" = desktop ]; then\n  printf '\\nLinux x64 / Steam Deck, Windows x64, macOS Apple Silicon and Intel.\
+        \ macOS builds require macOS 15+, are unsigned terminal executables and omit SMAA; FXAA remains available.\\n' >>\
+        \ notes.md\nelse\n  printf '\\nPortMaster ARM64 / OpenGL ES 3.0 Alpha Preview. Extract the launchers and vurus directory\
+        \ into your firmware Ports directory; follow vurus/README.txt. Includes the separate Vurus Benchmark Ports entry.\
+        \ Desktop post-processing shaders are unavailable.\\n' >> notes.md\nfi\nprintf '\\nBuilt and tested by [GitHub CI](https://github.com/%s/actions/runs/%s),\
+        \ source commit `%s`.\\n' \"$GH_REPO\" \"$BUILD_RUN\" \"$BUILD_SHA\" >> notes.md\npython3 - <<'EDIT'\nimport json,os\n\
+        from pathlib import Path\nPath('release-edit.json').write_text(json.dumps({'draft':False,'prerelease':os.environ['STREAM']!='desktop','make_latest':'true'\
+        \ if os.environ['STREAM']=='desktop' else 'false','body':Path('notes.md').read_text()}))\nEDIT\nrelease_id=$(jq -r\
+        \ .id draft.json)\ngh api --method PATCH \"repos/$GH_REPO/releases/$release_id\" --input release-edit.json > edited.json\n\
+        gh api \"repos/$GH_REPO/releases/tags/$RELEASE_TAG\" > published.json\njq -e --arg tag \"$RELEASE_TAG\" '.draft ==\
+        \ false and .tag_name == $tag' published.json\ntest \"$(gh api \"repos/$GH_REPO/git/ref/tags/$RELEASE_TAG\" --jq .object.sha)\"\
+        \ = \"$BUILD_SHA\"\necho \"Published: $(jq -r .html_url published.json)\"\n"
+    - name: Retain release verification receipts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-receipts-desktop-v0.1.7
+        path: 'run.json
+
+          jobs.json
+
+          tag.json
+
+          draft.json
+
+          published.json
+
+          notes.md
+
+          packages/SHA256SUMS.txt'
+        if-no-files-found: warn
+        retention-days: 7
