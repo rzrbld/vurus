@@ -1013,3 +1013,14 @@ if(BUILD_TESTING)
   target_include_directories(circular_ammo_world_test PRIVATE src)
   add_test(NAME circular_ammo_world COMMAND circular_ammo_world_test)
 endif()
+
+# Triple emitter stock/order regression and optional original-resource visual check.
+if(BUILD_TESTING)
+  add_executable(triple_ammo_world_test tests/triple_ammo_world_test.cpp ${VYRUZ_WORLD_TEST_SOURCES})
+  target_include_directories(triple_ammo_world_test PRIVATE src)
+  add_test(NAME triple_ammo_world COMMAND triple_ammo_world_test)
+  add_executable(triple_visual_audit EXCLUDE_FROM_ALL
+    tests/triple_visual_audit.cpp $<TARGET_OBJECTS:vyruz_save_audit_core>)
+  target_include_directories(triple_visual_audit PRIVATE src)
+  target_link_libraries(triple_visual_audit PRIVATE SDL2::SDL2 OpenGL::GL indeo)
+endif()

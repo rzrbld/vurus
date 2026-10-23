@@ -1648,24 +1648,25 @@ void GameWorld::fire(size_t id,bool held,bool sweep,std::optional<ContentPositio
     if(held && !stock->second.count)audioEvent(AudioEventKind::DryFire,id,weapon.name);
     const auto beforeAmmo=stock->second.count;
     const bool circularVisit=id==player_ && (sweep || surprise_.active(SurpriseKind::Circular));
-    const bool circularCharge=!sweep || surprise_.circularRemaining==1;
-    const bool circularSharedCharge=surprise_.active(SurpriseKind::Circular) || surprise_.active(SurpriseKind::Triple);
+    const bool chargeVisit=!sweep || surprise_.circularRemaining==1;
+    const bool sharedCharge=surprise_.active(SurpriseKind::Circular) || surprise_.active(SurpriseKind::Triple);
+    const bool tripleCopies=id==player_ && surprise_.tripleOffset>0;
+    const bool deferredCharge=circularVisit || tripleCopies || (id==player_ && surprise_.active(SurpriseKind::Triple));
+    const size_t copiesPerBarrel=tripleCopies?3:1;
     const size_t firingStock=static_cast<size_t>(stock-actor.ammo.begin());
     // Select at most the two authored barrels without spending real rounds.
-    // Circular charges after each actual product (443bd0), not by refunding
+    // Circular/Triple charge after each actual product (443bd0), not by refunding
     // ordinary per-barrel depletion after it has already suppressed a barrel.
     uint32_t barrelBudget=beforeAmmo?2:0;
-    auto& requestAmmo=circularVisit?barrelBudget:stock->second.count;
+    auto& requestAmmo=deferredCharge?barrelBudget:stock->second.count;
     if(sweep)weapon.state.lastFireMs.reset();
     auto requests=fireWeapon(weapon.config,weapon.state,held,static_cast<uint64_t>(elapsedMs_),requestAmmo,aiming,actor.nativeAmmoOwner.activeAmmo,
         sweep?WeaponFireVisit::PendingSweep:WeaponFireVisit::Input);
     std::vector<ShotPositionOffset> shotOrigins(requests.size());
     if(id==player_ && !requests.empty()) {
-        if(!circularVisit && (surprise_.active(SurpriseKind::Triple) || surprise_.active(SurpriseKind::Circular) || sweep))
-            stock->second.count=beforeAmmo-((!sweep || surprise_.circularRemaining==1)?1:0);
-        if(surprise_.tripleOffset>0 && stock->second.count>0) {
+        if(tripleCopies) {
             const auto originals=requests;requests.clear();shotOrigins.clear();
-            for(const auto& request:originals)for(int side:{-1,1,0}) {
+            for(const auto& request:originals)for(int side:{1,-1,0}) {
                 requests.push_back(request);
                 shotOrigins.push_back(tripleFireOffset(actor.direction,surprise_.tripleOffset,side));
             }
@@ -1709,14 +1710,17 @@ void GameWorld::fire(size_t id,bool held,bool sweep,std::optional<ContentPositio
     // 443fc4..443fee: In-ground forces0; otherwise explicit Fire-altitude or
     // shooter runtime altitude replaces the ammunition class's initial height.
     if(cls->flags.inGround.value_or(false))launchAltitude=0;
-    bool circularCompleted=true,circularCharged=false;
+    bool emissionCompleted=true,charged=false;
+    ShotPositionOffset start;
     for (size_t shotIndex=0;shotIndex<requests.size();++shotIndex) {
         // Native retains the old ammo pointer even if 444450 selected a new
         // stock/weapon. Finish this call before emitting from the replacement.
-        if(circularVisit && actors_[id].ammo.slots[firingStock].second.count==0)break;
+        if(deferredCharge && actors_[id].ammo.slots[firingStock].second.count==0)break;
         const auto& shot=requests[shotIndex];
         const auto origin=shotOrigins[shotIndex];
-        const auto start=projectileStartOffset(firingDirection,nativeWeaponStartDistance(
+        // 443e1f precedes the copy loop; all three origins share this barrel's
+        // forward-distance draw. The next barrel starts after 44437f.
+        if(shotIndex%copiesPerBarrel==0)start=projectileStartOffset(firingDirection,nativeWeaponStartDistance(
             startDistance,muzzleSpan,muzzleSpan,effectCamera_?effectCamera_->modeFlags:0,nativeWorldRandom_));
         Projectile projectile;
         projectile.owner=id;projectile.classId=cls->id;
@@ -1828,31 +1832,31 @@ void GameWorld::fire(size_t id,bool held,bool sweep,std::optional<ContentPositio
         projectiles_[emitted].motion=launchedMotion;projectiles_[emitted].velocity=launchedVelocity;
         projectiles_[emitted].directionX=launchedDirectionX;projectiles_[emitted].directionZ=launchedDirectionZ;
         updateSpiderProjectileNavigation(projectiles_[emitted]);
-        if(circularVisit && circularCharge && (!circularSharedCharge || !circularCharged)) {
+        if(deferredCharge && chargeVisit && (!sharedCharge || !charged)) {
             // Reacquire after construction: actors_ may have grown. The ADD
             // slot identity survives compatible-ammo and weapon selection.
             auto& count=actors_[id].ammo.slots[firingStock].second.count;
-            --count;circularCharged=true;
+            --count;charged=true;
             if(count==0) {
                 selectLoadedPlayerWeapon();
                 const auto& selected=actors_[id];
                 const auto next=weaponStock(selected,selected.weapons[selected.selectedWeapon]);
                 if(next==selected.ammo.end() || next->second.count==0) {
-                    circularCompleted=false;break;
+                    emissionCompleted=false;break;
                 }
             }
         }
     }
     // 443cbe aborts before 444390, even if an earlier barrel was created.
-    if(circularVisit && !circularCompleted)surprise_.circularRemaining=0;
-    if(circularVisit && circularCompleted) {
+    if(circularVisit && !emissionCompleted)surprise_.circularRemaining=0;
+    if(circularVisit && emissionCompleted) {
         if(surprise_.circularRemaining>0)--surprise_.circularRemaining;
         auto facing=nativePlayerFacing_;setPlayerDirection((firingDirection+1)%24);
         facing.logicalHeading=(facing.logicalHeading+1)%24;facing.orthogonalHeading=(facing.logicalHeading+3)%24;
         facing.pose+=2;if(facing.pose>48)facing.pose=1;nativePlayerFacing_=facing;
     }
     // Native emitter repeats444450 immediately after consuming the last round.
-    if(id==player_ && !requests.empty() && !circularVisit)selectLoadedPlayerWeapon();
+    if(id==player_ && !requests.empty() && !deferredCharge)selectLoadedPlayerWeapon();
 }
 void GameWorld::updateProjectile(size_t index,float seconds,bool nativeRouting) {
     auto& shot=projectiles_[index];
