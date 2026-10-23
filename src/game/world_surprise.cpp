@@ -104,6 +104,10 @@ void GameWorld::initializeSurpriseOrbitAltitude() {
 void GameWorld::applySurprise() {
     surprise_.applied=true;
     const auto kind=surprise_.kind;
+    // 41c647: World clock low two bits choose sample slots 0x23/0x28.
+    // Queue once on application; the existing speech scheduler owns admission.
+    if(kind==SurpriseKind::Xtc)
+        voiceEvent((static_cast<uint64_t>(elapsedMs_)&3)<2?"V-ARIBA.WAV":"V-YEEPEE.WAV",3000,2000,0);
     if(kind==SurpriseKind::Shield)actors_[player_].shieldUpStep=actors_[player_].shieldUpStep.value_or(0)+10.f;
     initializeSurpriseOrbitAltitude();
     if(kind==SurpriseKind::Banana) {

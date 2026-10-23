@@ -56,7 +56,13 @@ int main(){
  {Fixture f(13);f.activate();f.tick(15);check(f.world.player().vitals.shield==100,"Auto Shield Up regenerates and clamps");}
  {Fixture f(18);f.activate();f.world.damage(0,10000,2);check(f.world.player().alive&&f.world.player().vitals.energy==100,"Invulnerability blocks normal damage");f.world.cancelSurprise();f.world.damage(0,10000,2);check(!f.world.player().alive,"Protection expires");}
  for(int id:{4,10,14}){Fixture f(id);f.activate();WorldInput in;in.fire=true;f.tick(30,in);check(f.world.shotsFired==0,"Jam/motor/drone refuse ordinary gun fire");f.world.cancelSurprise();f.tick(1,in);check(f.world.shotsFired>0,"Fire resumes after restriction removed");}
- {Fixture f(6);f.activate();const auto p=f.world.playerPosition();f.tick(30);check(nativeDistanceSquared(p,f.world.playerPosition())>1,"XTC forces forward without input");}
+ {Fixture f(6);f.world.takeAudioEvents();f.activate();
+  const auto events=f.world.takeAudioEvents();unsigned voices=0;
+  for(const auto& e:events)if(e.kind==AudioEventKind::Voice){++voices;check(e.name==((static_cast<uint64_t>(f.world.elapsedMilliseconds())&3)<2?"V-ARIBA.WAV":"V-YEEPEE.WAV")&&e.delayMs==3000&&e.holdMs==2000&&e.tailMs==0,"authored XTC pickup queues native delayed voice");}
+  check(voices==1,"authored XTC pickup requests one apply voice");
+  const auto p=f.world.playerPosition();f.tick(30);check(nativeDistanceSquared(p,f.world.playerPosition())>1,"XTC forces forward without input");
+  for(const auto& e:f.world.takeAudioEvents())check(e.kind!=AudioEventKind::Voice,"active authored XTC does not repeat voice");
+ }
  {Fixture f(10);f.activate();WorldInput input;input.movement.forward=1;const auto p=f.world.playerPosition();f.tick(30,input);check(nativeDistanceSquared(p,f.world.playerPosition())<.01,"Motor lock prevents acceleration from rest");}
  {Fixture normal(20),reverse(2);normal.activate();reverse.activate();WorldInput input;input.movement.strafe=1;normal.tick(20,input);reverse.tick(20,input);check(normal.world.playerPosition().y>1000&&reverse.world.playerPosition().y<1000,"Reverse swaps strafe direction");}
  {Fixture f(2);f.activate();f.world.setPlayerDirection(0);WorldInput aim;aim.movement.aimActive=true;const auto n=nativeHeading(5);const auto v=nativeToSurface(n.x,n.y);aim.movement.aimX=v.x;aim.movement.aimY=v.y;

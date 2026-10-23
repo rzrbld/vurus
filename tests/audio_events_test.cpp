@@ -1,6 +1,8 @@
 #include "snapshot_fixture.h"
 #include "game/world.h"
 #include "game/save_state.h"
+#include "game/save_file.h"
+#include "audio/voice_schedule.h"
 #include "game/spider_contact_native.h"
 #include <algorithm>
 #include <iostream>
@@ -28,6 +30,38 @@ static void event(const std::vector<AudioEvent>& es,const std::string& name,unsi
 int main(){try{
  const char* money[]={"V-LAUGH-1.WAV","V-YEEPEE.WAV","V-YEAH.WAV","V-HEY.WAV","V-YO.WAV","V-GIVE-ME.WAV"};
  for(unsigned residue=0;residue<16;++residue){Run r;r.world.spawn(ClassId{1},r.world.playerPosition());auto s=r.world.snapshot();s.elapsedMs=1008+residue-62.5;r.restore(s);r.world.tick(.0625f,{});need(r.world.player().vitals.money==100,"money actually collected");auto v=r.voices();if(residue<6){need(v.size()==1,"money emits one selected commentary");event(v,money[residue],0,1000,0);}else need(v.empty(),"native money silent residues");}
+ // XTC selects from the apply-time clock, not pickup time or RNG. Eight
+ // exact 62.5 ms ticks exhaust its existing 500 ms pending interval.
+ for(unsigned residue=0;residue<4;++residue){
+  Run r;auto start=r.world.snapshot();start.elapsedMs=1008+residue-562.5;r.restore(start);
+  need(r.world.debugSetSurprise(SurpriseKind::Xtc),"XTC accepted");
+  need(r.voices().empty(),"XTC pickup does not request apply speech early");
+  for(unsigned i=0;i<8;++i){r.world.tick(.0625f,{});need(r.voices().empty(),"no XTC voice during pending interval");}
+  need(!r.world.surprise().applied&&r.world.surprise().delayMs==0,"XTC pending boundary reached");
+  const auto pending=r.world.snapshot();r.restore(pending);
+  r.world.tick(.0625f,{});need(r.world.surprise().applied,"live World applies XTC");
+  need(r.world.elapsedMilliseconds()==1008+residue,"controlled apply-time residue");
+  const auto voices=r.voices();need(voices.size()==1,"XTC requests exactly one apply-time voice");
+  const char* name=residue<2?"V-ARIBA.WAV":"V-YEEPEE.WAV";event(voices,name,3000,2000,0);
+  const auto applied=r.world.snapshot();
+  VoiceSchedule queue;const auto& voice=voices.front();
+  need(queue.enqueue(voice.name,10000,voice.delayMs,voice.holdMs,voice.tailMs),"World voice enters speech queue");
+  need(queue.advance(12999).empty(),"XTC speech waits full three seconds from application");
+  need(queue.advance(13000)==std::vector<std::string>{name},"XTC speech due at three-second boundary");
+  need(queue.nextAllowed()==15000,"XTC holds speech admission for two seconds");
+  need(!queue.enqueue(name,14999,0,0,0),"XTC sample remains deduplicated during hold");
+  need(queue.advance(15000).empty()&&queue.size()==0,"XTC has no extra suppression tail or repeat");
+  r.restore(applied);for(unsigned i=0;i<8;++i){r.world.tick(.0625f,{});need(r.voices().empty(),"active/restored XTC does not requeue speech");}
+  // Disk saves already remove Surprise state. Preserve that contract for both
+  // pending and applied XTC, rather than inventing persisted speech requests.
+  for(const auto& checkpoint:{pending,applied}){
+   SaveGame save,decoded;save.currentLevel=r.scene.mapPath;save.levels[save.currentLevel].world=checkpoint;
+   std::vector<uint8_t> bytes;need(encodeSave(save,bytes,r.error)&&decodeSave(bytes,decoded,r.error),r.error);
+   const auto& normalized=decoded.levels.at(save.currentLevel).world;
+   need(normalized.surprise.kind==SurpriseKind::None,"disk normalization removes XTC");
+   r.restore(normalized);r.world.tick(.0625f,{});need(r.voices().empty(),"disk-normalized XTC cannot replay speech");
+  }
+ }
  const char* weapons[]={"V-GUN.WAV","V-GRENADE.WAV","V-ROCKETS.WAV","V-FLAME.WAV","V-SAW.WAV","V-HOMING.WAV","V-LAZER.WAV","V-PULSAR.WAV","V-MINE.WAV"};
  {Run r;for(unsigned i=1;i<=9;++i){WorldInput in;in.weaponDelta=1;r.world.tick(.0625f,in);event(r.voices(),weapons[i%9],750,500,0);}}
  for(float shield:{1.01f,1.f,0.f}){Run r;auto s=r.world.snapshot();s.actors[0].vitals.shield=shield;r.restore(s);r.world.tick(.0625f,{});auto v=r.voices();if(shield<=1)event(v,"V-SHIELD-LOW.WAV",0,1000,15000);else need(v.empty(),"one percent threshold, not ten percent");}
@@ -48,5 +82,5 @@ int main(){try{
  {Run r;r.world.damage(1,100,0,true);need(r.voices().empty(),"non-Ammo radial damage has no ordinary kill voice");}
  {Run r;auto s=r.world.snapshot();s.actors[1].hudEnemy=false;s.actors[1].enemy=false;s.actors[1].ordinaryAI.reset();r.restore(s);r.world.damage(1,100,0,true,true);event(r.voices(),"V-YEAH.WAV",1000,1500,0);}
  {Run r;r.world.damage(1,100,1,true,true);need(r.voices().empty(),"foreign Ammo owner has no player kill voice");}
- std::cout<<"PASS money residue selection, weapon slots/timing, shield threshold, locked warnings, gate access, actual projectile kill commentary\n";return 0;
+ std::cout<<"PASS money residue selection, XTC apply speech/scheduler/continuation, weapon slots/timing, shield threshold, locked warnings, gate access, actual projectile kill commentary\n";return 0;
 }catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}
