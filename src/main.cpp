@@ -249,6 +249,7 @@ vyruz::EnemyAnimationView enemyAnimationView(App& a,float cameraX,float cameraY)
     //447320 ->446780 ->4467de sets world20&100 after level graphics load.
     //440336 clears it on game-loop exit. No per14ms clock prerequisite.
     result.visibilityStep=a.haveLevel;
+    result.savingPlot=a.world.activeSavingPlot();
     return result;
 }
 void advanceSceneAnimation(App& a,double milliseconds,double worldTimeMs) {

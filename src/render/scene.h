@@ -15,7 +15,7 @@
 #include <map>
 
 namespace vyruz {
-//431ae0/433b30 enemy-only phase protocol. Translation is native surface
+//431ae0/433b30 native phase protocol. Translation is native surface
 // world100c/1010 (normally -camera), dimensions are the virtual viewport.
 struct EnemyAnimationView {
     int32_t translationX=0,translationY=0;
@@ -28,6 +28,7 @@ struct EnemyAnimationView {
     bool visibilityStep=false;
     // Explicit isolated oracle context; gameplay must supply linked cells.
     bool unboundedOracle=false;
+    std::optional<size_t> savingPlot;
 };
 enum class EnemyAnimationPhase { AwakeUpdate, VisibleUpdate, Draw };
 enum class SceneAudioCueKind { Play,Held,Forget };
@@ -65,6 +66,7 @@ public:
         const EnemyAnimationView&,EnemyAnimationPhase,std::optional<size_t> awakeActor={});
     void syncActors(const std::vector<ActorState>&);
     // Test oracle; ordinary callers without a World epoch keep full synchronization.
+    void setNativeItemPhases(bool enabled) { nativeItemPhases_=enabled; }
     void setActorSyncReuse(bool enabled) { reuseActorSync_=enabled;actorSyncValid_=false; }
     std::vector<std::pair<size_t,uint64_t>> finishedGates(const std::vector<ActorState>&) const;
     std::vector<size_t> finishedEffects(const std::vector<ActorState>&) const;
@@ -95,13 +97,15 @@ private:
         int shadowPoseStride=-1;
         bool turretBase=false; // Native primary-bank sequence25, ground anchor.
         bool bankedEnemy=false,tank=false;
-        bool nativeEnemy=false,nativeGraphicUpdate=false,nativeInGround=false,nativeDetail=false;
+        bool nativeItem=false,nativeSavingPlot=false,nativeEnemy=false,nativeGraphicUpdate=false,nativeInGround=false,nativeDetail=false;
         bool enemyDrawAdmitted=false;
         int enemyLean=0,leanSubtype=0; // Renderer4333f0 state, independent of gameplay.
         uint64_t audioIdentity=0;
         bool drawBindingPending=false;
     };
     bool nativeEnemyPhases_=false;
+    bool nativeItemPhases_=true;
+    void advanceNativeItem(size_t,double,const std::vector<ActorState>&,const EnemyAnimationView&,EnemyAnimationPhase,bool);
     bool reuseActorSync_=true,actorSyncValid_=false;
     const std::vector<ActorState>* synchronizedActors_=nullptr;
     size_t synchronizedActorCount_=0;

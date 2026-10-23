@@ -380,6 +380,7 @@ public:
     const std::vector<ActorState>& actors() const { return actors_; }
     const std::vector<Projectile>& projectiles() const { return projectiles_; }
     size_t playerIndex() const { return player_; }
+    std::optional<size_t> activeSavingPlot() const { return savePlot_; }
     // Derived renderer-cache epoch; never serialized or used by simulation.
     uint64_t renderActorRevision() const { return renderActorRevision_; }
     const ActorState& player() const { return actors_.at(player_); }

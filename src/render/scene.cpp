@@ -464,6 +464,10 @@ bool SceneRenderer::sync(const SceneContent& scene,std::string& error) {
             channel.nativeEnemy=family=="cop"||family=="burner"||family=="walker"||family=="jeep"||family=="roller"||family=="heli"||family=="turret"||family=="tank"||family=="spider"||family=="staticgen";
             const auto* cls=object.classId.value<scene.classes.size()?&scene.classes[object.classId.value]:nullptr;
             channel.nativeGraphicUpdate=propertyBool(cls?cls->properties:object.properties,"Graphic-update-needed");
+            // Item (12) without Graphic-update-needed uses the native cell producer.
+            // Saving-plot body playback requires the selected world20c8 actor.
+            channel.nativeItem=family=="item"&&!channel.nativeGraphicUpdate&&!invisible;
+            channel.nativeSavingPlot=propertyBool(cls?cls->properties:object.properties,"Saving-plot");
             channel.nativeInGround=(cls?cls->flags:object.flags).inGround.value_or(false);
             channel.nativeDetail=(cls?cls->flags:object.flags).detail.value_or(false);
             const size_t leanBanks=family=="cop"?31:family=="burner"?27:0;
@@ -766,6 +770,25 @@ void SceneRenderer::advanceEnemyChannels(size_t id,double milliseconds,const std
         holdAudio(c);
     }
 }
+void SceneRenderer::advanceNativeItem(size_t id,double milliseconds,const std::vector<ActorState>& actors,
+    const EnemyAnimationView& view,EnemyAnimationPhase phase,bool groundPass) {
+    if(!nativeItemPhases_||phase==EnemyAnimationPhase::AwakeUpdate||
+       view.playerOnly||
+       id>=actors.size()||!actors[id].alive||id>=objectChannels_.size())return;
+    for(const auto index:objectChannels_[id]) {
+        auto& c=channels_[index];
+        if(!c.nativeItem||c.firing||c.nativeInGround!=groundPass)continue;
+        if(!c.shadow&&c.nativeSavingPlot&&view.savingPlot!=id)continue;
+        // New bindings can reach this phase before the next broad synchronization.
+        syncActorChannel(c,actors[id]);
+        //431f00..431fa9: Item shadow then body playback, before draw filtering.
+        for(const auto& frame:c.pendingAudio)queueAudio(c,frame);
+        c.pendingAudio.clear();
+        const auto& sequence=c.bank->animation.sequences[c.sequence-1];
+        c.cursor.advance(sequence,milliseconds,false,[&](const auto& frame){queueAudio(c,frame);});
+        holdAudio(c);
+    }
+}
 void SceneRenderer::advanceEnemyPhase(double milliseconds,const std::vector<ActorState>& actors,
     const EnemyAnimationView& view,EnemyAnimationPhase phase,std::optional<size_t> awakeActor) {
     if(!std::isfinite(milliseconds)||milliseconds<0)return;
@@ -775,6 +798,7 @@ void SceneRenderer::advanceEnemyPhase(double milliseconds,const std::vector<Acto
     if(phase==EnemyAnimationPhase::Draw)for(const auto& indices:enemyObjectChannels_)
         for(const auto i:indices)channels_[i].enemyDrawAdmitted=false;
     const auto admitted=[&](size_t id,bool groundPass) {
+        advanceNativeItem(id,milliseconds,actors,view,phase,groundPass);
         if(id>=actors.size()||id>=enemyObjectChannels_.size()||enemyObjectChannels_[id].empty()||!actors[id].alive)return;
         auto& c=channels_[enemyObjectChannels_[id].front()];
         if(c.nativeInGround!=groundPass)return;
@@ -858,6 +882,11 @@ void SceneRenderer::advance(double milliseconds,const std::vector<ActorState>* a
         if(channel.skipNewbornAdvance){channel.skipNewbornAdvance=false;continue;}
         if(playerOnly && (!playerObject_ || channel.object!=*playerObject_))continue;
         if(channel.firing)continue;
+        if(nativeEnemyPhases_&&nativeItemPhases_&&channel.nativeItem) {
+            // Preserve construction/reset audio independently of camera playback.
+            for(const auto& frame:channel.pendingAudio)queueAudio(channel,frame);
+            channel.pendingAudio.clear();continue;
+        }
         if(nativeEnemyPhases_&&channel.nativeEnemy)continue;
         if(channel.derivedInvisible && actors && channel.object<actors->size()) {
             channel.fadeClockMs+=milliseconds;
