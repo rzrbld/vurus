@@ -65,45 +65,46 @@ settings and command-line options.
 
 ## Performance
 
-Measured on **Anbernic RG40XX H / H700 / Mali-G31, 1 GB RAM**, muOS
-(2026-10-23): **991 points**, 640×480, trilinear filtering, ground details,
-shadows, reactor FX and vignette on. Uncapped, VSync off, music off.
-Preparing sprites from the original camera-cell window improves the matched
-Burner encounter from **47.9 to 58.4 bench FPS (+22%)**.
+On-device results (2026-10-23), with ground details, shadows, reactor FX and
+vignette on; music off. **H700**: Anbernic RG40XX H, muOS, 640×480, trilinear,
+VSync off, **991 points**. **RK3326**: ArkOS, native 480×320, nearest filtering;
+the driver retains VSync, so this run is **unscored**. Different rendering
+conditions and populations make these separate results, not a controlled hardware comparison.
+Both use Mali-G31 graphics.
 
-| Map / start position | Bench FPS | Enemies nearby¹ | RSS MiB² |
-| --- | ---: | ---: | ---: |
-| CAVE/T1C2 · 5230,1080 | 58.2 | 30 | 130.8 |
-| CPU/T3P2 · 3523,2763 | 60.0 | 11 | 139.0 |
-| UNDERGROUND/T2U1 · 4870,2180 | 59.9 | 39 | 148.2 |
-| UNDERGROUND/T2U1 · 3968,348 | 60.0 | 8 | 142.3 |
-| HITEK/T1H1 · 3670,2570 | 59.9 | 18 | 137.4 |
-| HITEK/T1H1 · 2166,1107 | 60.0 | 19 | 137.8 |
-| HITEK/T2H2 · 4571,2841 | 58.4 | 30 | 137.8 |
+The original camera-cell draw path improves the matched H700 Burner control
+from **47.9 to 58.4 bench FPS (+22%)**.
 
-Median timings in milliseconds: CPU columns are per simulation tick; render/present
-is per frame and includes CPU preparation, driver work and swap. CPU total includes
-World, animation, audio and other update work.
+| Map / start position | Enemies nearby¹ | H700 FPS | H700 RSS MiB² | RK3326 FPS | RK3326 RSS MiB² |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| CAVE/T1C2 · 5230,1080 | 30 | 58.2 | 130.8 | 38.3 | 128.1 |
+| CPU/T3P2 · 3523,2763 | 11 | 60.0 | 139.0 | 49.4 | 115.8 |
+| UNDERGROUND/T2U1 · 4870,2180 | 39 | 59.9 | 148.2 | 43.1 | 130.2 |
+| UNDERGROUND/T2U1 · 3968,348 | 8 | 60.0 | 142.3 | 50.2 | 130.4 |
+| HITEK/T1H1 · 3670,2570 | 18 | 59.9 | 137.4 | 44.1 | 126.7 |
+| HITEK/T1H1 · 2166,1107 | 19 | 60.0 | 137.8 | 46.1 | 128.3 |
+| HITEK/T2H2 · 4571,2841 | 30 | 58.4 | 137.8 | 33.3 | 127.5 |
 
-| Map / start position | World | Animation | CPU total | Render / present |
+Median timings for **HITEK/T2H2 · 4571,2841** (milliseconds). CPU columns are
+per tick; render/present is per frame and includes CPU preparation, driver work
+and swap. CPU total includes World, animation, audio and other update work.
+
+| Device | World | Animation | CPU total | Render / present |
 | --- | ---: | ---: | ---: | ---: |
-| CAVE/T1C2 · 5230,1080 | 3.79 | 2.07 | 7.33 | 8.93 |
-| CPU/T3P2 · 3523,2763 | 3.96 | 1.91 | 7.14 | 9.36 |
-| UNDERGROUND/T2U1 · 4870,2180 | 3.26 | 1.85 | 6.35 | 9.58 |
-| UNDERGROUND/T2U1 · 3968,348 | 2.23 | 1.80 | 5.15 | 11.43 |
-| HITEK/T1H1 · 3670,2570 | 3.41 | 1.87 | 6.50 | 10.15 |
-| HITEK/T1H1 · 2166,1107 | 3.19 | 2.03 | 6.55 | 9.95 |
-| HITEK/T2H2 · 4571,2841 | 5.14 | 2.54 | 9.50 | 6.65 |
+| H700 | 5.14 | 2.54 | 9.50 | 6.65 |
+| RK3326 | 7.36 | 2.78 | 11.99 | 17.51 |
 
 Seven scenes, 120 warmup + 1,200 measured steps each. Bench FPS = 1,000 / mean
 step time, with one fixed simulation tick and frame per step; it is not ordinary
 gameplay FPS. ¹ Alive enemies within 1,000 world units at spawn. ² Highest periodic
-process RSS sample. Settings, comparisons, full distributions and raw data:
-[H700 performance report](docs/performance_update_2026-10-23.md).
+process RSS sample. Full per-map timings, settings and raw data:
+[H700 report](docs/performance_update_2026-10-23.md) ·
+[RK3326 report](docs/performance_rk3326_2026-10-23.md).
 
-![Latest H700 benchmark results with trilinear filtering and ground details](docs/images/h700-benchmark-results-2026-10-23.png)
+<img src="docs/images/h700-benchmark-results-2026-10-23.png" alt="H700 benchmark: 991 points, Burner 58.4 bench FPS" width="48%"> <img src="docs/images/rk3326-benchmark-results-2026-10-23.png" alt="RK3326 native 480x320 benchmark: complete, unscored because driver VSync remains enabled" width="48%">
 
-*Actual H700 results screen from the same run: Burner 58.4 bench FPS, score 991.*
+*Actual results screens: H700 left, RK3326 right. The native-resolution fallback
+leaves saved game settings unchanged; small text at 480×320 remains a usability limitation.*
 
 ## Screenshots
 
