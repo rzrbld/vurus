@@ -79,7 +79,7 @@ void GameWorld::updateActorCreates(size_t parent,ContentPosition previous,bool c
         // are immutable authored data, recovered by the same admission order.
         if(launchedDeathProduct(scene_->classes[create.classId.value])) {
         const TextNode* launch=nullptr;size_t accepted=0;
-        for(const auto& node:scene_->objects[parent].properties) {
+        for(const auto& node:scene_->objects[parent].properties.read()) {
             if(!contentNameIs(node.key,"create"))continue;
             const auto* target=findClass(*scene_,propertyText(node.children,"Name"));
             if(!target || !supportedCreate(*target,node))continue;

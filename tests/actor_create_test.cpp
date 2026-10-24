@@ -62,5 +62,25 @@ int main(){try{
  GameWorld trail;need(vyruz_test::loadManagedFixture(trail,s,level,error),error);need(!trail.actors()[1].creates[0].previousOrigin,"constructor leaves trail history unset");
  trail.tick(.01f,{});need(!trail.actors().back().trailSegment&&trail.actors()[1].creates[0].previousOrigin.has_value(),"first update seeds history without connection");
  trail.tick(.01f,{});need(trail.actors().back().trailSegment.has_value(),"second update connects prior emission");
+
+ // A spawned emitter's read-only launch lookup must retain its class tree,
+ // including when nested CREATE products grow the scene/actor vectors.
+ s=fixture();s.objects.resize(1);
+ auto launch=create("White-Spark",0,14);
+ launch.children.push_back(number("Dir","9"));launch.children.push_back(number("Set-speed","1"));launch.children.push_back(number("Speed","123"));
+ s.classes[1].properties={number("Managed","1"),number("Altitude","24"),launch};
+ s.classes[2].name="White-Spark";s.classes[2].behaviours={"Straight"};
+ s.classes[2].properties={number("Managed","1"),number("Launched","1"),number("Use-inertia","1"),number("Bounding-box-size","0"),create("Second",0,0)};
+ GameWorld shared;need(vyruz_test::loadManagedFixture(shared,s,level,error),error);
+ const auto* definition=s.classes[1].properties.read().data();
+ const auto parent=shared.spawn(s.classes[1].id,{600,500});
+ need(parent<shared.actors().size()&&s.objects.size()==4,"launched child and nested product constructed");
+ need(s.objects[parent].properties.read().data()==definition,"read-only launched CREATE retains shared parent properties");
+ need(shared.actors()[parent+1].direction==9&&shared.actors()[parent+1].turnMs==123,"launch modifiers still applied");
+ shared.tick(.014f,{});
+ need(s.objects[parent].properties.read().data()==definition,"repeated launch lookup retains class sharing");
+ need(shared.actors()[parent].creates[0].nextMs==28,"shared lookup preserves CREATE schedule");
+ s.objects[parent].properties.push_back(number("Test-instance-only","1"));
+ need(s.objects[parent].properties.read().data()!=definition&&!contentProperty(s.classes[1].properties,"Test-instance-only"),"real property mutation still detaches and protects class");
  std::cout<<"PASS ordinary CREATE construction, timing, lifetime, retry, nesting and save continuation\n";
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
