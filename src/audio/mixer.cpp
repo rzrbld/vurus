@@ -114,7 +114,11 @@ void AudioMixer::update(uint64_t handle, float gain, float pan) {
         voice.pan = std::isfinite(pan) ? std::clamp(pan, -1.0f, 1.0f) : 0;
     }
 }
-void AudioMixer::stopEffects() { for (auto& voice : voices_) { voice.active = false; voice.handle = 0; } }
+void AudioMixer::stopEffects(uint64_t preserveHandle) {
+    for (auto& voice : voices_) if(!preserveHandle || voice.handle!=preserveHandle) {
+        voice.active=false;voice.handle=0;
+    }
+}
 void AudioMixer::stop(uint64_t handle) { for (auto& voice : voices_) if (handle && voice.handle == handle) voice = {}; }
 void AudioMixer::stopMusic() { music_.active = queuedMusic_.active = musicOverlay_.active = false; }
 void AudioMixer::stopAll() { stopEffects(); stopMusic(); outputGain_ = 1; }
@@ -297,7 +301,7 @@ AudioMixer::MusicState AudioDevice::musicState() const { DeviceLock lock(device_
 bool AudioDevice::isPlaying(uint64_t handle) const { DeviceLock lock(device_); return mixer_.isPlaying(handle); }
 std::optional<double> AudioDevice::playbackMilliseconds(uint64_t handle) const { DeviceLock lock(device_); return mixer_.playbackMilliseconds(handle); }
 void AudioDevice::update(uint64_t handle, float gain, float pan) { DeviceLock lock(device_); mixer_.update(handle, gain, pan); }
-void AudioDevice::stopEffects() { DeviceLock lock(device_); mixer_.stopEffects(); }
+void AudioDevice::stopEffects(uint64_t preserveHandle) { DeviceLock lock(device_); mixer_.stopEffects(preserveHandle); }
 void AudioDevice::stop(uint64_t handle) { DeviceLock lock(device_); mixer_.stop(handle); }
 void AudioDevice::stopMusic() { DeviceLock lock(device_); mixer_.stopMusic(); }
 void AudioDevice::stopAll() { DeviceLock lock(device_); mixer_.stopAll(); }

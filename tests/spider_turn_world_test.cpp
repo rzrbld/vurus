@@ -73,7 +73,7 @@ int main(){try{
     SaveGame save;save.currentLevel=scene.mapPath;save.levels[scene.mapPath].world=snapshot;
     std::vector<uint8_t> bytes;SaveGame decoded;
     need(encodeSave(save,bytes,error) && decodeSave(bytes,decoded,error),error.c_str());
-    need(bytes.size()>12 && bytes[8]==37 && bytes[9]==0,"Current writer retains v32 shared native controller extension");
+    need(bytes.size()>12 && bytes[8]==38 && bytes[9]==0,"Current writer retains v32 shared native controller extension");
     auto restoredScene=fixture();GameWorld restored;need(restored.load(restoredScene,terrain,error),error.c_str());
     need(restored.restoreSnapshot(decoded.levels.at(scene.mapPath).world,error),error.c_str());
     need(fields(*restored.actors()[1].spiderAI->turn)==fields(*world.actors()[1].spiderAI->turn),"v29 restores mid-pose desired/logical/countdown state");

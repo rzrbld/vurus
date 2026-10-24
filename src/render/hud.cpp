@@ -1,3 +1,4 @@
+#include "render/panel_help_native.h"
 #include "render/hud.h"
 #include "render/menu_marquee.h"
 #include "assets/native_font_text.h"
@@ -491,7 +492,7 @@ void HudRenderer::draw(Gfx& gfx,const GameWorld& world,const SceneContent& scene
     sequence(gfx,panel_,11,w/2.f,0,ratio(p.vitals.shield,p.vitals.shieldMax));
     sequence(gfx,panel_,12,w/2.f,0,ratio(p.vitals.energy,p.vitals.energyMax));
     sequence(gfx,panel_,2,w-1.f,0);
-    const size_t indicator=world.surprise().active(SurpriseKind::Pinball) && p.contactConfig.elasticity!=1.5f?4:5;
+    const size_t indicator=world.playerSpeedIndicatorLow()?4:5;
     sequence(gfx,panel_,indicator,w-1.f,0,1,panelPose(indicator));
     sequence(gfx,panel_,15,0,0);
     if(const auto* pose=panelPose(15))sequence(gfx,panel_,15,0,0,1,pose);
@@ -963,5 +964,42 @@ void HudRenderer::advanceInventory(double ms,const GameWorld& world,const Invent
     }
     if(view.firstRow && bonus_.animation.sequences.size()>=2)arrowCursors_[0].advance(bonus_.animation.sequences[1],ms);
     if(view.firstRow+9<rows.size() && bonus_.animation.sequences.size()>=3)arrowCursors_[1].advance(bonus_.animation.sequences[2],ms);
+}
+}
+
+namespace vyruz {
+void HudRenderer::drawPanelHelp(Gfx& gfx){
+    if(fonts_.size()<3)return;
+    const auto layout=gfx.hudLayout();const auto& font=fonts_[2];
+    glPushMatrix();glTranslatef(layout.x,layout.y,0);glScalef(layout.scale,layout.scale,1);
+    const auto label=[&](std::string_view value,int x,int y){
+        //43415d initially sets alpha127, but subsequent44c3c0 resets to
+        //PANEL font3 authored style: alpha255/white/zero specular.
+        glColor4f(1,1,1,1);
+        textBank(gfx,value,float(x),float(y),panel_,font,false,false,10000);
+        for(unsigned char c:value){
+            if(c==' '){x+=font.fixedAdvance();continue;}
+            const auto* glyph=font.glyph(c);uint32_t width=0;
+            if(glyph&&glyph->layers[0].frameIndex<panel_.animation.frames.size())
+                width=panel_.animation.frames[glyph->layers[0].frameIndex].image.width;
+            x+=font.advance(width);
+        }
+        return x;
+    };
+    const auto leader=[&](const auto& points,int count,int colorIndex){
+        (void)colorIndex; // Native default palette250 is00ff00, verified table51c000.
+        glDisable(GL_TEXTURE_2D);glColor4f(0,1,0,1);
+        glBegin(GL_LINES);
+        for(int i=1;i<count;++i){glVertex2f(points[i-1][0],points[i-1][1]);glVertex2f(points[i][0],points[i][1]);}
+        glEnd();
+        //434100 draws one explicit endpoint pixel. A one-pixel quad also works
+        //with the GLES shader, which does not supply a GL_POINTS point size.
+        const float x=points[count-1][0],y=points[count-1][1];
+        glBegin(GL_QUADS);glVertex2f(x,y);glVertex2f(x+1,y);
+        glVertex2f(x+1,y+1);glVertex2f(x,y+1);glEnd();
+        glEnable(GL_TEXTURE_2D);
+    };
+    nativePanelHelpLayout(int(layout.width),int(layout.height),language_,label,leader);
+    glColor4f(1,1,1,1);glPopMatrix();
 }
 }

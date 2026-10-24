@@ -9,6 +9,7 @@
 #include "game/native_random.h"
 #include "game/native_awake_state.h"
 #include "game/player_facing_native.h"
+#include "game/player_speed_mode_native.h"
 #include "game/native_actor_cells.h"
 #include "game/native_projection_cache.h"
 #include "game/navigation_item_cache.h"
@@ -301,6 +302,7 @@ struct PlayerCarry {
     std::optional<size_t> ammoSlot;
     std::vector<HeldItem> heldItems;
     uint64_t ammoHits=0,ammoMisses=0;
+    std::optional<NativePlayerSpeedModeState> speedMode;
 };
 struct TransitionRequest { size_t lift=0; std::string path; int64_t cost=0; };
 struct SaveRequest { size_t plot=0; int64_t cost=0; };
@@ -343,6 +345,8 @@ public:
     void finishSave(bool success,const std::string& error={});
     void tick(float seconds,const WorldInput&);
     void toggleMap();
+    bool togglePlayerSpeedMode(); // Native action9, caller supplies one press edge.
+    bool playerSpeedIndicatorLow() const; //4355d5: live threshold differs from authored.
     void setHudLanguage(int language) { notifications_.setLanguage(language); }
     bool mapOpen() const { return map_.open(); }
     // Native world+20 bit200000: rebuilt by each manager pass, including
@@ -440,6 +444,7 @@ private:
     void selectCompatibleActorAmmo(std::size_t);
     std::optional<PendingActorFire> deferredActorFire_;
     NativePlayerFacingState nativePlayerFacing_;
+    std::optional<NativePlayerSpeedModeState> nativePlayerSpeed_;
     ContentPosition nativePlayerPreviousSurface_;
     void updateGate(std::size_t,float milliseconds);
     std::optional<NativeEffectCamera> effectCamera_;
@@ -447,6 +452,8 @@ private:
     bool actorUpdateAdmitted(size_t actor) const;
     bool debugEnemyAI_=true,debugGodMode_=false;
     PlayerMotionConfig playerMotionConfig_;
+    float playerSpeedClassThreshold_=45;
+    int playerSpeedClassPeriodMs_=18;
     void configurePlayerMotion();
     void configureWeaponSlopes(ActorState& actor);
     void configureEnemyTurning(ActorState&,const ObjectPlacement&,bool legacy=false);

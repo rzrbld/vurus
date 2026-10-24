@@ -70,7 +70,7 @@ int main(){try{
         auto memoryScene=fixture(family);GameWorld memory;need(memory.load(memoryScene,terrain,error)&&memory.restoreSnapshot(checkpoint,error),error.c_str());
         SaveGame save;save.currentLevel=scene.mapPath;save.levels[scene.mapPath].world=checkpoint;
         std::vector<uint8_t> bytes;SaveGame decoded;need(encodeSave(save,bytes,error)&&decodeSave(bytes,decoded,error),error.c_str());
-        need(bytes.size()>12 && bytes[8]==37 && bytes[9]==0,"Current writer retains v32 shared controller/RNG fields");
+        need(bytes.size()>12 && bytes[8]==38 && bytes[9]==0,"Current writer retains v32 shared controller/RNG fields");
         auto diskScene=fixture(family);GameWorld disk;need(disk.load(diskScene,terrain,error)&&disk.restoreSnapshot(decoded.levels.at(scene.mapPath).world,error),error.c_str());
         need(fields(*disk.actors()[1].enemyTurn)==fields(*checkpoint.actors[1].enemyTurn),"disk restore retains legal visible/logical pose divergence");
         for(int tick=0;tick<180;++tick) {
@@ -111,7 +111,7 @@ int main(){try{
         auto memoryScene=fixture(family);GameWorld memory;need(memory.load(memoryScene,terrain,error)&&memory.restoreSnapshot(checkpoint,error),error.c_str());
         SaveGame save;save.currentLevel=scene.mapPath;save.levels[scene.mapPath].world=checkpoint;
         std::vector<uint8_t> bytes;SaveGame decoded;need(encodeSave(save,bytes,error)&&decodeSave(bytes,decoded,error),error.c_str());
-        need(bytes.size()>12 && bytes[8]==37,"Current writer retains multipart controller fields");
+        need(bytes.size()>12 && bytes[8]==38,"Current writer retains multipart controller fields");
         auto diskScene=fixture(family);GameWorld disk;need(disk.load(diskScene,terrain,error)&&disk.restoreSnapshot(decoded.levels.at(scene.mapPath).world,error),error.c_str());
         need(fields(*disk.actors()[1].enemyTurn)==fields(expected),"v30 round-trip preserves signed countdown, separate logical gun ring, commands and range flag");
         for(int tick=0;tick<240;++tick) {

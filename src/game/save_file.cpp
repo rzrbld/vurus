@@ -27,7 +27,7 @@ template<class K,class V> struct Map<std::map<K,V>>:std::true_type{};
 template<class T> struct Set:std::false_type{};
 template<class T> struct Set<std::set<T>>:std::true_type{};
 struct Archive {
- uint32_t version=37;
+ uint32_t version=38;
  bool reading; std::vector<uint8_t> bytes; std::span<const uint8_t> input; size_t pos=0,depth=0,allocationRemaining=1024*1024*1024;
  Archive():reading(false){} explicit Archive(std::span<const uint8_t> in):reading(true),input(in){}
  uint64_t integer(uint64_t n,size_t size){
@@ -307,7 +307,9 @@ template<class A,class V>void fields(A& a,V& v){
   }else a(v.direction,v.turnSeconds,v.velocityX,v.velocityZ,v.magnitude,v.thrust);
  }else
  TYPE(TransitionRequest,v.lift,v.path,v.cost)
+ TYPE(NativePlayerSpeedModeState,v.speedThreshold,v.turnPeriodMs,v.surpriseBaselineSpeedThreshold)
  if constexpr(std::is_same_v<V,WorldSnapshot>){
+  if(a.version>=38)a(v.nativePlayerSpeed);else if(a.reading)v.nativePlayerSpeed.reset();
   if(a.version>=37)a(v.bodyGraphicsStepMs);else if(a.reading)v.bodyGraphicsStepMs=0;
   if(v.bodyGraphicsStepMs<0 || v.bodyGraphicsStepMs>101)throw Failure("Invalid body graphics elapsed step");
   if(a.version>=31)a(v.actorCells);else if(a.reading)v.actorCells.reset();
@@ -427,7 +429,7 @@ bool decodeSave(std::span<const uint8_t> bytes,SaveGame& out,std::string& error)
   if(!complete)throw Failure("Invalid compressed save data");
   bytes=inflated; // The normal magic/checksum/validation below also rejects nested envelopes.
  }
- Archive header(bytes);for(size_t i=0;i<8;++i)if(header.integer(0,1)!=uint8_t(Magic[i]))throw Failure("Not a Vyruz port save");auto version=header.integer(0,4);if(version!=1&&version!=2&&version!=3&&version!=4&&version!=5&&version!=6&&version!=7&&version!=8&&version!=9&&version!=10&&version!=11&&version!=12&&version!=13&&version!=14&&version!=15&&version!=16&&version!=17&&version!=18&&version!=19&&version!=20&&version!=21&&version!=22&&version!=23&&version!=24&&version!=25&&version!=26&&version!=27&&version!=28&&version!=29&&version!=30&&version!=31&&version!=32&&version!=33&&version!=34&&version!=35&&version!=36&&version!=37)throw Failure("Unsupported save version");auto size=header.integer(0,8),checksum=header.integer(0,8);auto payload=bytes.subspan(header.pos);if(size!=payload.size())throw Failure("Invalid save payload length");if(hash(payload)!=checksum)throw Failure("Save checksum mismatch");Archive a(payload);a.version=uint32_t(version);SaveGame s;a(s);if(a.pos!=payload.size())throw Failure("Trailing save data");validate(s);out=std::move(s);error.clear();return true;}catch(const std::exception& e){error=e.what();return false;}}
+ Archive header(bytes);for(size_t i=0;i<8;++i)if(header.integer(0,1)!=uint8_t(Magic[i]))throw Failure("Not a Vyruz port save");auto version=header.integer(0,4);if(version!=1&&version!=2&&version!=3&&version!=4&&version!=5&&version!=6&&version!=7&&version!=8&&version!=9&&version!=10&&version!=11&&version!=12&&version!=13&&version!=14&&version!=15&&version!=16&&version!=17&&version!=18&&version!=19&&version!=20&&version!=21&&version!=22&&version!=23&&version!=24&&version!=25&&version!=26&&version!=27&&version!=28&&version!=29&&version!=30&&version!=31&&version!=32&&version!=33&&version!=34&&version!=35&&version!=36&&version!=37&&version!=38)throw Failure("Unsupported save version");auto size=header.integer(0,8),checksum=header.integer(0,8);auto payload=bytes.subspan(header.pos);if(size!=payload.size())throw Failure("Invalid save payload length");if(hash(payload)!=checksum)throw Failure("Save checksum mismatch");Archive a(payload);a.version=uint32_t(version);SaveGame s;a(s);if(a.pos!=payload.size())throw Failure("Trailing save data");validate(s);out=std::move(s);error.clear();return true;}catch(const std::exception& e){error=e.what();return false;}}
 uint64_t catalogFingerprint(const SceneContent& content){auto classes=content.classes;auto paths=content.paths;Archive a;a(classes,paths);return hash(a.bytes);}
 bool writeSaveFile(const std::string& path,const SaveGame& s,std::string& error){
  std::vector<uint8_t> bytes;if(!encodeStoredSave(s,bytes,error))return false;

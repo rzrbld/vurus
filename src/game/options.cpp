@@ -21,9 +21,9 @@
 namespace vyruz { namespace {
 constexpr size_t maxOptionsBytes=16384;
 constexpr std::array<const char*,optionActionCount> actionNames={
-    "Forward","Reverse","Left","Right","Fire","Next weapon","Previous weapon","Map","Inventory","Pause"};
+    "Forward","Reverse","Left","Right","Fire","Next weapon","Previous weapon","Map","Inventory","Pause","Panel help","High / low speed"};
 constexpr std::array<const char*,optionActionCount> actionKeys={
-    "forward","reverse","left","right","fire","next_weapon","previous_weapon","map","inventory","pause"};
+    "forward","reverse","left","right","fire","next_weapon","previous_weapon","map","inventory","pause","panel_help","speed_mode"};
 std::string_view trim(std::string_view value) {
     constexpr std::string_view whitespace=" \t\r";
     const auto first=value.find_first_not_of(whitespace);
@@ -137,6 +137,14 @@ bool loadOptions(const std::string& path,GameOptions& options,std::string& error
         }
 #undef FIELD
         if(known&&(!valid||!seen.insert(std::string(key)).second))return malformed();
+    }
+    // Existing settings may already use F3/Page Down. An absent new action
+    // must not invalidate or steal the user's older explicit binding.
+    for(const auto action:{OptionAction::PanelHelp,OptionAction::SpeedMode}) {
+        const auto id=static_cast<size_t>(action);
+        if(!seen.contains(std::string("key.")+actionKeys[id])&&candidate.keyBindings[id])
+            for(size_t other=0;other<optionActionCount;++other)
+                if(other!=id&&candidate.keyBindings[other]==candidate.keyBindings[id]){candidate.keyBindings[id]=0;break;}
     }
     if(!validateOptions(candidate,error))return false;
     options=std::move(candidate);error.clear();return true;

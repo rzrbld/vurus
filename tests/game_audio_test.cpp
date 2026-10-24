@@ -25,6 +25,50 @@ static TextNode value(std::string key,std::string text){TextNode n;n.kind=TextKi
 static TextNode block(std::string key,std::vector<TextNode> fields,std::string type={}){
     TextNode n;n.kind=TextKind::Block;n.key=std::move(key);n.children=std::move(fields);if(!type.empty())n.arguments={std::move(type)};return n;
 }
+static void transitionClips(){
+    GameAudio audio;SceneContent scene;std::string error;size_t reads=0;
+    ContentReader reader=[&](const std::string&,std::vector<uint8_t>& out){++reads;out=wave(48000);return true;};
+    check(audio.device().open(error));check(audio.load(scene,reader,"ENGLISH",error));
+    const auto loaded=reads;
+    audio.speech("V-KEY.WAV",5000); // Departure must discard pending unrelated speech.
+    audio.beginLiftDeparture();check(audio.device().nativeChannelPlaying(5));
+    audio.cue("money.wav");audio.reset();
+    check(audio.device().nativeChannelPlaying(5)&&!audio.device().nativeChannelPlaying(1));
+    check(audio.load(scene,reader,"ENGLISH",error));
+    check(audio.device().nativeChannelPlaying(5)&&reads==loaded);
+    audio.endLiftDeparture();audio.reset();check(!audio.device().nativeChannelPlaying(5));
+    audio.beginLiftDeparture(); // Native global hold deadline survives queue/reset.
+    check(!audio.device().nativeChannelPlaying(5));audio.endLiftDeparture();
+    audio.fade();check(audio.device().nativeChannelPlaying(1));
+    check(reads==loaded);audio.reset();check(!audio.device().nativeChannelPlaying(1));
+}
+static void savingClip(GameAudio& audio,const ContentReader& reader,size_t& reads){
+    SceneContent scene;scene.mapPath="TEST/PAID_AUDIO.3DG";scene.player=ObjectId{0};
+    for(unsigned id=0;id<3;++id){
+        ObjectClass cls;cls.id={id};cls.name="SaveAudio"+std::to_string(id);
+        cls.behaviours={id==0?"Player":"Fixed"};
+        cls.properties={value("Managed","1"),value("Bounding-box-size",id==2?"64":"22"),
+            value("Saving-plot",id==1?"1":"0"),value("Saving-zone",id==2?"1":"0"),value("Reward",id==1?"-100":"0")};
+        scene.classes.push_back(cls);
+        ObjectPlacement object;object.id={id};object.classId={id};object.position={id==0?1100.f:1000.f,1000};
+        object.properties=cls.properties;object.behaviours=cls.behaviours;scene.objects.push_back(object);
+    }
+    Level level;level.mapW=level.mapH=100;GameWorld world;std::string error;
+    check(world.load(scene,level,error));auto carry=world.carry();carry.vitals.money=100;world.restore(carry);
+    for(int i=0;i<57;++i)world.tick(.1f,{});
+    check(world.saveRequest()&&world.saveRequest()->cost==100);
+    check(audio.load(scene,reader,"ENGLISH",error));audio.device().setPaused(true);
+    const auto loaded=reads;world.takeAudioEvents();audio.consume(world,scene,{});
+    const bool channel2=audio.device().nativeChannelPlaying(2),channel4=audio.device().nativeChannelPlaying(4);
+    world.finishSave(true);
+    audio.consume(world,scene,{});
+    check(audio.device().nativeChannelPlaying(3)); // Original explicit MONEY channel.
+    check(audio.device().nativeChannelPlaying(2)==channel2&&audio.device().nativeChannelPlaying(4)==channel4);
+    check(reads==loaded); // Cached PCM only, no playback-time resource reads.
+    audio.device().stopNativeChannels(1u<<2);world.finishSave(true);audio.consume(world,scene,{});
+    check(!audio.device().nativeChannelPlaying(3));
+    audio.reset();
+}
 static void weaponClips(GameAudio& audio,const ContentReader& reader,size_t& reads){
     // Keep effect cursors frozen in the real device/mixer; test channel admission
     // deterministically, without sleeps or racing the dummy audio callback.
@@ -83,15 +127,20 @@ int main(){try{
     ContentReader reader=[&](const std::string& path,std::vector<uint8_t>& out){++reads;paths.insert(path);out=wave();return true;};
     check(audio.load(scene,reader,"ENGLISH",error));check(error.empty());check(audio.diagnostics().empty());
     check(paths.contains("COMMON/DATA/SOUND/ENGLISH/V-KEY.WAV"));
+    check(paths.contains("COMMON/DATA/SOUND/ENGLISH/V-HELP.WAV"));
+    check(paths.contains("COMMON/DATA/SOUND/ENGLISH/V-HIGH-SPEED.WAV")&&paths.contains("COMMON/DATA/SOUND/ENGLISH/V-LOW-SPEED.WAV"));
     const size_t loaded=reads;audio.cue("V-KEY.WAV",true);audio.cue("money.wav");
     GameWorld empty;audio.consume(empty,scene,{});check(reads==loaded);
     audio.reset();check(audio.load(scene,reader,"ENGLISH",error));check(reads==loaded);
     check(audio.load(scene,reader,"FRENCH",error));check(paths.contains("COMMON/DATA/SOUND/FRENCH/V-KEY.WAV"));
+    check(paths.contains("COMMON/DATA/SOUND/FRENCH/V-HELP.WAV"));
+    check(paths.contains("COMMON/DATA/SOUND/FRENCH/V-HIGH-SPEED.WAV")&&paths.contains("COMMON/DATA/SOUND/FRENCH/V-LOW-SPEED.WAV"));
     paths.clear();const auto frenchReads=reads;
     check(audio.load(scene,reader,"ENGLISH",error));
     check(reads>frenchReads&&paths.contains("COMMON/DATA/SOUND/ENGLISH/V-KEY.WAV"));
     check(!paths.contains("common/data/sound/money.wav")); // common clips retained
     weaponClips(audio,reader,reads);
+    savingClip(audio,reader,reads);
     audio.device().setPaused(false);
     check(audio.load(scene,reader,"ENGLISH",error));
     check(!audio.musicFile("/tmp/vyruz-no-such-track-128731.wav",error));check(!error.empty());
@@ -117,6 +166,7 @@ int main(){try{
     audio.device().close();audio.cue("V-KEY.WAV",true);audio.consume(empty,scene,{});
     check(!audio.device().nativeChannelPlaying(0)&&!audio.device().nativeChannelPlaying(17));
     } // Destroy fixed-source stream and join workers before fixture cleanup.
+    transitionClips();
     std::filesystem::remove_all(musicDir);
     std::cout<<"Game audio cache and device lifecycle passed\n";
 }catch(const std::exception& error){std::cerr<<"Game audio test: "<<error.what()<<'\n';return 1;}

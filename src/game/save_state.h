@@ -4,6 +4,7 @@
 #include "render/scene_state.h"
 namespace vyruz {
 struct WorldSnapshot {
+    std::optional<NativePlayerSpeedModeState> nativePlayerSpeed;
     int32_t bodyGraphicsStepMs=0; // Last native101c delta retained by active redraw.
     std::optional<NativeActorCells> actorCells;
     std::optional<NativeNavGraph> spiderNavigation;
@@ -85,6 +86,16 @@ inline bool validNativeAmmoLifecycleSnapshot(const WorldSnapshot& s) {
     return true;
 }
 inline bool validNativeAwakeSnapshot(const WorldSnapshot& s) {
+    if(s.nativePlayerSpeed) {
+        const auto& mode=*s.nativePlayerSpeed;
+        if(!std::isfinite(mode.speedThreshold) || mode.turnPeriodMs<=0 || mode.turnPeriodMs>1000000 ||
+           (s.nativePlayerFacing && s.nativePlayerFacing->periodMs!=mode.turnPeriodMs))return false;
+        if(mode.surpriseBaselineSpeedThreshold &&
+           (!std::isfinite(*mode.surpriseBaselineSpeedThreshold) ||
+            (!s.surprise.active(SurpriseKind::Xtc) && !s.surprise.active(SurpriseKind::Slow))))return false;
+        if((s.surprise.active(SurpriseKind::Xtc) || s.surprise.active(SurpriseKind::Slow)) &&
+           !mode.surpriseBaselineSpeedThreshold)return false;
+    }
     if(s.nativePlayerFacing) {
         const auto& f=*s.nativePlayerFacing;
         if(f.pose<1||f.pose>48||f.desiredPose<1||f.desiredPose>48||f.previousPose<1||f.previousPose>48||
@@ -227,6 +238,10 @@ inline bool validMissileNativeNavigationSnapshot(const WorldSnapshot& s) {
     return true;
 }
 inline void normalizeSavedSurprise(WorldSnapshot& s) {
+    if(s.nativePlayerSpeed && s.nativePlayerSpeed->surpriseBaselineSpeedThreshold) {
+        s.nativePlayerSpeed->speedThreshold=*s.nativePlayerSpeed->surpriseBaselineSpeedThreshold;
+        s.nativePlayerSpeed->surpriseBaselineSpeedThreshold.reset();
+    }
     if(s.player<s.actors.size() && s.player<s.objects.size()) {
         auto& actor=s.actors[s.player];
         if(s.surprise.active(SurpriseKind::Shield) && actor.shieldUpStep)

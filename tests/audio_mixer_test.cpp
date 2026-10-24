@@ -48,6 +48,13 @@ int main() {
     auto fast=clip({128,192,255},96000);clockHandle=m.play(fast);m.mix(out,4);
     near(float(*m.playbackMilliseconds(clockHandle)),3000.f/96000);
     m.stopEffects();check(!m.playbackMilliseconds(clockHandle));
+    // Preserve only the exact admitted departure voice across a level reset.
+    const auto departure=m.play(constant,191,1,0,true,false,AudioBus::Voices);
+    const auto oldEffect=m.play(constant,127,1,0,true);
+    m.stopEffects(departure);check(m.isPlaying(departure)&&!m.isPlaying(oldEffect));
+    m.stop(departure);const auto newOwner=m.play(constant,191,1,0,true);
+    m.stopEffects(departure);check(!m.isPlaying(newOwner)); // A reused channel is not that voice.
+    m.stopAll();
     // Suspending background music leaves ordinary voices running, and resumes
     // music from the same sample. World pause still suspends both channels.
     m.playMusic(c,1,false);m.setMusicPaused(true);clockHandle=m.play(constant);

@@ -92,6 +92,7 @@ struct SaveCatalogResult {
 struct App {
     bool debugEnabled=false;
     bool debugInfoVisible=true;
+    bool panelHelp=false; // Native0800 overlay; transient session UI, not save state.
     bool profileTick=false;
     double profileWorldMs=0;
     double debugFrameSum=0,debugFramePeak=0;unsigned debugFrameCount=0;
@@ -440,9 +441,17 @@ bool readLoadingResource(App& a,const std::string& path,std::vector<uint8_t>& by
     return ok;
 }
 // Build and validate replacements before releasing any of the live session.
+struct ScopedLiftDepartureAudio {
+    vyruz::GameAudio* audio;
+    ScopedLiftDepartureAudio(vyruz::GameAudio& device,bool admitted):audio(admitted?&device:nullptr) {
+        if(audio)audio->beginLiftDeparture();
+    }
+    ~ScopedLiftDepartureAudio(){if(audio)audio->endLiftDeparture();}
+    ScopedLiftDepartureAudio(const ScopedLiftDepartureAudio&)=delete;
+};
 bool loadLevelData(App& a, const std::string& path,const vyruz::SavedLevel* saved=nullptr,
                    bool entering=false,bool validateOnly=false,bool present=false,int requestedDifficulty=-1,
-                   const vyruz::PlayerCarry* carried=nullptr) {
+                   const vyruz::PlayerCarry* carried=nullptr,bool liftDeparture=false) {
     // CPU images and cursors remain available for transactional failure
     // recovery; old GPU copies need not overlap the replacement level.
     a.sceneRenderer.releaseTextures(a.gfx);
@@ -549,6 +558,9 @@ bool loadLevelData(App& a, const std::string& path,const vyruz::SavedLevel* save
     std::vector<uint8_t>().swap(catalog);
     showLoadingProgress(a,.75f,.85f);
     if(entering)validation.setPlayerPosition(entry.x,entry.y);
+    // Begin only after fallible destination validation; preserve the admitted
+    // native departure sample through presentation/load audio resets below.
+    ScopedLiftDepartureAudio departureAudio(a.audio,liftDeparture);
     const auto atlas=vyruz::paddedTileAtlas(nextLevel.tiles,kAtlasPerRow);
     if (a.atlasTex) a.gfx.deleteTexture(a.atlasTex);
     a.atlasW=atlas.width;a.atlasH=atlas.height;
@@ -836,6 +848,7 @@ void refreshSaveCatalog(App& a,bool force) {
 
 void recordScore(App& a);
 bool changeLevel(App& a,const vyruz::TransitionRequest& request) {
+    const bool fromLift=request.lift<a.world.actors().size()&&a.world.actors()[request.lift].lift.has_value();
     if(vyruz::endingDestination(request.path)) {
         const auto language=a.audioLanguage=="FRENCH"?"FR":"EN";
         auto first=presentationText(a,std::string("COMMON/DATA/EXTRA/THEEND-")+language+".TXT");
@@ -845,21 +858,26 @@ bool changeLevel(App& a,const vyruz::TransitionRequest& request) {
             a.world.rejectTransition("Original ending resources are missing or invalid.");return false;
         }
         if(!a.endingTex)a.endingTex=a.gfx.uploadTexture(image.rgba.data(),image.width,image.height);
+        ScopedLiftDepartureAudio departureAudio(a.audio,fromLift);
         //445dd0 calls446120 only on Final-object completion, before dispatch.
         const bool terminal=request.path=="*" && request.lift<a.world.actors().size() && a.world.actors()[request.lift].finalObject;
         a.endingFirstText=std::move(first);a.endingSecondText=std::move(second);a.world.finishEnding();a.inventory.open=false;
         recordScore(a);a.sessionStarted=false;
         beginPresentation(a,terminal?vyruz::PresentationPage::EndingTerminal:vyruz::PresentationPage::Ending,
-            terminal?vyruz::endingTerminalText(a.audioLanguage):a.endingFirstText);return true;
+            terminal?vyruz::endingTerminalText(a.audioLanguage):a.endingFirstText);
+        a.audio.fade(); //440273: the '*' post-gameplay destination, not every Lift.
+        return true;
     }
     const bool debugAI=a.world.debugEnemyAI(),debugGod=a.world.debugGodMode();
     // Native41f7c0 replaces the previous world. Campaign exits are forward-only;
     // keep player carry, not a snapshot of every completed map. loadLevelData
     // validates the destination before committing, preserving failure rollback.
     auto carried=a.world.carry();
+    const auto* departingLift=fromLift?vyruz::attribute(a.content.objects[request.lift].properties,"lift"):nullptr;
+    if(!departingLift||a.world.player().vitals.energy<=0||!vyruz::liftRetainsPlayerBody(departingLift->children))carried.speedMode.reset();
     const auto destination=levelKey(request.path);
     carried.vitals.money-=request.cost;
-    if(!loadLevelData(a,destination,nullptr,true,false,true,-1,&carried)) {
+    if(!loadLevelData(a,destination,nullptr,true,false,true,-1,&carried,fromLift)) {
         a.world.rejectTransition(a.loadError);return false;
     }
     a.world.setDebugEnemyAI(debugAI);a.world.setDebugGodMode(debugGod);
@@ -1048,6 +1066,7 @@ void handleInput(App& a) {
     a.gfx.resize(windowW,windowH);
     const auto view=a.gfx.viewport();
     const bool wasMenu=a.menu.open(),wasInventory=a.inventory.open,wasMap=a.world.mapOpen(),wasPaused=a.paused;
+    const bool wasDebugMenu=a.menu.debugScreen();
     const int wasSelected=a.menu.selected;
     int weaponDelta = 0;
     const bool modal=a.presentation.open();
@@ -1167,6 +1186,8 @@ void handleInput(App& a) {
                     case vyruz::OptionAction::Map:key=SDLK_m;break;
                     case vyruz::OptionAction::Inventory:key=SDLK_i;break;
                     case vyruz::OptionAction::Pause:key=SDLK_p;break;
+                    case vyruz::OptionAction::PanelHelp:key=SDLK_F3;break;
+                    case vyruz::OptionAction::SpeedMode:key=SDLK_PAGEDOWN;break;
                     default:break;
                     }
                 }
@@ -1229,7 +1250,7 @@ void handleInput(App& a) {
         }
         if(ev.type==SDL_KEYDOWN && ev.key.keysym.scancode!=SDL_SCANCODE_UNKNOWN) {
             const auto original=ev.key.keysym.sym;
-            if(original==SDLK_i||original==SDLK_m||original==SDLK_p||original==SDLK_q||original==SDLK_e)ev.key.keysym.sym=0;
+            if(original==SDLK_i||original==SDLK_m||original==SDLK_p||original==SDLK_q||original==SDLK_e||original==SDLK_F3||original==SDLK_PAGEDOWN)ev.key.keysym.sym=0;
             for(size_t i=0;i<vyruz::optionActionCount;++i)if(a.options.keyBindings[i]==ev.key.keysym.scancode) {
                 ev.key.keysym.sym=0;
                 switch(static_cast<vyruz::OptionAction>(i)) {
@@ -1238,6 +1259,8 @@ void handleInput(App& a) {
                 case vyruz::OptionAction::Map:ev.key.keysym.sym=SDLK_m;break;
                 case vyruz::OptionAction::Inventory:ev.key.keysym.sym=SDLK_i;break;
                 case vyruz::OptionAction::Pause:ev.key.keysym.sym=SDLK_p;break;
+                case vyruz::OptionAction::PanelHelp:ev.key.keysym.sym=SDLK_F3;break;
+                case vyruz::OptionAction::SpeedMode:ev.key.keysym.sym=SDLK_PAGEDOWN;break;
                 default:break;
                 }
             }
@@ -1264,6 +1287,11 @@ void handleInput(App& a) {
                 if (ev.key.keysym.sym == SDLK_q && !ev.key.repeat) --weaponDelta;
                 if (ev.key.keysym.sym == SDLK_e && !ev.key.repeat) ++weaponDelta;
                 if (ev.key.keysym.sym == SDLK_F1 && !ev.key.repeat) a.showInfo = !a.showInfo;
+                if(ev.key.keysym.sym==SDLK_F3&&!ev.key.repeat&&a.sessionStarted&&!a.paused) {
+                    a.panelHelp=!a.panelHelp;
+                    if(a.panelHelp)a.audio.speech("V-HELP.WAV",0,1000,5000);
+                }
+                if(ev.key.keysym.sym==SDLK_PAGEDOWN&&!ev.key.repeat&&a.sessionStarted&&!a.paused)a.world.togglePlayerSpeedMode();
                 break;
             case SDL_MOUSEWHEEL:
                 if(a.inventory.open)a.inventory.scroll(-wheelSteps(ev.wheel),vyruz::inventoryRows(a.world.player()).size(),9);
@@ -1297,6 +1325,10 @@ void handleInput(App& a) {
     else if(!wasMap && a.world.mapOpen())a.audio.speech("V-MAP.WAV",0,1000,5000);
     else if(!wasPaused && a.paused)a.audio.cue("V-PAUSE.WAV",true);
     if(a.options.menuSounds && wasMenu && (wasSelected!=a.menu.selected || a.menuAction!=vyruz::MenuAction::None))a.audio.cue("select.wav");
+    //42275d: returning from the captured game menu enables FADE; leaving the
+    //session disables it. Ordinary pause/map/inventory and debug UI stay separate.
+    if(wasMenu&&!wasDebugMenu&&!a.menu.open()&&a.sessionStarted&&!a.presentation.open()&&
+       (a.menuAction==vyruz::MenuAction::None||a.menuAction==vyruz::MenuAction::Resume))a.audio.fade();
     if (!a.inputFocused || a.paused || !a.world.player().alive) return;
 
     // Forward/back and strafe are independent of the pointer. The cursor
@@ -1652,6 +1684,7 @@ void render(App& a,float alpha=1) {
     if (gameCursor) {
         a.hud.drawCursor(a.gfx,crosshair.x,crosshair.y);
     }
+    if(a.panelHelp&&!a.menu.open()&&!a.presentation.open()&&!a.inventory.open)a.hud.drawPanelHelp(a.gfx);
 
     if(endingRemaining>0) {
         if(!a.endingFrameTex){glGenTextures(1,&a.endingFrameTex);glBindTexture(GL_TEXTURE_2D,a.endingFrameTex);

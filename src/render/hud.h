@@ -42,6 +42,7 @@ public:
     void drawMenuExit(Gfx&);
     bool menuExitActive() const {return menuExit_.active;}
     void drawControlsHelp(Gfx&,const std::vector<std::pair<std::string,int>>&,int first);
+    void drawPanelHelp(Gfx&);
     unsigned advanceMenu(MenuPage page,uint32_t elapsedMs,int refreshHz,bool pointerVisible=false);
     void drawMenuScanline(Gfx&);
     void drawNameCaret(std::string_view label,float x,float y);

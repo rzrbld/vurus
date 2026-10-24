@@ -607,8 +607,13 @@ int main() try {
     world.tick(.1f,{});
     check(world.saveRequest()&&world.saveRequest()->cost==100000&&world.player().vitals.money==200000,"eligible terminal requests write before debit");
     auto paid=world.snapshot();paid.actors[0].vitals.money-=world.saveRequest()->cost;
+    world.takeAudioEvents();
     world.finishSave(true);
     check(world.player().vitals.money==100000&&!world.saveRequest(),"successful write debits once");
+    const auto paidAudio=world.takeAudioEvents();
+    check(paidAudio.size()==1&&paidAudio.front().kind==AudioEventKind::SaveCash&&paidAudio.front().actor==world.playerIndex(),"successful paid save requests MONEY once");
+    world.finishSave(true);
+    check(world.takeAudioEvents().empty(),"repeated completion cannot replay MONEY");
     check(world.notifications().entries().size()==1&&world.notifications().entries().front().text=="Saving Completed."&&
           world.notifications().entries().front().lifetimeMs==3000&&world.message().empty(),"successful save replaces countdown with visible completion");
     check(world.restoreSnapshot(paid,error),"paid checkpoint restores");
@@ -618,7 +623,9 @@ int main() try {
     world.setPlayerPosition(1300,1000);world.tick(.1f,{});world.setPlayerPosition(1100,1000);world.tick(.1f,{});
     for(int i=0;i<55;++i)world.tick(.1f,{});
     check(world.saveRequest().has_value(),"leave and reenter rearms terminal");
+    world.takeAudioEvents();
     world.finishSave(false,"disk failure");
+    check(world.takeAudioEvents().empty(),"failed save never requests MONEY");
     check(world.player().vitals.money==100000,"failed write preserves credits");
     check(world.notifications().entries().back().text=="Cannot save: disk failure"&&world.message().empty(),
           "disk failure stays visible in game without charging");
@@ -649,6 +656,17 @@ int main() try {
     check(world.player().vitals.money==reservedMoney&&!world.saveRequest(),"background failure releases fee without charging");
     world.toggleMap();check(world.mapOpen(),"released save fee is spendable again");
     world.toggleMap();
+
+    auto freeScene=scene;
+    for(auto& property:freeScene.objects[1].properties)
+        if(property.key=="Reward")property.values={"0"};
+    GameWorld freeWorld;
+    check(loadFixture(freeWorld,freeScene,level,error),"free terminal fixture");
+    freeWorld.setPlayerPosition(1100,1000);
+    for(int i=0;i<57;++i)freeWorld.tick(.1f,{});
+    check(freeWorld.saveRequest()&&freeWorld.saveRequest()->cost==0,"free terminal requests save");
+    freeWorld.takeAudioEvents();freeWorld.finishSave(true);
+    check(freeWorld.takeAudioEvents().empty(),"free saving never requests MONEY");
 
     // Native reward credit is independent of killer ownership, once per death;
     // noneligible scenery, nonpositive Reward and the player do not pay.
@@ -762,6 +780,11 @@ int main() try {
     // Original T1C1 omits Scenery for its same-scenery exit.
     const auto localLift=block("TYPE",{assignment("3do-file","t1c2")},"Lift");
     check(liftDestination(localLift.children,"CAVE/T1C1.3DG")=="CAVE/t1c2.3DG","blank Lift scenery preserves current scenery");
+    check(liftRetainsPlayerBody(localLift.children),"absent Lift Destination defaults to zero and retains Player");
+    auto retention=localLift.children;auto point=assignment("Destination","0");point.values={"0","0"};retention.push_back(point);
+    check(liftRetainsPlayerBody(retention),"nonnegative Destination retains Player identity");
+    retention.back().values={"-1","0"};check(!liftRetainsPlayerBody(retention),"negative X releases Player");
+    retention.back().values={"0","-1"};check(!liftRetainsPlayerBody(retention),"negative Y releases Player");
     check(liftDestination(localLift.children,"CAVE\\T1C1.3DG")=="CAVE/t1c2.3DG","native path separator accepted");
     auto external=localLift;external.children.push_back(assignment("Scenery","CPU"));
     check(liftDestination(external.children,"CAVE/T1C1.3DG")=="CPU/t1c2.3DG","explicit Lift scenery still overrides");

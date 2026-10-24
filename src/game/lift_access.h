@@ -6,6 +6,19 @@
 namespace vyruz {
 // 43e5f0 recognizes a leading '*' as end-of-game, not a scenery filename.
 inline bool endingDestination(std::string_view path) { return !path.empty() && path.front()=='*'; }
+//446a8a retains the living Player body when both Destination fields are
+//nonnegative. Lift attributes default to0,0 (405210 clears the block); World's
+//startup -1 sentinels are overwritten on departure. These are not arrival XY.
+inline bool liftRetainsPlayerBody(const std::vector<TextNode>& fields) {
+    const auto* node=contentProperty(fields,"Destination");
+    if(!node)return true;
+    if(node->values.size()<2)return false;
+    const auto nonnegative=[](const std::string& text) {
+        char* end=nullptr;const float value=std::strtof(text.c_str(),&end);
+        return end!=text.c_str()&&(*end=='\0'||(*end==';'&&end[1]=='\0'))&&std::isfinite(value)&&value>=0;
+    };
+    return nonnegative(node->values[0])&&nonnegative(node->values[1]);
+}
 // Native442bf0 changes scenery only when the Lift names one. Empty Scenery
 // means another level in the current scenery, not an incomplete destination.
 inline std::optional<std::string> liftDestination(const std::vector<TextNode>& fields,

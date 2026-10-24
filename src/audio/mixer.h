@@ -43,7 +43,7 @@ public:
     std::optional<double> playbackMilliseconds(uint64_t handle) const;
     void update(uint64_t handle, float gain, float pan);
     void stop(uint64_t handle);
-    void stopEffects();
+    void stopEffects(uint64_t preserveHandle=0);
     void stopMusic();
     void stopAll();
     void setPaused(bool paused) { paused_ = paused; }
@@ -124,7 +124,7 @@ public:
     std::optional<double> playbackMilliseconds(uint64_t handle) const;
     void update(uint64_t handle, float gain, float pan);
     void stop(uint64_t handle);
-    void stopEffects();
+    void stopEffects(uint64_t preserveHandle=0);
     void stopMusic();
     void stopAll();
     void setPaused(bool paused);

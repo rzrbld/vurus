@@ -5,7 +5,7 @@
 
 namespace vyruz {
 enum class OptionAction : size_t {
-    Forward, Reverse, Left, Right, Fire, NextWeapon, PrevWeapon, Map, Inventory, Pause, Count
+    Forward, Reverse, Left, Right, Fire, NextWeapon, PrevWeapon, Map, Inventory, Pause, PanelHelp, SpeedMode, Count
 };
 constexpr size_t optionActionCount = static_cast<size_t>(OptionAction::Count);
 const char* optionActionName(OptionAction action);
@@ -42,9 +42,10 @@ struct GameOptions {
     std::string saveProfile;
     const std::string& storageProfile() const { return saveProfile.empty()?playerName:saveProfile; }
     int difficulty = 1; // Easy, Normal, Hard, Insane.
-    std::array<int, optionActionCount> keyBindings = {26,22,4,7,44,8,20,16,12,19};
+    // F3 preserves accepted F1 information/F2 debug; Page Down is native high/low.
+    std::array<int, optionActionCount> keyBindings = {26,22,4,7,44,8,20,16,12,19,60,78};
     // -1 leaves that action unbound; analog sticks and trigger keep their roles.
-    std::array<int, optionActionCount> controllerBindings = {11,12,13,14,0,10,9,4,3,2};
+    std::array<int, optionActionCount> controllerBindings = {11,12,13,14,0,10,9,4,3,2,-1,-1};
     int fireButton = 1, thrustButton = 3; // SDL mouse buttons; 0 means unbound.
     int joystickMoveSensitivity = 100, joystickAimSensitivity = 100;
     bool crosshair = true;

@@ -59,7 +59,7 @@ bool beginExtra(App& a,vyruz::MenuAction action) {
         const auto add=[&](std::string label,std::string binding,int slot=-1){a.helpRows.push_back({std::move(label)+" : "+std::move(binding),slot});};
         add("Information","F1");if(a.debugEnabled)add("Debug menu","F2");
         for(int i=0;i<9;++i)add("Weapon #"+std::to_string(i+1),std::to_string(i+1),i);
-        for(auto action:{vyruz::OptionAction::Fire,vyruz::OptionAction::NextWeapon,vyruz::OptionAction::PrevWeapon,vyruz::OptionAction::Inventory,vyruz::OptionAction::Map,vyruz::OptionAction::Pause,vyruz::OptionAction::Forward,vyruz::OptionAction::Reverse,vyruz::OptionAction::Left,vyruz::OptionAction::Right}) {
+        for(auto action:{vyruz::OptionAction::Fire,vyruz::OptionAction::NextWeapon,vyruz::OptionAction::PrevWeapon,vyruz::OptionAction::Inventory,vyruz::OptionAction::Map,vyruz::OptionAction::Pause,vyruz::OptionAction::PanelHelp,vyruz::OptionAction::SpeedMode,vyruz::OptionAction::Forward,vyruz::OptionAction::Reverse,vyruz::OptionAction::Left,vyruz::OptionAction::Right}) {
             const auto index=static_cast<size_t>(action);std::string binding;
             if(a.options.keyBindings[index]>0)binding=SDL_GetScancodeName(static_cast<SDL_Scancode>(a.options.keyBindings[index]));
             if(a.options.controllerBindings[index]>=0){const char* button=SDL_GameControllerGetStringForButton(static_cast<SDL_GameControllerButton>(a.options.controllerBindings[index]));if(button){if(!binding.empty())binding+=" / ";binding+=button;}}
@@ -70,6 +70,9 @@ bool beginExtra(App& a,vyruz::MenuAction action) {
         if(a.options.thrustButton)add("Mouse forward","Button "+std::to_string(a.options.thrustButton));
         add("Controller fire","Right trigger");
         beginPresentation(a,P::ControlsHelp);
+        //43b67a: opening controls help queues HELP after presentation reset.
+        a.audio.speech("V-HELP.WAV",0,1000,5000);
+        a.audio.updateSpeech(); // Controls presentation does not run gameplay speech updates.
     } else if(action==A::Intro) {
         if(!beginMovie(a)){a.menu.error="Intro animation file is not present or cannot be decoded.";return false;}
     } else if(action==A::Credits) {

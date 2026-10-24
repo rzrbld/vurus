@@ -53,6 +53,7 @@ uint64_t GameWorld::contentFingerprint() const {
 }
 WorldSnapshot GameWorld::snapshot() const {
     WorldSnapshot s;s.bodyGraphicsStepMs=bodyGraphicsStepMs_;s.actorCells=actorCells_;s.spiderNavigation=spiderNavigation_;s.catalogHash=catalogHash_;s.difficulty=difficulty_.level;s.objects=scene_->objects;s.actors=actors_;s.projectiles=projectiles_;
+    s.nativePlayerSpeed=nativePlayerSpeed_;
     s.player=player_;s.navigationCursor=navigationCursor_;s.motion=motion_;s.elapsedMs=elapsedMs_;s.playerKills=playerKills_;s.ammoHits=ammoHits_;s.ammoMisses=ammoMisses_;
     s.shotsFired=shotsFired;s.pickupsTaken=pickupsTaken;s.actorsDestroyed=actorsDestroyed;s.transition=transition_;
     s.rejectedLifts=rejectedLifts_;s.message=message_;std::ostringstream random;random<<random_;s.randomState=random.str();
@@ -458,6 +459,8 @@ bool GameWorld::restoreSnapshot(const WorldSnapshot& saved,std::string& error) {
     transition_=std::move(transition);rejectedLifts_=std::move(rejected);message_=std::move(message);random_=restoredRandom;nativeWorldRandom_=saved.nativeWorldRandom;nativeGlobalRandom_=saved.nativeGlobalRandom;nativeReplayRandom_=saved.nativeReplayRandom;
     restoreNativeAwake(saved.nativeAwake);
     nativePlayerFacing_=saved.nativePlayerFacing.value_or(initializeNativePlayerFacing(motion_.direction));
+    nativePlayerSpeed_=saved.nativePlayerSpeed;
+    if(nativePlayerSpeed_)nativePlayerFacing_.periodMs=nativePlayerSpeed_->turnPeriodMs;
     nativePlayerPreviousSurface_=saved.nativePlayerFacing?saved.nativePlayerPreviousSurface:playerPosition();
     savePlot_=saved.savePlot;saveDwellMs_=saved.saveDwellMs;saveAttempted_=saved.saveAttempted;saveRequest_.reset();
     surprise_=std::move(surprise);
@@ -558,6 +561,9 @@ void GameWorld::finishSave(bool success,const std::string& error) {
     const auto p=scene_->objects[saveRequest_->plot].position;
     if(success){
         actors_[player_].vitals.money-=saveRequest_->cost;
+        //42a516: paid saving uses MONEY on explicit channel3. Keep the port's
+        //transactional debit-on-success policy; free/failed saves stay silent.
+        if(saveRequest_->cost>0)audioEvent(AudioEventKind::SaveCash,player_);
         notifications_.saving(notifications_.language()==2?"Sauvegarde Termin\xe9" "e":"Saving Completed.",p.x,p.y,3000);
     }
     else {

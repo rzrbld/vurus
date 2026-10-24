@@ -63,8 +63,10 @@ int main(int argc,char**argv){try{
  need(a.saveCatalogDirty,"gameplay rendering must not decode the save catalog");
  need(frames>1&&a.world.elapsedMilliseconds()>timeBefore,"gameplay and rendering advance while saving");
  need(a.world.player().vitals.money==0&&!a.world.saveRequest(),"success charges once after commit");
+ const auto paidAudio=a.world.takeAudioEvents();need(std::count_if(paidAudio.begin(),paidAudio.end(),[](const auto& e){return e.kind==vyruz::AudioEventKind::SaveCash;})==1,"async paid save emits exactly one MONEY request");
  const auto written=a.lastSavedPath;need(fileBytes(written)==expectedBytes,"async file equals synchronous checkpoint exactly");
  serviceSave(a,true);need(a.world.player().vitals.money==0,"poll cannot double-charge");
+ need(a.world.takeAudioEvents().empty(),"async completion poll cannot repeat MONEY");
  vyruz::SaveGame disk;need(vyruz::readSaveFile(written,disk,error),error);
  need(disk.levels.size()==1,"save contains only current level");
  // Disk continuation versus the exact source checkpoint, without replaying the
@@ -82,6 +84,7 @@ int main(int argc,char**argv){try{
  serviceSave(a,true);need(a.saveFuture.valid(),"failed destination still handled asynchronously");
  a.saveFuture.wait();serviceSave(a,true);
  need(a.world.player().vitals.money==100000&&!a.world.saveRequest(),"write failure does not charge");
+ const auto failedAudio=a.world.takeAudioEvents();need(std::none_of(failedAudio.begin(),failedAudio.end(),[](const auto& e){return e.kind==vyruz::AudioEventKind::SaveCash;}),"failed async save cannot request MONEY");
  need(fileBytes(written)==expectedBytes,"write failure preserves existing checkpoint");
  a.savePath=oldPath;
  // Automatic entry checkpoints also finish off-thread, without a paid-save
@@ -106,5 +109,10 @@ int main(int argc,char**argv){try{
  vyruz::SaveGame interrupted;need(vyruz::readSaveFile(a.lastSavedPath,interrupted,error),error);
  auto noPreview=std::filesystem::path(a.lastSavedPath);noPreview.replace_extension(".tga");need(!std::filesystem::exists(noPreview),"cancelled preview does not reuse stale pixels");
 #endif
+ // Synchronous tooling uses the same successful-debit event boundary.
+ enter();a.saveHistory=false;a.savePath=(out/"sync.vzs").string();a.world.takeAudioEvents();
+ need(serviceSave(a,false),"synchronous paid save completes");
+ const auto syncAudio=a.world.takeAudioEvents();
+ need(a.world.player().vitals.money==0&&std::count_if(syncAudio.begin(),syncAudio.end(),[](const auto& e){return e.kind==vyruz::AudioEventKind::SaveCash;})==1,"synchronous save debits and requests MONEY once");
  a.sceneRenderer.clear(a.gfx);a.hud.clear(a.gfx);a.gfx.shutdown();SDL_DestroyWindow(a.window);SDL_Quit();return 0;
 }catch(const std::exception&e){std::cerr<<"async save audit: "<<e.what()<<"\n";return 1;}}

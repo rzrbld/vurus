@@ -56,8 +56,8 @@ bool GameAudio::load(const SceneContent& scene,const ContentReader& read,const s
         return preload(path,reader);
     };
     for(const auto* name:{"pickup-heavy.wav","weapon-switch.wav","vz-motor.wav","start-engine.wav","aaaa.wav",
-                         "shield-alarm.wav","money.wav","select.wav","bip.wav","techno.wav","darken.wav","hardcore.wav","electric.wav"})keepClip(soundPath(name),read);
-    for(const auto* name:{"V-CODE.WAV","V-KEY.WAV","V-BONUS.WAV","V-MALUS.WAV","V-GAME-OVER.WAV","V-GAME-SAVED.WAV",
+                         "shield-alarm.wav","money.wav","select.wav","bip.wav","techno.wav","darken.wav","hardcore.wav","electric.wav","fade.wav"})keepClip(soundPath(name),read);
+    for(const auto* name:{"V-CODE.WAV","V-KEY.WAV","V-BONUS.WAV","V-MALUS.WAV","V-GAME-OVER.WAV","V-GAME-SAVED.WAV","V-HELP.WAV","V-HIGH-SPEED.WAV","V-LOW-SPEED.WAV",
             "V-PAUSE.WAV","V-MENU.WAV","V-MAP.WAV","V-INVENTORY.WAV","V-NEED-CASH.WAV","V-NEED-CODE.WAV","V-NEED-KEY.WAV",
             "V-LOCKED.WAV","V-GUN.WAV","V-FLAME.WAV","V-GRENADE.WAV","V-HOMING.WAV","V-LAZER.WAV","V-MINE.WAV",
             "V-PULSAR.WAV","V-ROCKETS.WAV","V-SAW.WAV","V-YEEPEE.WAV","V-SHIELD-LOW.WAV",
@@ -129,7 +129,7 @@ bool GameAudio::load(const SceneContent& scene,const ContentReader& read,const s
     error.clear();return true;
 }
 void GameAudio::reset() {
-    music_.resetOverlay();surpriseMusic_=0;device_.stopEffects();firing_.clear();
+    music_.resetOverlay();surpriseMusic_=0;device_.stopEffects(preservingDeparture_?departureVoice_:0);firing_.clear();
     weaponActors_.clear();weaponActorsInitialized_=false;spatialSamples_.clear();
     lastSoundWorldTime_=-1;motorBlocked_=false;shieldAlarm_={};fullShieldAlarm_.reset(shieldSequence_);speech_.clear();
 }
@@ -143,6 +143,12 @@ void GameAudio::explicitSample(const std::string& name,unsigned channel){
     const uint32_t mask=1u<<(channel-1);device_.stopNativeChannels(mask);raw(soundPath(name),mask,191);
 }
 void GameAudio::briefingBip(){raw(soundPath("bip.wav"),0x40000000u,127,false,false);}
+void GameAudio::fade(){raw(soundPath("fade.wav"),0xffff,191,false,false);}
+void GameAudio::beginLiftDeparture(){
+    preservingDeparture_=true;departureVoice_=0;speech_.clear();
+    speech("V-WELL-DONE.WAV",0,1000,10000);updateSpeech();
+}
+void GameAudio::endLiftDeparture(){preservingDeparture_=false;departureVoice_=0;}
 void GameAudio::cue(const std::string& filename,bool voice) {
     if(voice){speech(filename);return;}
     raw(soundPath(filename),0xffff,191,false,false);
@@ -155,7 +161,8 @@ void GameAudio::updateSpeech() {
     for(const auto& path:speech_.advance(SDL_GetTicks64())) {
         if(!clip(path))continue;
         device_.stopNativeChannels(1u<<4);
-        raw(path,1u<<4,191,false,false,AudioBus::Voices);
+        const auto handle=raw(path,1u<<4,191,false,false,AudioBus::Voices);
+        if(preservingDeparture_&&path==normalized("COMMON/DATA/SOUND/"+language_+"/V-WELL-DONE.WAV"))departureVoice_=handle;
     }
 }
 void GameAudio::consumeWeapons(const GameWorld& world,const SceneContent& scene){
@@ -242,7 +249,7 @@ void GameAudio::consume(GameWorld& world,const SceneContent& scene,const std::ve
     }
     case AudioEventKind::WeaponStop:case AudioEventKind::DryFire:break; //43df70 owns held audio.
     case AudioEventKind::WeaponSwitch:firing_[event.actor]={};if(event.actor==world.playerIndex())explicitSample("weapon-switch.wav",2);break;
-    case AudioEventKind::MapCash:explicitSample("money.wav",3);break;
+    case AudioEventKind::MapCash:case AudioEventKind::SaveCash:explicitSample("money.wav",3);break;
     case AudioEventKind::Voice:speech(event.name,event.delayMs,event.holdMs,event.tailMs);break;
     case AudioEventKind::Bonus:speech("V-BONUS.WAV",0,2000);break;
     case AudioEventKind::Malus:cue("V-MALUS.WAV",true);break;

@@ -49,7 +49,7 @@ int main(int argc,char** argv){try{
  {auto s=fixture();GameWorld w;need(w.load(s,level,error),error);w.setDebugEnemyAI(false);
   need(w.debugSetSurprise(SurpriseKind::Shield),"debug shield activation");for(int i=0;i<40&&!w.surprise().applied;++i)w.tick(.016f,{});need(w.player().shieldUpStep==10,"Surprise mutates same runtime field");
   const auto start=w.player().vitals.shield;w.tick(.050f,{});need(w.player().vitals.shield==start+10,"one Surprise step per pass, no elapsed producer");
-  const auto memory=w.snapshot();SaveGame save;save.currentLevel=s.mapPath;save.levels[s.mapPath].world=memory;std::vector<uint8_t> bytes;SaveGame disk;need(encodeSave(save,bytes,error)&&decodeSave(bytes,disk,error),error);need(bytes[8]==37,"Current writer retains v32 shield state");
+  const auto memory=w.snapshot();SaveGame save;save.currentLevel=s.mapPath;save.levels[s.mapPath].world=memory;std::vector<uint8_t> bytes;SaveGame disk;need(encodeSave(save,bytes,error)&&decodeSave(bytes,disk,error),error);need(bytes[8]==38,"Current writer retains v32 shield state");
   need(disk.levels.at(s.mapPath).world.actors[0].shieldUpStep==0&&!disk.levels.at(s.mapPath).world.surprise.applied,"disk removes temporary +10");need(w.player().shieldUpStep==10,"saving leaves live field unchanged");
   w.cancelSurprise();need(w.player().shieldUpStep==0,"cancel releases +10");need(w.restoreSnapshot(memory,error),error);need(w.player().shieldUpStep==10,"memory rollback keeps +10 without doubling");
   auto expired=memory;expired.surprise.remainingMs=0;need(w.restoreSnapshot(expired,error),error);const float before=w.player().vitals.shield;w.tick(.016f,{});need(w.player().shieldUpStep==0&&w.player().vitals.shield==before,"natural expiry removes producer before pass");

@@ -31,6 +31,12 @@ int main() {
     GameOptions options=original;options.gamma=73;
     // A first launch keeps caller defaults, including explicit command-line policy.
     assert(loadOptions(path.string(),options,error)&&options.gamma==73&&error.empty());
+    write(path,"version=1\nkey.forward=60\nkey.fire=78\n");
+    GameOptions legacy;assert(loadOptions(path.string(),legacy,error));
+    assert(legacy.keyBindings[0]==60&&legacy.keyBindings[4]==78);
+    assert(legacy.keyBindings[size_t(OptionAction::PanelHelp)]==0&&legacy.keyBindings[size_t(OptionAction::SpeedMode)]==0);
+    write(path,"version=1\nkey.forward=60\nkey.panel_help=60\n");
+    GameOptions duplicate;assert(!loadOptions(path.string(),duplicate,error));
     options.windowMode=3;options.width=1280;options.height=800;options.gamma=0;options.spriteFiltering=2;options.hudAspect=11;options.hudLanguage=2;
     options.fpsCounter=true;options.vsync=false;options.frameCap=30;
     options.fxaa=options.bloom=options.sharpen=true;options.crt=true;options.crtRetro=true;options.crtBright=true;options.vignette=false;options.shadows=false;options.reactorFx=false;options.soundFx=false;options.music=false;options.menuSounds=false;

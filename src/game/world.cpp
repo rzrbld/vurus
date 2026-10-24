@@ -143,6 +143,10 @@ void GameWorld::notifyWeapon() {
 void GameWorld::configurePlayerMotion() {
     const auto& p=scene_->objects[player_].properties;
     auto& c=playerMotionConfig_;c={};
+    //43b830/4355d5 compare/restore the class defaults, not instance overrides.
+    const auto& defaults=scene_->classes[scene_->objects[player_].classId.value].properties;
+    playerSpeedClassThreshold_=propertyNumber(defaults,"Speed-max",45);
+    playerSpeedClassPeriodMs_=std::max(1,int(propertyNumber(defaults,"Turn-timeout",18)));
     const auto& thrust=children(p,"Thrust");
     c.speedMin=propertyNumber(thrust,"Min",c.speedMin);
     c.speedMax=propertyNumber(thrust,"Max",c.speedMax);
@@ -488,6 +492,7 @@ bool GameWorld::load(SceneContent& scene,const Level& level,std::string& error,i
     }
     motion_.thrust=propertyNumber(children(scene.objects[player_].properties,"Thrust"),"Initial");
     configurePlayerMotion();
+    nativePlayerSpeed_.reset();
     nativePlayerFacing_=initializeNativePlayerFacing(motion_.direction,std::max(1,int(playerMotionConfig_.turnSeconds*1000)));
     nativePlayerPreviousSurface_=scene.objects[player_].position;
     initializeGates();
@@ -551,8 +556,8 @@ bool GameWorld::debugAddMoney() {
     if(money>std::numeric_limits<int64_t>::max()-amount)return false;
     money+=amount;return true;
 }
-void GameWorld::setPlayerPosition(float x,float y) { scene_->objects[player_].position={x,y}; motion_.velocityX=motion_.velocityZ=motion_.magnitude=motion_.thrust=0;actors_[player_].nativeAmmoContinuation=false;nativePlayerFacing_=initializeNativePlayerFacing(motion_.direction);nativePlayerPreviousSurface_={x,y};if(auto* h=actors_[player_].nativeMotionHistory()){const auto p=spiderSurfaceToNative(x,y);*h={{p.x,p.y},{x,y}};}synchronizeActorCell(player_); }
-void GameWorld::setPlayerDirection(int direction) { invalidateRenderActors(); motion_.direction=(direction%24+24)%24;actors_[player_].direction=motion_.direction;nativePlayerFacing_=initializeNativePlayerFacing(motion_.direction); }
+void GameWorld::setPlayerPosition(float x,float y) { scene_->objects[player_].position={x,y}; motion_.velocityX=motion_.velocityZ=motion_.magnitude=motion_.thrust=0;actors_[player_].nativeAmmoContinuation=false;nativePlayerFacing_=initializeNativePlayerFacing(motion_.direction,nativePlayerSpeed_?nativePlayerSpeed_->turnPeriodMs:18);nativePlayerPreviousSurface_={x,y};if(auto* h=actors_[player_].nativeMotionHistory()){const auto p=spiderSurfaceToNative(x,y);*h={{p.x,p.y},{x,y}};}synchronizeActorCell(player_); }
+void GameWorld::setPlayerDirection(int direction) { invalidateRenderActors(); motion_.direction=(direction%24+24)%24;actors_[player_].direction=motion_.direction;nativePlayerFacing_=initializeNativePlayerFacing(motion_.direction,nativePlayerSpeed_?nativePlayerSpeed_->turnPeriodMs:18); }
 bool GameWorld::selectPlayerWeaponSlot(unsigned slot) {
     auto& actor=actors_[player_];
     if(slot>=actor.weapons.size())return false;
@@ -2222,12 +2227,24 @@ PlayerCarry GameWorld::carry() const {
     const auto& p=player();auto ammunition=p.ammo;
     if(surprise_.active(SurpriseKind::Ammo))restoreAmmoBaseline(ammunition,surprise_.savedAmmo);
     auto held=heldItems_;std::erase_if(held,[&](const auto& item){return item.holder!=player_;});
-    return {p.vitals,ammunition,p.keys,p.heldKeys,p.weapons.empty()?"":p.weapons[p.selectedWeapon].name,playerKills_,elapsedMs_,p.weapons.empty()?std::nullopt:p.weapons[p.selectedWeapon].ammoSlot,std::move(held),ammoHits_,ammoMisses_};
+    auto speedMode=nativePlayerSpeed_;
+    if(speedMode && speedMode->surpriseBaselineSpeedThreshold){speedMode->speedThreshold=*speedMode->surpriseBaselineSpeedThreshold;speedMode->surpriseBaselineSpeedThreshold.reset();}
+    return {p.vitals,ammunition,p.keys,p.heldKeys,p.weapons.empty()?"":p.weapons[p.selectedWeapon].name,playerKills_,elapsedMs_,p.weapons.empty()?std::nullopt:p.weapons[p.selectedWeapon].ammoSlot,std::move(held),ammoHits_,ammoMisses_,speedMode};
 }
 void GameWorld::restore(const PlayerCarry& carry) {
     invalidateRenderActors();
     audioInput_.reset();audioMotorAttempt_=false;playerMoveCommanded_=false;
     playerKills_=carry.kills;ammoHits_=carry.ammoHits;ammoMisses_=carry.ammoMisses;elapsedMs_=carry.elapsedMs;
+    const bool hadManualSpeed=nativePlayerSpeed_.has_value();
+    nativePlayerSpeed_=carry.speedMode;
+    // Carry is normalized for a level transition. A same-World inventory/cash
+    // restore must reapply the destination's currently active speed Surprise.
+    if(nativePlayerSpeed_ && (surprise_.active(SurpriseKind::Xtc) || surprise_.active(SurpriseKind::Slow))) {
+        nativePlayerSpeed_->surpriseBaselineSpeedThreshold=nativePlayerSpeed_->speedThreshold;
+        nativePlayerSpeed_->speedThreshold*=surprise_.active(SurpriseKind::Xtc)?2.f:.25f;
+    }
+    if(nativePlayerSpeed_)nativePlayerFacing_.periodMs=nativePlayerSpeed_->turnPeriodMs;
+    else if(hadManualSpeed)nativePlayerFacing_.periodMs=std::max(1,int(playerMotionConfig_.turnSeconds*1000));
     auto& p=actors_[player_];p.vitals=carry.vitals;p.ammo=carry.ammo;p.keys=carry.keys;p.heldKeys=carry.heldKeys;
     auto incomingHeld=carry.heldItems;
     if(surprise_.kind==SurpriseKind::None)std::erase_if(incomingHeld,[](const auto& held){return held.surprise;});

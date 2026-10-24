@@ -25,6 +25,9 @@ public:
     void consume(GameWorld&, const SceneContent&, const std::vector<SceneAudioCue>&);
     void cue(const std::string& filename, bool voice=false);
     void briefingBip(); // Original428690 mask/priority, including its silent invalid channel.
+    void fade(); // Native41e71c/440273; callers supply the transition gate.
+    void beginLiftDeparture(); //442dd8: clear, enqueue WELL-DONE, attempt before teardown.
+    void endLiftDeparture();
     void menuExitSample(const std::string& bank,uint32_t command,uint32_t sample);
     void speech(const std::string& filename,unsigned delay=0,unsigned hold=1000,unsigned tail=0);
     void updateSpeech(); // Also called in menus, where consume() is not run.
@@ -71,5 +74,7 @@ private:
     unsigned surpriseMusic_=0,listenerHalfWidth_=320;
     bool weaponActorsInitialized_=false,motorBlocked_=false;
     double lastSoundWorldTime_=-1;
+    bool preservingDeparture_=false;
+    uint64_t departureVoice_=0; // Exact live handle; never preserve a replacement channel owner.
 };
 }

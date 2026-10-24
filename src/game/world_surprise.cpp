@@ -24,6 +24,29 @@ bool GameWorld::takeSurprise(SurpriseKind kind) {
         static_cast<double>(std::max(5000,500+(surpriseDuration(kind)<2?3000:surpriseDuration(kind)))),0,false,false,6,5,0xff2010});
     return true;
 }
+bool GameWorld::playerSpeedIndicatorLow() const {
+    float threshold=playerMotionConfig_.speedThreshold;
+    if(nativePlayerSpeed_)threshold=nativePlayerSpeed_->speedThreshold;
+    else if(surprise_.active(SurpriseKind::Slow))threshold*=.25f;
+    else if(surprise_.active(SurpriseKind::Xtc))threshold*=2;
+    return threshold!=playerSpeedClassThreshold_;
+}
+bool GameWorld::togglePlayerSpeedMode() {
+    if(!scene_ || player_>=actors_.size() || !player().alive || surprise_.active(SurpriseKind::Slow))return false;
+    auto state=nativePlayerSpeed_.value_or(NativePlayerSpeedModeState{
+        playerMotionConfig_.speedThreshold,nativePlayerFacing_.periodMs,{}});
+    // Lazily opt in: ordinary motion/Surprises remain byte-for-byte unchanged
+    // until the user actually invokes this new control.
+    if(!nativePlayerSpeed_ && surprise_.active(SurpriseKind::Xtc)) {
+        state.surpriseBaselineSpeedThreshold=state.speedThreshold;
+        state.speedThreshold*=2;
+    }
+    const auto voice=toggleNativePlayerSpeedMode(state,playerSpeedClassThreshold_,playerSpeedClassPeriodMs_);
+    if(!voice || state.turnPeriodMs<=0 || state.turnPeriodMs>1000000)return false;
+    nativePlayerSpeed_=state;nativePlayerFacing_.periodMs=state.turnPeriodMs;
+    voiceEvent(*voice==NativePlayerSpeedVoice::Low?"V-LOW-SPEED.WAV":"V-HIGH-SPEED.WAV",0,1000,2000);
+    return true;
+}
 void GameWorld::cancelSurprise() {
     for(auto held=heldItems_.begin();held!=heldItems_.end();) {
         if(held->holder!=player_ || !held->surprise){++held;continue;}
@@ -48,6 +71,10 @@ void GameWorld::cancelSurprise() {
             p.solid=surprise_.originalSolid && p.alive;
             motion_.velocityX=motion_.velocityZ=motion_.magnitude=0;
         }
+    }
+    if(nativePlayerSpeed_ && nativePlayerSpeed_->surpriseBaselineSpeedThreshold) {
+        nativePlayerSpeed_->speedThreshold=*nativePlayerSpeed_->surpriseBaselineSpeedThreshold;
+        nativePlayerSpeed_->surpriseBaselineSpeedThreshold.reset();
     }
     surprise_={};
     if(scene_ && player_<actors_.size())actors_[player_].shieldPulse=0;
@@ -104,6 +131,10 @@ void GameWorld::initializeSurpriseOrbitAltitude() {
 void GameWorld::applySurprise() {
     surprise_.applied=true;
     const auto kind=surprise_.kind;
+    if(nativePlayerSpeed_ && (kind==SurpriseKind::Xtc || kind==SurpriseKind::Slow)) {
+        nativePlayerSpeed_->surpriseBaselineSpeedThreshold=nativePlayerSpeed_->speedThreshold;
+        nativePlayerSpeed_->speedThreshold*=kind==SurpriseKind::Xtc?2.f:.25f;
+    }
     // 41c647: World clock low two bits choose sample slots 0x23/0x28.
     // Queue once on application; the existing speech scheduler owns admission.
     if(kind==SurpriseKind::Xtc)
@@ -230,6 +261,10 @@ Displacement GameWorld::surpriseMovement(const MovementCommand& raw,float second
         config.speedThreshold*=.25f;command.strafe*=.25f;
     }
     if(surprise_.active(SurpriseKind::Xtc))config.speedThreshold*=2;
+    if(nativePlayerSpeed_) {
+        config.speedThreshold=nativePlayerSpeed_->speedThreshold;
+        config.turnSeconds=nativePlayerSpeed_->turnPeriodMs/1000.f;
+    }
     if(surprise_.active(SurpriseKind::Banana)) {
         config.frictionX=config.frictionZ=.999f;config.grip=1;
     }
