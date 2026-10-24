@@ -1,0 +1,255 @@
+name: Verify and publish existing desktop and PortMaster Beta builds
+'on':
+  push:
+    branches:
+    - publish-beta-202610241546-resume
+    paths:
+    - .github/workflows/publish-beta-202610241546-resume.yml
+permissions:
+  actions: write
+  contents: write
+concurrency:
+  group: publish-beta-202610241546
+  cancel-in-progress: true
+jobs:
+  build-verify:
+    name: Build and verify (${{ matrix.stream }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - stream: desktop
+          workflow: build-desktop.yml
+          tag: v202610241546-beta
+          expected_jobs: '5'
+          title: Vurus 202610241546 Beta
+          run_id: '40108876642'
+        - stream: portmaster
+          workflow: build-portmaster.yml
+          tag: portmaster-v202610241546-beta
+          expected_jobs: '2'
+          title: Vurus PortMaster 202610241546 Beta
+          run_id: '40108876146'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_SHA: 362a35eb4e317d5b66f5b549a3ff44151bbf77fb
+      BUILD_WORKFLOW: ${{ matrix.workflow }}
+      RELEASE_TAG: ${{ matrix.tag }}
+      EXPECTED_JOBS: ${{ matrix.expected_jobs }}
+      STREAM: ${{ matrix.stream }}
+      RELEASE_TITLE: ${{ matrix.title }}
+      EXISTING_BUILD_RUN: ${{ matrix.run_id }}
+    steps:
+    - name: Build and verify exact tagged source
+      shell: bash
+      run: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        test "$(gh api "repos/$GH_REPO/git/commits/$BUILD_SHA" --jq .sha)" = "$BUILD_SHA"
+        test "$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq .object.sha)" = "$BUILD_SHA"
+        BUILD_RUN="$EXISTING_BUILD_RUN"
+        export BUILD_RUN
+        echo "Build: https://github.com/$GH_REPO/actions/runs/$BUILD_RUN"
+        for attempt in $(seq 1 240); do
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" > run.json
+          if [ "$(jq -r .status run.json)" = completed ]; then break; fi
+          sleep 30
+        done
+        jq -e --arg sha "$BUILD_SHA" --arg branch "$RELEASE_TAG" --arg path ".github/workflows/$BUILD_WORKFLOW" '.status == "completed" and .conclusion == "success" and .head_sha == $sha and .head_branch == $branch and .event == "workflow_dispatch" and .path == $path' run.json
+        # Job metadata may lag the run summary. Wait for the expected successful set.
+        for attempt in $(seq 1 30); do
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN/jobs?filter=all&per_page=100" > jobs.json
+          if jq -e --argjson count "$EXPECTED_JOBS" '.jobs | sort_by(.id) | group_by(.name) | map(last) | length == $count and all(.status == "completed" and .conclusion == "success")' jobs.json; then break; fi
+          sleep 10
+        done
+        jq -e --argjson count "$EXPECTED_JOBS" '.jobs | sort_by(.id) | group_by(.name) | map(last) | length == $count and all(.status == "completed" and .conclusion == "success")' jobs.json
+        test "$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq .object.sha)" = "$BUILD_SHA"
+        gh api "repos/$GH_REPO/releases?per_page=100" | jq -e --arg tag "$RELEASE_TAG" '[.[] | select(.tag_name == $tag)] | if length == 1 then .[0] else error("Expected exactly one existing release") end' > draft.json
+        jq -e --arg tag "$RELEASE_TAG" '.draft == true and .tag_name == $tag' draft.json
+        mkdir packages
+        jq -r '.assets[] | [.id, .name] | @tsv' draft.json > assets.tsv
+        while IFS=$'\t' read -r asset_id asset_name; do
+          case "$asset_name" in
+            vurus-linux.tar.gz|vurus-windows-amd64.zip|vurus-darwin-arm64.zip|vurus-darwin-x86_64.zip|vurus-portmaster.zip|SHA256SUMS.txt) ;;
+            *) echo 'Unexpected asset name' >&2; exit 1 ;;
+          esac
+          gh api "repos/$GH_REPO/releases/assets/$asset_id" -H 'Accept: application/octet-stream' > "packages/$asset_name"
+        done < assets.tsv
+        python3 - <<'PY'
+        import os,json,tarfile,zipfile
+        from pathlib import Path,PurePosixPath
+        desktop=os.environ['STREAM']=='desktop'
+        expected={'vurus-linux.tar.gz','vurus-windows-amd64.zip','vurus-darwin-arm64.zip','vurus-darwin-x86_64.zip'} if desktop else {'vurus-portmaster.zip'}
+        expected.add('SHA256SUMS.txt')
+        draft=json.loads(Path('draft.json').read_text())
+        # Existing workflow draft flags are normalized after validation.
+        assert {a['name'] for a in draft['assets']}==expected
+        assert {p.name for p in Path('packages').iterdir()}==expected
+        manifest=Path('packages/SHA256SUMS.txt').read_text().splitlines()
+        assert {line.split()[-1].removeprefix('*') for line in manifest}==expected-{'SHA256SUMS.txt'}
+        for p in Path('packages').iterdir():
+         if p.suffix=='.txt':continue
+         if p.suffix=='.zip':
+          with zipfile.ZipFile(p) as z:
+           assert z.testzip() is None
+           names=z.namelist()
+         else:
+          with tarfile.open(p) as t:names=t.getnames()
+         for name in names:
+          q=PurePosixPath(name)
+          assert not q.is_absolute() and '..' not in q.parts,name
+          assert not any(part.lower() in {'work','.git','.agents','.codex','.aws','saves','data'} for part in q.parts),name
+          assert q.suffix.lower() not in {'.iso','.bin','.rsc','.gaf','.vzs','.cfg'},name
+         assert any('license' in n.lower() for n in names),p
+         assert any(PurePosixPath(n).name in {'vurus-bench','vurus-bench.exe','vurus-bench.aarch64'} for n in names),p
+         assert any(PurePosixPath(n).name=='benchmark-README.txt' for n in names),p
+         print(p.name,'validated',len(names),'entries')
+        PY
+        (cd packages && sha256sum --check SHA256SUMS.txt)
+        python3 - <<'VERIFY'
+        from pathlib import Path, PurePosixPath
+        import json,hashlib,zipfile,tarfile,struct,os
+        assets=json.loads(Path('draft.json').read_text())['assets']
+        for a in assets:
+         p=Path('packages')/a['name'];digest='sha256:'+hashlib.sha256(p.read_bytes()).hexdigest()
+         if a.get('digest'):assert a['digest']==digest,(a['name'],'asset digest mismatch')
+         if p.suffix=='.txt':continue
+         if p.suffix=='.zip':
+          with zipfile.ZipFile(p) as z:entries={n:z.read(n) for n in z.namelist() if not n.endswith('/')}
+         else:
+          with tarfile.open(p) as t:entries={n.name:t.extractfile(n).read() for n in t.getmembers() if n.isfile()}
+         names=list(entries)
+         assert any('rust-licenses' in n or 'oxideav' in n.lower() for n in names),p
+         assert any('mame' in n.lower() and 'notice' in n.lower() for n in names),p
+         engine=[v for n,v in entries.items() if PurePosixPath(n).name in {'vurus','vurus.exe','vurus.aarch64'}]
+         assert len(engine)==1,p
+         b=engine[0]
+         if p.name=='vurus-linux.tar.gz':assert b[:4]==b'\x7fELF' and struct.unpack_from('<H',b,18)[0]==62
+         elif p.name=='vurus-portmaster.zip':
+          assert b[:4]==b'\x7fELF' and struct.unpack_from('<H',b,18)[0]==183
+          assert 'Beta' in entries['vurus/README.txt'].decode().splitlines()[0]
+         elif p.name=='vurus-windows-amd64.zip':
+          pe=struct.unpack_from('<I',b,60)[0];assert b[:2]==b'MZ' and b[pe:pe+4]==b'PE\0\0' and struct.unpack_from('<H',b,pe+4)[0]==0x8664
+         else:
+          assert b[:4]==b'\xcf\xfa\xed\xfe'
+          assert struct.unpack_from('<I',b,4)[0]==(0x100000c if 'arm64' in p.name else 0x1000007)
+         print(p.name,'architecture/notices/digest verified')
+        VERIFY
+        cat > notes.md <<'NOTES'
+        Beta release for broader testing, with native Linux, Windows, macOS and PortMaster builds.
+
+        - Correct Gatling aiming for Spider, Cops and Turrets: preserve the original downward-to-level sweep through cooldowns and target scans.
+        - Restore native enemy initial firing readiness, ordinary projectile contact selection and Missile target ordering.
+        - Correct Circular/Triple Fire transaction ordering, ordinary Ammo/Item animation lifecycle and explosion timing.
+        - Restore missing audio cues and XTC speech, player help controls and exit confirmations.
+        - Reduce repeated collision/renderer work and stop redrawing ordinary paused gameplay.
+        - Refresh the Extras benchmark screens and recall saved benchmark reports, including ARM compatibility.
+
+        Original game resources are required and are not included. Keep your imported data, saves and settings when updating. The save format is version 38 with supported legacy readers retained; older builds may not read newer checkpoints. Engine and third-party notices accompany the packages. Verify downloads with SHA256SUMS.txt.
+
+        Known issues: controlled offscreen smoke-trail reuse can produce a checkpoint that fails to restore; normal gameplay frequency remains unmeasured. Some Spider target/obstacle encounters remain under investigation. This Beta does not establish complete original-game parity or a universal performance guarantee.
+        NOTES
+        if [ "$STREAM" = desktop ]; then
+         printf '\nLinux x64 / Steam Deck, Windows x64, macOS Apple Silicon and Intel. macOS requires macOS 15+, uses unsigned terminal executables and omits SMAA; FXAA remains available. Includes the standalone benchmark.\n' >> notes.md
+        else
+         printf '\nPortMaster ARM64 / OpenGL ES 3.0. Extract Vurus.sh, Vurus Benchmark.sh and the vurus directory into your firmware Ports folder. Follow vurus/README.txt and preserve existing user files. GLES 2-only devices are unsupported; desktop post-processing shaders are unavailable. CI is not physical-device acceptance of this exact build.\n' >> notes.md
+        fi
+        printf '\nBuilt and tested by [GitHub CI](https://github.com/%s/actions/runs/%s), source commit `%s`.\n' "$GH_REPO" "$BUILD_RUN" "$BUILD_SHA" >> notes.md
+        python3 - <<'PREPARE'
+        from pathlib import Path
+        import json,os,hashlib
+        rid=json.loads(Path('draft.json').read_text())['id']
+        edit={'draft':True,'prerelease':True,'make_latest':'false','name':os.environ['RELEASE_TITLE'],'body':Path('notes.md').read_text()}
+        Path('release-edit.json').write_text(json.dumps(edit))
+        receipt={'release_id':rid,'tag':os.environ['RELEASE_TAG'],'title':os.environ['RELEASE_TITLE'],'source':os.environ['BUILD_SHA'],'ci_run':int(os.environ['BUILD_RUN']),'stream':os.environ['STREAM'],'expected_jobs':int(os.environ['EXPECTED_JOBS']),'prerelease':True,'make_latest':'false','assets':{p.name:'sha256:'+hashlib.sha256(p.read_bytes()).hexdigest() for p in Path('packages').iterdir()}}
+        Path('prepared.json').write_text(json.dumps(receipt,indent=2))
+        PREPARE
+        release_id=$(jq -r .id draft.json)
+        gh api --method PATCH "repos/$GH_REPO/releases/$release_id" --input release-edit.json > prepared-release.json
+        jq -e --arg title "$RELEASE_TITLE" '.draft == true and .prerelease == true and .name == $title' prepared-release.json
+    - name: Retain verification receipts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: beta-release-receipts-${{ matrix.stream }}
+        path: |-
+          run.json
+          jobs.json
+          tag.json
+          draft.json
+          prepared.json
+          prepared-release.json
+          notes.md
+          packages/SHA256SUMS.txt
+        if-no-files-found: warn
+        retention-days: 7
+  publish-both:
+    name: Publish both verified Beta releases
+    needs:
+    - build-verify
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        pattern: beta-release-receipts-*
+        path: receipts
+    - name: Verify both drafts and publish Beta prereleases
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 - <<'CHECK'
+        from pathlib import Path
+        import json
+        r=[json.loads(p.read_text()) for p in Path('receipts').rglob('prepared.json')]
+        assert len(r)==2 and {x['stream'] for x in r}=={'desktop','portmaster'}
+        assert all(x['source']=='362a35eb4e317d5b66f5b549a3ff44151bbf77fb' and x['prerelease'] is True and x['make_latest']=='false' for x in r)
+        Path('prepared-both.json').write_text(json.dumps(r,indent=2))
+        CHECK
+        gh api "repos/$GH_REPO/releases/latest" > latest-before.json
+        for stream in desktop portmaster; do
+         receipt=$(find receipts -path "*/prepared.json" -exec grep -l "\"stream\": \"$stream\"" {} +)
+         test -n "$receipt"
+         rid=$(jq -r .release_id "$receipt")
+         tag=$(jq -r .tag "$receipt")
+         source=$(jq -r .source "$receipt")
+         title=$(jq -r .title "$receipt")
+         test "$(gh api "repos/$GH_REPO/git/ref/tags/$tag" --jq .object.sha)" = "$source"
+         gh api "repos/$GH_REPO/releases/$rid" > "before-$stream.json"
+         jq -e --arg tag "$tag" --arg title "$title" '.draft==true and .prerelease==true and .tag_name==$tag and .name==$title' "before-$stream.json"
+         python3 - "$receipt" "before-$stream.json" <<'ASSETS'
+        import json,sys
+        r=json.load(open(sys.argv[1]));d=json.load(open(sys.argv[2]))
+        assert {a['name']:a['digest'] for a in d['assets']}==r['assets']
+        ASSETS
+        done
+        # Both streams are validated and still match their reviewed drafts before either publishes.
+        for stream in desktop portmaster; do
+         receipt=$(find receipts -path "*/prepared.json" -exec grep -l "\"stream\": \"$stream\"" {} +)
+         rid=$(jq -r .release_id "$receipt")
+         printf '%s\n' '{"draft":false,"prerelease":true,"make_latest":"false"}' > publish.json
+         gh api --method PATCH "repos/$GH_REPO/releases/$rid" --input publish.json > "published-$stream.json"
+         jq -e '.draft==false and .prerelease==true' "published-$stream.json"
+        done
+        gh api "repos/$GH_REPO/releases/latest" > latest-after.json
+        test "$(jq -r .id latest-before.json)" = "$(jq -r .id latest-after.json)"
+    - name: Retain publication receipts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: beta-publication-receipts
+        path: |-
+          prepared-both.json
+          before-*.json
+          published-*.json
+          latest-*.json
+        if-no-files-found: warn
+        retention-days: 7
