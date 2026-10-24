@@ -149,6 +149,6 @@ jobs:
           done
           (cd release-assets && sha256sum vurus-*.zip vurus-*.tar.gz > SHA256SUMS.txt)
           cat > release-notes.txt <<'NOTES'
-          Native engine and standalone benchmark builds for Linux, Windows and macOS. Run vurus-bench after importing your game data; see benchmark-README.txt for the score, video settings and offline HTML/JSON reports. Original game data is required and is not included. Verify downloads with SHA256SUMS.txt. PortMaster Alpha Preview has its own independent build and release workflow.
+          Native engine and standalone benchmark builds for Linux, Windows and macOS. Run vurus-bench after importing your game data; see benchmark-README.txt for the score, video settings and offline HTML/JSON reports. Original game data is required and is not included. Verify downloads with SHA256SUMS.txt. PortMaster Beta has its own independent build and release workflow.
           NOTES
           gh release create "$RELEASE_TAG" release-assets/* --draft --title "Vurus $RELEASE_TAG" --notes-file release-notes.txt

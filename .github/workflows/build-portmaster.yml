@@ -1,4 +1,4 @@
-name: PortMaster ARM64 — Alpha Preview
+name: PortMaster ARM64 — Beta
 on:
   workflow_dispatch:
   push:
@@ -68,10 +68,10 @@ jobs:
           printf '%s\n' "$entries" | grep -Fx 'vurus/vurus-bench.aarch64'
           printf '%s\n' "$entries" | grep -Fx 'vurus/benchmark-README.txt'
           (cd dist/portmaster && sha256sum vurus-portmaster.zip > SHA256SUMS.txt)
-      - name: Retain validated Alpha Preview package
+      - name: Retain validated Beta package
         uses: actions/upload-artifact@v4
         with:
-          name: vurus-portmaster-aarch64-alpha-preview
+          name: vurus-portmaster-aarch64-beta
           path: |
             dist/portmaster/vurus-portmaster.zip
             dist/portmaster/SHA256SUMS.txt
@@ -100,7 +100,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: vurus-portmaster-aarch64-alpha-preview
+          name: vurus-portmaster-aarch64-beta
           path: release-assets
       - name: Verify and create independent draft release
         env:
@@ -117,10 +117,10 @@ jobs:
           package_dir=$(dirname "${packages[0]}")
           (cd "$package_dir" && sha256sum --check SHA256SUMS.txt)
           cat > release-notes.txt <<'NOTES'
-          PortMaster Alpha Preview — ARM64 / OpenGL ES 3.0, optimized Release build. Original game data is required and is not included.
+          PortMaster Beta — ARM64 / OpenGL ES 3.0, optimized Release build. Original game data is required and is not included.
 
-          Use the normal firmware Ports launcher. Advanced video → FPS counter toggles FPS and RSS memory display. See the repository README and performance report for measured H700 encounter results and settings; performance varies with the scene. Existing imported data does not need re-importing; preserve saves and settings when updating. This remains an alpha prerelease.
+          Use the normal firmware Ports launcher. Advanced video → FPS counter toggles FPS and RSS memory display. See the repository README and performance report for measured H700 encounter results and settings; performance varies with the scene. Existing imported data does not need re-importing; preserve saves and settings when updating. This remains a beta prerelease.
 
           Includes a separate Vurus Benchmark Ports entry. It uses your saved video settings with VSync off and FPS uncapped, then shows a score and writes offline HTML/JSON reports. See vurus/benchmark-README.txt; --default-settings selects the fixed benchmark preset.
           NOTES
-          gh release create "$RELEASE_TAG" "$package_dir/vurus-portmaster.zip" "$package_dir/SHA256SUMS.txt" --draft --prerelease --title "Vurus PortMaster Alpha Preview $RELEASE_TAG" --notes-file release-notes.txt
+          gh release create "$RELEASE_TAG" "$package_dir/vurus-portmaster.zip" "$package_dir/SHA256SUMS.txt" --draft --prerelease --title "Vurus PortMaster Beta $RELEASE_TAG" --notes-file release-notes.txt

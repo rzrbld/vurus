@@ -1,4 +1,4 @@
-Vurus — PortMaster Alpha Preview ARM64 / OpenGL ES 3.0 build
+Vurus — PortMaster Beta ARM64 / OpenGL ES 3.0 build
 
 Extract Vurus.sh and the vurus folder together into your firmware's ports folder.
 Install PortMaster first. Launch Vurus from your firmware's ports menu.
@@ -25,7 +25,7 @@ Default resolution is 640x480; other resolutions and adaptive HUD remain availab
 Optional CRT, bloom, sharpen and antialiasing shaders are unavailable in this
 build. Gameplay effects remain enabled. See engine-README.txt for all options.
 
-This Alpha Preview is a normal optimized Release build, not a debug build.
+This Beta is a normal optimized Release build, not a debug build.
 It requires aarch64 and native GLES 3.0; GLES 2-only devices are unsupported.
 User-tested on Anbernic RG40XX H (H700,1GB RAM,muOS2410 Banana): roughly30-40FPS
 with FX and terrain effects disabled, dipping into the low20s in heavy battles.
