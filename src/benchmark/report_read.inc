@@ -43,8 +43,12 @@ class ReportJsonReader {
         if(pos<s.size()&&s[pos]=='0')++pos;else digits();
         if(pos<s.size()&&s[pos]=='.'){++pos;digits();}
         if(pos<s.size()&&(s[pos]=='e'||s[pos]=='E')){++pos;if(pos<s.size()&&(s[pos]=='+'||s[pos]=='-'))++pos;digits();}
-        v.kind=ReportJson::Number;const auto result=std::from_chars(s.data()+begin,s.data()+pos,v.number);
-        if(result.ec!=std::errc{}||result.ptr!=s.data()+pos||!std::isfinite(v.number))bad();
+        // The ARM libc++ toolchain has no floating-point from_chars overload.
+        // JSON always uses '.', independently of the user's numeric locale.
+        v.kind=ReportJson::Number;
+        std::istringstream input{std::string(s.substr(begin,pos-begin))};
+        input.imbue(std::locale::classic());input>>v.number;
+        if(!input||!input.eof()||!std::isfinite(v.number))bad();
         return v;
     }
 public:

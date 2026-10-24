@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <fstream>
 #include <chrono>
+#include <locale>
 using namespace vyruz::benchmark;
 int main() {
     vyruz::GameOptions menu;
@@ -102,6 +103,11 @@ int main() {
     assert(html.find("https://") == std::string::npos && html.find("http://") == std::string::npos);
     Report reopened;std::string error;
     assert(readReport(json,reopened,error));
+    struct CommaDecimal:std::numpunct<char>{char do_decimal_point()const override{return ',';}};
+    const auto savedLocale=std::locale();
+    std::locale::global(std::locale(std::locale::classic(),new CommaDecimal));
+    assert(readReport(json,reopened,error));
+    std::locale::global(savedLocale);
     assert(reopened.score()==report.score()&&reopened.results.size()==7&&reopened.gpu==report.gpu&&reopened.error==report.error);
     assert(std::abs(reopened.results.back().frame.mean-report.results.back().frame.mean)<1e-7&&reopened.options.width==1920);
     const auto intact=jsonReport(reopened);
