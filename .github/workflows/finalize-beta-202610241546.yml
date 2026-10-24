@@ -52,7 +52,7 @@ jobs:
          gh api "repos/$GH_REPO/releases/$rid" > "before-$stream.json"
          printf 'Expected tag=%s title=%s release=%s\n' "$tag" "$title" "$rid"
          jq '{id,name,tag_name,draft,prerelease,target_commitish}' "before-$stream.json"
-         jq -e --arg tag "$tag" --arg title "$title" '.draft==true and .prerelease==true and .tag_name==$tag and .name==$title' "before-$stream.json"
+         jq -e --arg tag "$tag" --arg title "$title" '.draft==true and .prerelease==true and (.tag_name==$tag or (.tag_name | startswith("untagged-"))) and .name==$title' "before-$stream.json"
          python3 - "$receipt" "before-$stream.json" <<'ASSETS'
         import json,sys
         r=json.load(open(sys.argv[1]));d=json.load(open(sys.argv[2]))
@@ -63,9 +63,24 @@ jobs:
         for stream in desktop portmaster; do
          receipt=$(find receipts -path "*/prepared.json" -exec grep -l "\"stream\": \"$stream\"" {} +)
          rid=$(jq -r .release_id "$receipt")
-         printf '%s\n' '{"draft":false,"prerelease":true,"make_latest":"false"}' > publish.json
+         python3 - "$receipt" <<'BIND'
+        import json,sys
+        r=json.load(open(sys.argv[1]));d=json.load(open('before-'+r['stream']+'.json'))
+        assert 'version 38' in d['body'] and 'Known issues:' in d['body']
+        json.dump({'body':d['body'],'draft':False,'prerelease':True,'make_latest':'false','tag_name':r['tag'],'target_commitish':r['source'],'name':r['title']},open('publish.json','w'))
+        BIND
          gh api --method PATCH "repos/$GH_REPO/releases/$rid" --input publish.json > "published-$stream.json"
-         jq -e '.draft==false and .prerelease==true' "published-$stream.json"
+         tag=$(jq -r .tag "$receipt")
+         source=$(jq -r .source "$receipt")
+         title=$(jq -r .title "$receipt")
+         jq -e --arg tag "$tag" --arg title "$title" '.draft==false and .prerelease==true and .tag_name==$tag and .name==$title' "published-$stream.json"
+         test "$(gh api "repos/$GH_REPO/git/ref/tags/$tag" --jq .object.sha)" = "$source"
+         python3 - "$receipt" "published-$stream.json" <<'RECHECK'
+        import json,sys
+        r=json.load(open(sys.argv[1]));d=json.load(open(sys.argv[2]));before=json.load(open('before-'+r['stream']+'.json'))
+        assert {a['name']:a['digest'] for a in d['assets']}==r['assets']
+        assert d['body']==before['body']
+        RECHECK
         done
         gh api "repos/$GH_REPO/releases/latest" > latest-after.json
         test "$(jq -r .id latest-before.json)" = "$(jq -r .id latest-after.json)"
