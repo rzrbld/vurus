@@ -205,16 +205,28 @@ bool GameWorld::advanceSpiderAI(size_t id,float seconds,std::span<const ContentP
                 const bool more=!(route.status&1) || nextSegment(route);
                 turn(route);
                 if(more && spiderTurnAllowsForward(turning))command.throttle=EnemyThrottle::Forward;
+                // 42caa0 returns without a slope visit on the ordinary Patrol
+                // branch; the hide-until-firing class branch releases instead.
+                if(actor.visibleWhenFiring && !actor.weapons.empty()) {
+                    auto& weapon=actor.weapons[actor.selectedWeapon];
+                    advanceWeaponAim(weapon.config,weapon.state,false);
+                }
             }else{
                 turn(route);
                 if(route.status&2){command.throttle=EnemyThrottle::Reverse;actor.contactMotion=false;actor.enemyThrust=std::min(actor.enemyThrust,0.f);}
                 if(route.target && *route.target<actors_.size() && actors_[*route.target].alive)route.segmentEnd=targetCenter(*route.target);
                 const int aim=heading(route.segmentStart,route.segmentEnd);
                 const int desired=aim<24?((aim+3)/6*6)%24:24;
-                if(route.target && *route.target<actors_.size() && actors_[*route.target].alive && !actor.weapons.empty() && terminal(route) &&
-                   spiderTurnAllowsFire(turning,aim) && actor.direction==desired &&
-                   static_cast<uint32_t>(targetDistance)<=static_cast<uint32_t>(actor.weapons[actor.selectedWeapon].range*actor.weapons[actor.selectedWeapon].range))
-                    firing=true;
+                const bool aiming=route.target && *route.target<actors_.size() && actors_[*route.target].alive &&
+                    !actor.weapons.empty() && terminal(route) && turning.logicalHeading==aim &&
+                    static_cast<uint32_t>(targetDistance)<=static_cast<uint32_t>(actor.weapons[actor.selectedWeapon].range*actor.weapons[actor.selectedWeapon].range);
+                firing=aiming && spiderTurnAllowsFire(turning,aim) && actor.direction==desired;
+                // 42d2d0 returns admitted aim even during cooldown/pose gating;
+                // 42caa0 then visits42c210/42c280 once, before motion/emission.
+                if(!actor.weapons.empty()) {
+                    auto& weapon=actor.weapons[actor.selectedWeapon];
+                    advanceWeaponAim(weapon.config,weapon.state,aiming);
+                }
             }
             command.routeCorrection=enemyRouteCorrection({native.x,native.y},{route.segmentStart.x,route.segmentStart.y},
                 {route.segmentEnd.x,route.segmentEnd.y},true);
@@ -270,7 +282,9 @@ bool GameWorld::advanceSpiderAI(size_t id,float seconds,std::span<const ContentP
     const bool ready=firing && !actor.weapons.empty() && nativeEnemyWeaponReady(
         actor.weapons[actor.selectedWeapon].config,actor.weapons[actor.selectedWeapon].state,
         static_cast<uint64_t>(elapsedMs_),actor.nativeAmmoOwner.activeAmmo);
-    fire(id,ready);
+    // Rescan/search visits that did not steer must neither reset nor advance
+    // the slope, and deferred emission must not visit it a second time.
+    fire(id,ready,false,{}, {},WeaponFireVisit::AimAlreadyUpdated);
     return locked;
 }
 }

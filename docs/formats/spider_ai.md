@@ -1,5 +1,20 @@
 # Spider steering and animation timing
 
+## Gatling aim and shot readiness
+
+Spider steering at42caa0 advances or releases its weapon slope independently of
+actual shot readiness. Admitted aim advances through cooldown and incomplete
+visible poses; scan-only visits retain it. Non-near steering retains slope for
+ordinary classes and releases it for Visible-when-firing classes. A rejected
+near-branch aim also releases it.
+
+The deferred emission tail uses AimAlreadyUpdated so it does not repeat or reset
+the steering update. Initial delay, pose admission and Player/ordinary/Circular
+weapon policies remain separate. Existing serialized slope/held state is retained;
+no schema change is needed. The World regression checks sustained fire, rescan,
+target changes, pose/range/class branches and disk continuation. The separately
+reported player-as-obstacle/non-engagement encounter remains unresolved.
+
 Spider uses separate Seeker and Patrol actions. Original executable procedures
 42c510 and42e400 identify their normal records as type7, modes2 and12 respectively.
 The direct near-target test42ce40 accepts a supplied Seeker action. During Patrol,

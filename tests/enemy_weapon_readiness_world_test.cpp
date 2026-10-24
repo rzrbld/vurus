@@ -23,6 +23,84 @@ void drain(GameWorld&w){w.takeAudioEvents();}
 void prepare(GameWorld&w,uint32_t raw=0){auto state=w.snapshot();auto&a=state.actors[1];a.direction=6;a.nativeAmmoOwner.activeAmmo=raw;if(a.enemyTurn)a.enemyTurn=initializeEnemyTurn(a.enemyTurnConfig,6,0);if(a.spiderAI&&a.spiderAI->turn)a.spiderAI->turn=initializeSpiderTurn(a.enemyTurnConfig,6);std::string e;need(w.restoreSnapshot(state,e),e);drain(w);const auto center=spiderSurfaceToNative(1000,1000);const auto target=spiderNativeToSurface(center.x+100,center.y);w.setPlayerPosition(target.x,target.y);}
 uint64_t firstShot(GameWorld&w,unsigned limit=150){for(unsigned t=0;t<limit;++t){w.tick(.014f,{});drain(w);if(w.shotsFired)return *w.actors()[1].weapons[0].state.lastFireMs;}throw std::runtime_error("No first enemy volley");}
 std::vector<uint8_t> encoded(GameWorld&w){SaveGame s;s.currentLevel="TEST/ENEMY-READY.3DG";s.levels[s.currentLevel].world=w.snapshot();std::vector<uint8_t>b;std::string e;need(encodeSave(s,b,e),e);return b;}
+SceneContent spiderGatlingFixture(){
+ auto s=fixture("Spider");auto& gun=s.classes[2].properties[0].children;
+ gun.push_back(value("Initial-slope","-45"));gun.push_back(value("Slope-step","0.5"));
+ for(auto& n:gun)if(n.key=="Delay")n.values={"98"};
+ return s;
+}
+WorldSnapshot admittedSpider(GameWorld& world){
+ prepare(world);for(int tick=0;tick<2;++tick){world.tick(.014f,{});drain(world);}
+ auto state=world.snapshot();auto& ai=*state.actors[1].spiderAI;
+ need(ai.seekerRoute.action.active,"Spider admitted before slope comparison");
+ ai.seekerRoute.action.scanRemainingMs=10000;
+ return state;
+}
+void spiderGatlingRegression(){
+ const auto terrain=arena();std::string error;
+ // 42caa0 calls42c210 for admitted aim even when42d2d0 cannot set fire.
+ // The current World must retain native readiness and update slope once,
+ // including through deferred CREATE/emission, rather than once per bullet.
+ auto scene=spiderGatlingFixture();GameWorld world;
+ need(world.load(scene,terrain,error),error);auto initial=admittedSpider(world);
+ need(world.restoreSnapshot(initial,error),error);
+ const auto config=world.actors()[1].weapons[0].config;
+ float expected=config.initialSlope;unsigned cooldownVisits=0,volleys=0;
+ for(unsigned visit=0;visit<120;++visit){
+  if(visit)expected=std::min(0.f,expected+config.slopeStep);
+  const auto shots=world.shotsFired;world.tick(.014f,{});drain(world);
+  const auto& actor=world.actors()[1];const auto& weapon=actor.weapons[0];
+  need(weapon.state.slopeHeld&&weapon.state.slopeRadians==expected,"Spider slope matches original once-per-steering recurrence");
+  if(world.shotsFired==shots)++cooldownVisits;
+  else {++volleys;need(*weapon.state.lastFireMs>=98,"Slope aiming never bypasses initial readiness");
+   need(world.projectiles().size()>0&&world.projectiles().back().slopeRadians==expected,"Emitted projectile captures already-updated slope");}
+ }
+ need(cooldownVisits>90&&volleys>15&&expected==0,"Sustained Spider fire levels out through cooldowns");
+ // 42c5a0 scan-only visit does not call42caa0: hold the slope unchanged.
+ auto rescan=initial;auto& r=rescan.actors[1];r.weapons[0].state.slopeHeld=true;r.weapons[0].state.slopeRadians=-.25f;
+ r.spiderAI->seekerRoute.action.scanRemainingMs=0;
+ need(world.restoreSnapshot(rescan,error),error);const auto count=world.shotsFired;world.tick(.014f,{});drain(world);
+ need(world.actors()[1].weapons[0].state.slopeHeld&&world.actors()[1].weapons[0].state.slopeRadians==-.25f&&world.shotsFired==count,"Scan-only visit retains slope without emitting");
+ // Target-change rescan clears active state without a slope helper visit.
+ auto lost=rescan;lost.actors[1].spiderAI->seekerRoute.sampledTarget.x+=1;
+ need(world.restoreSnapshot(lost,error),error);world.tick(.014f,{});drain(world);
+ need(!world.actors()[1].spiderAI->seekerRoute.action.active&&world.actors()[1].weapons[0].state.slopeRadians==-.25f,"Target-change rescan preserves native retained slope");
+ // Original42d2d0 admits range/logical heading before its visible-pose gate.
+ auto turning=initial;auto& t=turning.actors[1];t.direction=7;
+ auto& turn=*t.spiderAI->turn;turn.bodyPose=turn.bodyPreviousPose=8;turn.bodyDesiredPose=7;turn.bodyRemainingMs=1000;
+ t.weapons[0].state.slopeHeld=true;t.weapons[0].state.slopeRadians=-.25f;
+ need(world.restoreSnapshot(turning,error),error);const auto before=world.shotsFired;world.tick(.014f,{});drain(world);
+ need(world.actors()[1].weapons[0].state.slopeRadians==-.25f+config.slopeStep&&world.shotsFired==before,"Incomplete visible pose advances admitted aim but cannot fire");
+ // An actual steering range rejection invokes42c280, unlike a scan-only visit.
+ auto shortScene=spiderGatlingFixture();for(auto& n:shortScene.classes[2].properties[0].children)if(n.key=="Fire-Range")n.values={"50"};
+ GameWorld shortRange;need(shortRange.load(shortScene,terrain,error),error);auto rejected=admittedSpider(shortRange);
+ rejected.actors[1].weapons[0].state.slopeHeld=true;rejected.actors[1].weapons[0].state.slopeRadians=-.25f;
+ need(shortRange.restoreSnapshot(rejected,error),error);shortRange.tick(.014f,{});drain(shortRange);
+ need(!shortRange.actors()[1].weapons[0].state.slopeHeld&&shortRange.actors()[1].weapons[0].state.slopeRadians==config.initialSlope&&!shortRange.shotsFired,"Rejected aim releases the original slope");
+ // 42caa0's non-near branch retains slope for ordinary classes, but resets
+ // it for Visible-when-firing classes. Do not turn every steering pass into
+ // either an unconditional held input or an unconditional release.
+ for(bool hiddenUntilFire:{false,true}){
+  auto farScene=spiderGatlingFixture();
+  for(auto* properties:{&farScene.classes[1].properties,&farScene.objects[1].properties})
+   for(auto& n:*properties)if(n.key=="Visible-when-firing")n.values={hiddenUntilFire?"1":"0"};
+  GameWorld farWorld;need(farWorld.load(farScene,terrain,error),error);auto far=admittedSpider(farWorld);
+  far.actors[1].brain.minimumDistance=0;far.actors[1].weapons[0].state.slopeHeld=true;far.actors[1].weapons[0].state.slopeRadians=-.25f;
+  need(farWorld.restoreSnapshot(far,error),error);farWorld.tick(.014f,{});drain(farWorld);
+  const auto& state=farWorld.actors()[1].weapons[0].state;
+  need(state.slopeHeld==!hiddenUntilFire&&state.slopeRadians==(hiddenUntilFire?config.initialSlope:-.25f),"Non-near steering preserves original class-dependent slope visit");
+ }
+ // Real disk save in mid-sweep, then cross multiple scan/cooldown boundaries.
+ need(world.restoreSnapshot(initial,error),error);for(int tick=0;tick<30;++tick){world.tick(.014f,{});drain(world);}
+ auto saved=world.snapshot();saved.actors[1].spiderAI->seekerRoute.action.scanRemainingMs=28;
+ need(world.restoreSnapshot(saved,error),error);
+ auto dir=hostTempDirectory("spider-slope");SaveGame save,read;save.currentLevel=scene.mapPath;save.levels[scene.mapPath].world=world.snapshot();
+ need(writeSaveFile((dir/"slope.vzs").string(),save,error)&&readSaveFile((dir/"slope.vzs").string(),read,error),error);
+ auto replayScene=spiderGatlingFixture();GameWorld replay;
+ need(replay.load(replayScene,terrain,error)&&replay.restoreSnapshot(read.levels.at(scene.mapPath).world,error),error);drain(replay);
+ for(int tick=0;tick<180;++tick){for(auto* w:{&world,&replay}){w->tick(.014f,{});drain(*w);}need(encoded(world)==encoded(replay),"Spider slope disk continuation across rescan and cooldown");}
+ std::filesystem::remove_all(dir);
+}
 }
 int main(){try{
  unsigned families=0;
@@ -51,5 +129,6 @@ int main(){try{
   auto dir=hostTempDirectory("enemy-ready");SaveGame save,read;save.currentLevel=s.mapPath;save.levels[s.mapPath].world=live.snapshot();need(writeSaveFile((dir/"save.vzs").string(),save,e)&&readSaveFile((dir/"save.vzs").string(),read,e),e);need(resumed.load(r,l,e)&&resumed.restoreSnapshot(read.levels.at(s.mapPath).world,e),e);drain(resumed);
   for(unsigned t=0;t<60;++t){for(auto*w:{&live,&resumed}){w->tick(.014f,{});drain(*w);}need(encoded(live)==encoded(resumed),"Initial readiness disk continuation");}std::filesystem::remove_all(dir);
  }
- std::cout<<"PASS"<<families<<"enemy families,54initial admissions,Player,latebirth and60disk ticks\n";
+ spiderGatlingRegression();
+ std::cout<<"PASS"<<families<<"enemy families,54initial admissions,Player,latebirth,Spider slope/scan/pose/range and240disk ticks\n";
 }catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}

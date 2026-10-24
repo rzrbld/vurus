@@ -439,6 +439,7 @@ private:
         std::size_t actor=0;bool held=false,sweep=false;
         std::optional<ContentPosition> previous;
         std::optional<bool> aiming;
+        WeaponFireVisit visit=WeaponFireVisit::Input;
     };
     bool deferActorFire_=false;
     void selectCompatibleActorAmmo(std::size_t);
@@ -495,7 +496,7 @@ private:
     bool ammoContactEnabled(const Projectile&) const;
     std::vector<std::pair<size_t,size_t>> ammoContactVictims_; // mine, incoming actor
     std::vector<size_t> contactMines_;
-    void fire(size_t actor,bool held,bool sweep=false,std::optional<ContentPosition> forwardPrevious={},std::optional<bool> aiming={});
+    void fire(size_t actor,bool held,bool sweep=false,std::optional<ContentPosition> forwardPrevious={},std::optional<bool> aiming={},WeaponFireVisit visit=WeaponFireVisit::Input);
     bool takeSurprise(SurpriseKind);
     void updateSurprise(float milliseconds);
     void spawnBananaTrails(bool constructing);

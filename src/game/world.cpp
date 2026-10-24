@@ -1630,9 +1630,9 @@ void GameWorld::selectCompatibleActorAmmo(size_t id) {
     auto& actor=actors_[id];
     selectCompatibleAmmo(actor.weapons[actor.selectedWeapon],actor,scene_->objects[id],*scene_);
 }
-void GameWorld::fire(size_t id,bool held,bool sweep,std::optional<ContentPosition> forwardPrevious,std::optional<bool> aiming) {
+void GameWorld::fire(size_t id,bool held,bool sweep,std::optional<ContentPosition> forwardPrevious,std::optional<bool> aiming,WeaponFireVisit visit) {
     if(id<actors_.size())actors_[id].nativeFireRequested=held;
-    if(deferActorFire_){deferredActorFire_=PendingActorFire{id,held,sweep,forwardPrevious,aiming};return;}
+    if(deferActorFire_){deferredActorFire_=PendingActorFire{id,held,sweep,forwardPrevious,aiming,visit};return;}
     if(id==player_ && (surprise_.jammed || surprise_.active(SurpriseKind::Motor)))held=false;
     auto& actor=actors_[id];
     if (!actor.alive || actor.weapons.empty() || std::find(touchVictims_.begin(),touchVictims_.end(),id)!=touchVictims_.end()) return;
@@ -1675,7 +1675,7 @@ void GameWorld::fire(size_t id,bool held,bool sweep,std::optional<ContentPositio
     auto& requestAmmo=deferredCharge?barrelBudget:stock->second.count;
     if(sweep)weapon.state.lastFireMs.reset();
     auto requests=fireWeapon(weapon.config,weapon.state,held,static_cast<uint64_t>(elapsedMs_),requestAmmo,aiming,actor.nativeAmmoOwner.activeAmmo,
-        sweep?WeaponFireVisit::PendingSweep:WeaponFireVisit::Input);
+        sweep?WeaponFireVisit::PendingSweep:visit);
     std::vector<ShotPositionOffset> shotOrigins(requests.size());
     if(id==player_ && !requests.empty()) {
         if(tripleCopies) {

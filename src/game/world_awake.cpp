@@ -263,7 +263,7 @@ void GameWorld::visitNativeActor(size_t id,float seconds,const WorldInput& input
     if(id>=actors_.size() || !actors_[id].alive)return;
     if(retireBodyGraphics(id))return;
     if(actors_[id].effect){updateExplosion(id,seconds*1000);return;}
-    if(pending)fire(pending->actor,pending->held,pending->sweep,pending->previous,pending->aiming);
+    if(pending)fire(pending->actor,pending->held,pending->sweep,pending->previous,pending->aiming,pending->visit);
     if(id<actors_.size() && actors_[id].alive)updateGenerator(id,seconds*1000);
 }
 

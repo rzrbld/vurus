@@ -29,6 +29,13 @@ ShotPositionOffset projectileBarrelOffset(int direction,float lateralOffset) {
             static_cast<float>((sz+cx)*.4472135901451111f)};
 }
 
+void advanceWeaponAim(const WeaponConfig& config,WeaponState& state,bool aiming) {
+    if(config.initialSlope==0)return;
+    if(!aiming){state.slopeHeld=false;state.slopeRadians=config.initialSlope;}
+    else if(!state.slopeHeld){state.slopeHeld=true;state.slopeRadians=config.initialSlope;}
+    else if(state.slopeRadians!=0)state.slopeRadians=std::min(0.f,state.slopeRadians+config.slopeStep);
+}
+
 std::vector<ShotRequest> fireWeapon(const WeaponConfig& config, WeaponState& state,
                                   bool held, uint64_t nowMs, uint32_t& ammo,
                                   std::optional<bool> aiming,std::optional<uint32_t> activeAmmo,
@@ -37,11 +44,7 @@ std::vector<ShotRequest> fireWeapon(const WeaponConfig& config, WeaponState& sta
     // per held input tick, not per emitted bullet or elapsed milliseconds.
     // 440dd7/440f1b goes directly to443bd0 for a pending Circular sweep,
     // skipping438540 and its slope input helpers entirely.
-    if(visit==WeaponFireVisit::Input && config.initialSlope!=0) {
-        if(!aiming.value_or(held)){state.slopeHeld=false;state.slopeRadians=config.initialSlope;}
-        else if(!state.slopeHeld){state.slopeHeld=true;state.slopeRadians=config.initialSlope;}
-        else if(state.slopeRadians!=0)state.slopeRadians=std::min(0.f,state.slopeRadians+config.slopeStep);
-    }
+    if(visit==WeaponFireVisit::Input)advanceWeaponAim(config,state,aiming.value_or(held));
     std::vector<ShotRequest> shots;
     if (!held || ammo == 0 || !std::isfinite(config.weaponsGap) || config.weaponsGap < 0)
         return shots;

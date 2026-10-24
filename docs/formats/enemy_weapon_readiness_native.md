@@ -9,6 +9,11 @@ starts the timestamp at zero, so a late birth does not wait Delay from its birth
 A declined fire bit retains the separate admitted/in-range state and reveal.
 Player first-input policy is a separate accepted boundary.
 
+Spider slope is advanced/released from42caa0 steering independently of this
+readiness result. Scan-only visits retain it, and deferred emission must not
+repeat the slope visit. Passing readiness as the slope trigger would reset a
+Gatling during every cooldown; the live World regression now covers this case.
+
 `enemy_weapon_readiness_test` compares30,000 retained original-instruction results;
 `enemy_weapon_readiness_world_test` covers live native callers, raw wrap and disk
 continuation. The optional authored-resource audit reproduces Cop first-fire
