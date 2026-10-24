@@ -91,6 +91,7 @@ struct SaveCatalogResult {
 };
 struct App {
     bool debugEnabled=false;
+    bool debugInfoVisible=true;
     bool profileTick=false;
     double profileWorldMs=0;
     double debugFrameSum=0,debugFramePeak=0;unsigned debugFrameCount=0;
@@ -157,6 +158,7 @@ struct App {
     vyruz::InventoryView inventory;
     vyruz::MenuView menu;
     bool menuPointerVisible=false;
+    bool menuExit=false;
     vyruz::GameOptions options;
     std::string optionsPath;
     int optionsPage=0, bindingCapture=0;
@@ -898,7 +900,7 @@ bool applyMenuAction(App& a) {
     bool levelChanged=false;
         if(a.menuAction!=vyruz::MenuAction::None) {
             const auto action=a.menuAction;a.menuAction=vyruz::MenuAction::None;
-            if(!a.debugEnabled && action>=vyruz::MenuAction::Debug && action<=vyruz::MenuAction::DebugSelectSurprise)return false;
+            if(!a.debugEnabled && ((action>=vyruz::MenuAction::Debug && action<=vyruz::MenuAction::DebugSelectSurprise)||action==vyruz::MenuAction::DebugInfo))return false;
             if(action==vyruz::MenuAction::Options){a.optionsPage=0;a.menu.showOptions();refreshOptions(a);}
             else if(action==vyruz::MenuAction::BenchmarkDefault || action==vyruz::MenuAction::BenchmarkUser){
                 a.benchmarkRequest=action==vyruz::MenuAction::BenchmarkDefault;a.quit=1;
@@ -907,6 +909,10 @@ bool applyMenuAction(App& a) {
             else if(action==vyruz::MenuAction::Scores||action==vyruz::MenuAction::Credits||action==vyruz::MenuAction::Intro||action==vyruz::MenuAction::SlideShow||action==vyruz::MenuAction::ControlsHelp)beginExtra(a,action);
             else if(action==vyruz::MenuAction::DebugAI)a.world.setDebugEnemyAI(!a.world.debugEnemyAI());
             else if(action==vyruz::MenuAction::DebugGod)a.world.setDebugGodMode(!a.world.debugGodMode());
+            else if(action==vyruz::MenuAction::DebugInfo) {
+                a.debugInfoVisible=!a.debugInfoVisible;a.menu.debugInfo=a.debugInfoVisible;
+                a.hud.setDebugInfoVisible(a.debugInfoVisible);
+            }
             else if(action==vyruz::MenuAction::DebugAmmo){a.world.debugFillAmmo();a.menu.error="All ammunition filled.";}
             else if(action==vyruz::MenuAction::DebugMoney)a.menu.error=a.world.debugAddMoney()?"Added 1,000,000 money.":"Balance limit: no money added.";
             else if(action==vyruz::MenuAction::DebugSelectSurprise){
@@ -918,7 +924,10 @@ bool applyMenuAction(App& a) {
                 levelChanged=selectDebugLevel(a,a.menu.selected);
                 if(!levelChanged)a.menu.error="Could not load level: "+a.loadError;
             }
-            else if(action==vyruz::MenuAction::Quit)a.quit=1;
+            else if(action==vyruz::MenuAction::Quit) {
+                a.menuExit=a.hud.beginMenuExit(a.content);
+                if(!a.menuExit)a.quit=1;
+            }
             else if(action==vyruz::MenuAction::EndGame) {
                 a.menu.close(a.paused);a.menu.show(a.paused,true);a.sessionStarted=false;a.menu.retryAvailable=a.restartLevel.has_value();a.audio.device().stopEffects();
             } else if(action==vyruz::MenuAction::LoadGame) {
@@ -1050,6 +1059,11 @@ void handleInput(App& a) {
     if(a.inputFocused&&a.controllerBlockedUntilNeutral&&a.controller.controlsNeutral())a.controllerBlockedUntilNeutral=false;
     SDL_Event ev;
     while (SDL_PollEvent(&ev)) {
+        if(a.menuExit) {
+            if(ev.type==SDL_QUIT||ev.type==SDL_KEYDOWN||ev.type==SDL_MOUSEBUTTONDOWN||
+               (ev.type==SDL_CONTROLLERBUTTONDOWN&&a.controller.owns(ev.cbutton.which)))a.quit=1;
+            continue;
+        }
         if(a.controller.event(ev)){
             a.suppressFireUntilRelease=true;a.controllerBlockedUntilNeutral=true;
             a.menuHold.reset();a.menuStick.reset();a.mouseUsed=false;a.padAimX=a.padAimY=0;a.assistedAim={};a.aimAssistTarget=SIZE_MAX;a.presentationArmed=false;
@@ -1183,15 +1197,28 @@ void handleInput(App& a) {
                 const float x=point.x-view.uiX(),y=point.y-view.uiY();
                 if(a.menu.hover(x,y) && ev.type==SDL_MOUSEBUTTONDOWN && ev.button.button==SDL_BUTTON_LEFT)
                     a.menuAction=a.menu.activate(a.paused);
-            } else if(ev.type==SDL_MOUSEWHEEL)a.menu.move(-wheelSteps(ev.wheel));
+            } else if(ev.type==SDL_MOUSEWHEEL) {
+                if(a.menu.debugScreen()&&!a.menu.debugPreview().empty())a.menu.debugFocusRight();
+                a.menu.move(-wheelSteps(ev.wheel));
+            }
             else if(ev.type==SDL_KEYDOWN&&(!ev.key.repeat ||
                 ((a.menu.page==vyruz::MenuPage::Debug||a.menu.page==vyruz::MenuPage::DebugLevels||a.menu.page==vyruz::MenuPage::DebugSurprises)&&
                  (ev.key.keysym.sym==SDLK_UP||ev.key.keysym.sym==SDLK_DOWN)))) {
                 // Debug tools retain their existing held-arrow browsing.
-                if(ev.key.keysym.sym==SDLK_UP)a.menu.move(-1);
+                if(a.menu.debugScreen()&&ev.key.keysym.sym==SDLK_LEFT)a.menu.debugFocusLeft();
+                else if(a.menu.debugScreen()&&ev.key.keysym.sym==SDLK_RIGHT)a.menu.debugFocusRight();
+                else if(a.menu.debugScreen()&&ev.key.keysym.sym==SDLK_TAB) {
+                    if(a.menu.debugListFocused())a.menu.debugFocusLeft();else a.menu.debugFocusRight();
+                }
+                else if(a.menu.debugScreen()&&(ev.key.keysym.sym==SDLK_PAGEUP||ev.key.keysym.sym==SDLK_PAGEDOWN)) {
+                    a.menu.debugFocusRight();if(a.menu.debugListFocused())a.menu.selected=std::clamp(a.menu.selected+
+                        (ev.key.keysym.sym==SDLK_PAGEUP?-vyruz::MenuView::DebugVisible:vyruz::MenuView::DebugVisible),0,int(a.menu.entries().size())-1);
+                }
+                else if(a.menu.debugScreen()&&(ev.key.keysym.sym==SDLK_HOME||ev.key.keysym.sym==SDLK_END))a.menu.selected=ev.key.keysym.sym==SDLK_HOME?0:int(a.menu.entries().size())-1;
+                else if(ev.key.keysym.sym==SDLK_UP)a.menu.move(-1);
                 else if(ev.key.keysym.sym==SDLK_DOWN)a.menu.move(1);
                 else if((ev.key.keysym.sym==SDLK_RETURN||ev.key.keysym.sym==SDLK_KP_ENTER||ev.key.keysym.sym==SDLK_SPACE) && !ev.key.repeat)a.menuAction=a.menu.activate(a.paused);
-                else if((ev.key.keysym.sym==SDLK_ESCAPE||ev.key.keysym.sym==SDLK_BACKSPACE) && !ev.key.repeat)a.menu.back(a.paused);
+                else if((ev.key.keysym.sym==SDLK_ESCAPE||ev.key.keysym.sym==SDLK_BACKSPACE) && !ev.key.repeat)a.menuAction=a.menu.escape(a.paused);
             }
             continue;
         }
@@ -1334,7 +1361,7 @@ void endingColor(App& a,double remaining) {
 // Presentation-only diagnostics. Half-second averages include swap and pacing;
 // peak exposes stalls without adding GL queries or synchronizing the GPU.
 void recordDebugFrame(App& a,double milliseconds) {
-    if(!a.debugEnabled && !a.options.fpsCounter){
+    if(!(a.debugEnabled&&a.debugInfoVisible) && !a.options.fpsCounter){
         a.debugFrameSum=0;a.debugFramePeak=0;a.debugFrameCount=0;a.fpsText="FPS --";return;
     }
     if(milliseconds<=0)return;
@@ -1349,15 +1376,16 @@ void recordDebugFrame(App& a,double milliseconds) {
     }
 }
 void presentApplication(App& a) {
-    if((a.debugEnabled || a.options.fpsCounter) && SDL_GetTicks64()>=a.debugMemoryNext){
+    const bool debugInfo=a.debugEnabled&&a.debugInfoVisible;
+    if((debugInfo || a.options.fpsCounter) && SDL_GetTicks64()>=a.debugMemoryNext){
         a.debugMemoryNext=SDL_GetTicks64()+1000;
-        const auto memory=vyruz::processMemory(a.debugEnabled);
+        const auto memory=vyruz::processMemory(debugInfo);
         const auto mib=[](std::optional<uint64_t> kib){
             if(!kib)return std::string("N/A");
             char text[32];std::snprintf(text,sizeof(text),"%.1f",double(*kib)/1024);return std::string(text);
         };
         a.rssText="RSS "+mib(memory.rss)+(memory.rss?" MIB":"");
-        if(a.debugEnabled){
+        if(debugInfo){
         a.debugMemoryText={
             "RAM MIB: RSS "+mib(memory.rss)+"  PSS "+mib(memory.pss),
             "ANON "+mib(memory.anonymous)+"  FILE "+mib(memory.file)+"  SHMEM "+mib(memory.shmem),
@@ -1370,17 +1398,17 @@ void presentApplication(App& a) {
         a.debugMemoryText.push_back(storage);
         }
     }
-    if(a.debugEnabled || a.options.fpsCounter){
-        const float right=a.debugEnabled?480.f:230.f;
+    if(!a.menu.debugScreen() && (debugInfo || a.options.fpsCounter)){
+        const float right=debugInfo?480.f:230.f;
         glMatrixMode(GL_MODELVIEW);glPushMatrix();glLoadIdentity();
         glPushAttrib(GL_ENABLE_BIT|GL_COLOR_BUFFER_BIT|GL_CURRENT_BIT);
         glDisable(GL_TEXTURE_2D);glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
         glColor4f(0,0,0,.65f);glBegin(GL_QUADS);
-        const float bottom=100+(a.debugEnabled?20.f*a.debugMemoryText.size():0);
+        const float bottom=100+(debugInfo?20.f*a.debugMemoryText.size():0);
         glVertex2f(10,72);glVertex2f(right,72);glVertex2f(right,bottom);glVertex2f(10,bottom);glEnd();
         glEnable(GL_TEXTURE_2D);glColor4f(1,1,1,1);
-        a.hud.drawMenuText(a.gfx,a.debugEnabled?a.debugFrameText:a.fpsText+"  "+a.rssText,18,94,4,right-20);
-        if(a.debugEnabled)for(size_t i=0;i<a.debugMemoryText.size();++i)
+        a.hud.drawMenuText(a.gfx,debugInfo?a.debugFrameText:a.fpsText+"  "+a.rssText,18,94,4,right-20);
+        if(debugInfo)for(size_t i=0;i<a.debugMemoryText.size();++i)
             a.hud.drawMenuText(a.gfx,a.debugMemoryText[i],18,114+20.f*i,4,right-20);
         glPopAttrib();glPopMatrix();
     }
@@ -1414,6 +1442,7 @@ bool gameplayCrosshair(App& a,SDL_FPoint& point) {
 }
 
 void render(App& a,float alpha=1) {
+    a.hud.setDebugInfoVisible(a.debugInfoVisible);
     SDL_FPoint crosshair{};
     const bool gameCursor=gameplayCrosshair(a,crosshair);
     const bool hiddenGameplayCursor=!a.options.crosshair&&a.haveLevel&&!a.world.mapOpen()&&!a.inventory.open;
@@ -1459,24 +1488,32 @@ void render(App& a,float alpha=1) {
         glTranslatef(view.uiX(),view.uiY(),0);a.hud.drawPresentation(a.gfx,a.presentation);
         presentApplication(a);return;
     }
+    if(a.menuExit) {
+        glTranslatef(view.uiX(),view.uiY(),0);a.hud.drawMenuExit(a.gfx);
+        presentApplication(a);return;
+    }
     if(a.menu.open()){
         if(a.menu.page==vyruz::MenuPage::Options && (a.optionsPage==1||a.optionsPage==8))refreshOptions(a);
         if(a.menu.page==vyruz::MenuPage::Options && a.bindingCapture==5)
             a.menu.optionLabels[0]="Player: "+a.nameEdit;
         glTranslatef(view.uiX(),view.uiY(),0);
         refreshMenuContext(a);
-        a.menu.debugAI=a.world.debugEnemyAI();a.menu.debugGod=a.world.debugGodMode();
+        a.menu.debugAI=a.world.debugEnemyAI();a.menu.debugGod=a.world.debugGodMode();a.menu.debugInfo=a.debugInfoVisible;
         const bool controlsHelp=a.presentation.page==vyruz::PresentationPage::ControlsHelp;
         a.hud.drawMenu(a.gfx,a.menu,controlsHelp);
         if(a.menu.page==vyruz::MenuPage::Options && a.bindingCapture==5 &&
            ((SDL_GetTicks64()-a.nameEditBlinkStart)/500)%2==0)
             a.hud.drawNameCaret(a.menu.optionLabels[0],a.menu.rowLeft(),a.menu.rowTop());
         if(controlsHelp)a.hud.drawControlsHelp(a.gfx,a.helpRows,a.helpFirst);
-        else {drawSavePreview(a);a.hud.drawMenuScanline(a.gfx);}
+        else if(!a.menu.debugScreen()){drawSavePreview(a);a.hud.drawMenuScanline(a.gfx);}
         if(a.menuPointerVisible) {
             int pointerX=0,pointerY=0;SDL_GetMouseState(&pointerX,&pointerY);
             const auto point=a.gfx.mousePoint(pointerX,pointerY);
-            a.hud.drawMenuCursor(a.gfx,point.x-view.uiX(),point.y-view.uiY());
+            if(a.menu.debugScreen()) {
+                const float x=point.x-view.uiX(),y=point.y-view.uiY();
+                glDisable(GL_TEXTURE_2D);glColor3f(1,.75f,.2f);glBegin(GL_TRIANGLES);
+                glVertex2f(x,y);glVertex2f(x+9,y+6);glVertex2f(x+3,y+10);glEnd();glEnable(GL_TEXTURE_2D);glColor4f(1,1,1,1);
+            }else a.hud.drawMenuCursor(a.gfx,point.x-view.uiX(),point.y-view.uiY());
         }
         presentApplication(a);return;
     }
@@ -2001,7 +2038,7 @@ int runApplication(int argc, char** argv, BenchmarkLaunch& benchmark, bool retur
             advanceDeathPrompt(a,kMoveDt*1000.0);
             const bool liveDeath=a.presentation.page==vyruz::PresentationPage::DeathPrompt && !a.presentation.suspended;
             if(a.paused||(a.presentation.open()&&!liveDeath))a.previousPositions.clear();
-            a.audio.device().setPaused(a.presentation.open()?a.presentation.suspended:(a.paused && a.sessionStarted));
+            a.audio.device().setPaused(!a.menuExit&&(a.presentation.open()?a.presentation.suspended:(a.paused && a.sessionStarted)));
             const auto animationStart=measuring?SDL_GetPerformanceCounter():0;
             if (liveDeath || (!a.presentation.open() && !a.paused && a.world.player().alive)) { advanceSceneAnimation(a,kMoveDt*1000,a.world.elapsedMilliseconds());a.hud.advance(kMoveDt*1000,&a.world); }
             if(measuring)animationTimes.push_back(1000.0*(SDL_GetPerformanceCounter()-animationStart)/timerFrequency);
@@ -2046,7 +2083,7 @@ int runApplication(int argc, char** argv, BenchmarkLaunch& benchmark, bool retur
             a.previousPositions.clear();
             pendingTime=0;lastFrame=SDL_GetPerformanceCounter();softwareDeadline=static_cast<double>(lastFrame);
         }
-        a.audio.device().setPaused(a.presentation.open()?a.presentation.suspended:(a.paused && a.sessionStarted));
+        a.audio.device().setPaused(!a.menuExit&&(a.presentation.open()?a.presentation.suspended:(a.paused && a.sessionStarted)));
         const auto& player = a.world.player();
         const auto* weapon = player.weapons.empty() ? nullptr : &player.weapons[player.selectedWeapon];
         const auto ammo = weapon ? vyruz::weaponStock(player,*weapon) : player.ammo.end();
@@ -2068,7 +2105,14 @@ int runApplication(int argc, char** argv, BenchmarkLaunch& benchmark, bool retur
             if(a.presentation.timedOut() || (a.presentation.page==vyruz::PresentationPage::Movie && movieClock>=a.intro.durationMilliseconds()))finishPresentation(a);
         }
         a.presentationLastTick=presentationNow;
-        if(!a.menu.open())a.hud.advanceMenu(vyruz::MenuPage::Closed,0,60);
+        if(a.menuExit) {
+            SDL_DisplayMode mode{};const int display=SDL_GetWindowDisplayIndex(a.window);
+            const int hz=display>=0&&SDL_GetCurrentDisplayMode(display,&mode)==0?mode.refresh_rate:60;
+            a.hud.advanceMenuExit(static_cast<uint32_t>(std::clamp(menuFrameMs,0.0,double(UINT32_MAX))),hz,
+                [&](const auto& bank,const auto& frame){a.audio.menuExitSample(bank,frame.command,frame.sample);});
+            if(!a.hud.menuExitActive())a.quit=1;
+        }
+        else if(!a.menu.open())a.hud.advanceMenu(vyruz::MenuPage::Closed,0,60);
         else if(!a.presentation.open()) {
             SDL_DisplayMode mode{};const int display=SDL_GetWindowDisplayIndex(a.window);
             const int menuRefresh=display>=0 && SDL_GetCurrentDisplayMode(display,&mode)==0?mode.refresh_rate:60;

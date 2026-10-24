@@ -25,6 +25,7 @@ public:
     void consume(GameWorld&, const SceneContent&, const std::vector<SceneAudioCue>&);
     void cue(const std::string& filename, bool voice=false);
     void briefingBip(); // Original428690 mask/priority, including its silent invalid channel.
+    void menuExitSample(const std::string& bank,uint32_t command,uint32_t sample);
     void speech(const std::string& filename,unsigned delay=0,unsigned hold=1000,unsigned tail=0);
     void updateSpeech(); // Also called in menus, where consume() is not run.
     void setMusicEnabled(bool enabled) { music_.setEnabled(enabled); }

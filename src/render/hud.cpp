@@ -182,6 +182,8 @@ void HudRenderer::clear(Gfx& gfx) {
     gfx.deleteTexture(mapTexture_);mapTexture_=0;levelMap_={};
     for (auto* b:{&coins_,&score_,&panel_,&vPanel_,&pause_,&failed_,&inventory_,&menu_,&vMenu_,&cursor_,&bonus_,&surprise_,&darkness_,&surpriseFx_}) {for(auto t:b->textures)gfx.deleteTexture(t);*b={};}
     for(auto& b:weaponIcons_) {for(auto t:b.textures)gfx.deleteTexture(t);b={};}
+    for(auto& b:menuExitBanks_) {for(auto t:b.textures)gfx.deleteTexture(t);b={};}
+    menuExit_={};menuExitSprites_={};
     for(auto& [id,bank]:heldBanks_)for(auto t:bank.textures)gfx.deleteTexture(t);
     heldIcons_.clear();heldBanks_.clear();read_={};markers_={};markersReady_=false;
     fonts_.clear();inventoryFonts_.clear();menuFonts_.clear();bonusFonts_.clear();
@@ -261,6 +263,7 @@ void HudRenderer::drawCursor(Gfx& gfx,float x,float y) {
     glDisable(GL_ALPHA_TEST);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
 }
 unsigned HudRenderer::advanceMenu(MenuPage page,uint32_t elapsedMs,int refreshHz,bool pointerVisible) {
+    if(page==MenuPage::Debug || page==MenuPage::DebugLevels || page==MenuPage::DebugSurprises)return 0;
     if(page==MenuPage::SavedSessions || page==MenuPage::Controls)saveLabelClock_+=elapsedMs;
     else {saveLabelClock_=saveLabelStart_=0;saveLabelSelection_=-1;saveLabelText_.clear();}
     const unsigned flashes=menuEffects_.advance(page,elapsedMs,refreshHz);
@@ -552,7 +555,7 @@ void HudRenderer::draw(Gfx& gfx,const GameWorld& world,const SceneContent& scene
     }
     glEnd();glColor4f(1,1,1,1);glEnable(GL_TEXTURE_2D);
     }
-    if(world.debugGodMode() || !world.debugEnemyAI())
+    if(debugInfoVisible_ && (world.debugGodMode() || !world.debugEnemyAI()))
         text(gfx,std::string("DEBUG  ")+(world.debugGodMode()?"GOD ON  ":"")+(!world.debugEnemyAI()?"ENEMY AI OFF":""),16,52,2);
     if(p.alive && !world.message().empty())text(gfx,world.message().substr(0,75),16,h-20.f,2);
     if(p.alive && paused) {
@@ -709,6 +712,7 @@ void HudRenderer::drawNameCaret(std::string_view label,float x,float y) {
 }
 void HudRenderer::drawMenu(Gfx& gfx,const MenuView& view,bool backgroundOnly) {
     if(!view.open())return;
+    if(view.debugScreen()){drawDebugMenu(gfx,view);return;}
     glDisable(GL_BLEND);sequence(gfx,menu_,4,0,0);glEnable(GL_BLEND);
     if(menuEffects_.takeLogo()) {
         // 421780 draws V-MENU6 at (0,0), with authored (-3,-13) offset
@@ -723,7 +727,8 @@ void HudRenderer::drawMenu(Gfx& gfx,const MenuView& view,bool backgroundOnly) {
     };
     const auto rows=view.entries();
     const auto title=view.title()+(view.paginated()&&rows.size()>10?"  "+std::to_string(view.firstRow()/10+1)+" / "+std::to_string((rows.size()+9)/10):"");
-    if(view.page==MenuPage::SavedSessions)write(title,10,120,0);
+    if(view.exitConfirmation())write(title,10,120,1); // 4228a0: selected title font2.
+    else if(view.page==MenuPage::SavedSessions)write(title,10,120,0);
     else if(view.title()=="Extras")write(title,10,120,0);else write(title,270,50,3);
     std::optional<MenuListClip> saveClip;
     const bool list=view.panelList();
@@ -751,11 +756,11 @@ void HudRenderer::drawMenu(Gfx& gfx,const MenuView& view,bool backgroundOnly) {
         if(first+MenuView::ListVisible<view.listRowCount() && bonus_.animation.sequences.size()>=3)
             sequence(gfx,bonus_,3,MenuView::ListRight-9,280);
     }
-    if(view.page==MenuPage::Confirm)write("Unsaved progress will be lost.",270,250,3);
+    if(view.page==MenuPage::Confirm&&!view.exitConfirmation())write("Unsaved progress will be lost.",270,250,3);
     if(view.page==MenuPage::Controls)write("Up/Down or wheel: select\nEsc: back",270,435,3);
     else if(view.page==MenuPage::DebugSurprises)write("Enter: replace effect and resume\nUp/Down: browse. Esc: back",270,405,3);
     else if(view.page==MenuPage::DebugLevels)write("Enter: fresh unsaved test session\nDisk saves are unchanged. Esc: back",270,405,3);
-    else if(view.page!=MenuPage::Controls && view.page!=MenuPage::Main && view.page!=MenuPage::Extras && view.page!=MenuPage::Options && view.page!=MenuPage::Game && view.page!=MenuPage::SavedSessions)
+    else if(!view.exitConfirmation() && view.page!=MenuPage::Controls && view.page!=MenuPage::Main && view.page!=MenuPage::Extras && view.page!=MenuPage::Options && view.page!=MenuPage::Game && view.page!=MenuPage::SavedSessions)
         write("Arrows: select   Enter: choose\nMouse: point and click   Esc: back",270,435,3);
     // Port options have up to ten rows; reserve their help below the last row.
     const float helpY=view.page==MenuPage::Options&&rows.size()>8?400:360;
@@ -774,6 +779,127 @@ void HudRenderer::drawMenu(Gfx& gfx,const MenuView& view,bool backgroundOnly) {
         const float statusY=view.page==MenuPage::SavedSessions?335:view.page==MenuPage::Options?(rows.size()>8?385:335):view.paginated()?385:365;
         write(view.error,270,statusY,3);
     }
+}
+void HudRenderer::drawDebugMenu(Gfx& gfx,const MenuView& view) {
+    // Same background and native small gold font as benchmark results. The
+    // double frames, focus bars and key strip are deliberately DOS-style UI.
+    gfx.clear(.035f,.06f,.055f);
+    const auto text=[&](std::string_view value,float x,float y,float width,float scale=1.15f,bool wrap=false) {
+        glPushMatrix();glTranslatef(x,y,0);glScalef(scale,scale,1);
+        const float height=drawMenuText(gfx,value,0,0,4,width/scale,wrap);glPopMatrix();return height*scale;
+    };
+    const auto box=[](float l,float t,float r,float b,float red,float green,float blue) {
+        glDisable(GL_TEXTURE_2D);glColor3f(red,green,blue);glBegin(GL_QUADS);
+        glVertex2f(l,t);glVertex2f(r,t);glVertex2f(r,b);glVertex2f(l,b);glEnd();
+        glEnable(GL_TEXTURE_2D);glColor4f(1,1,1,1);
+    };
+    const auto frame=[](float l,float t,float r,float b) {
+        glDisable(GL_TEXTURE_2D);glColor3f(.48f,.42f,.20f);
+        for(float inset:{0.f,3.f}){glBegin(GL_LINE_LOOP);
+            glVertex2f(l+inset,t+inset);glVertex2f(r-inset,t+inset);
+            glVertex2f(r-inset,b-inset);glVertex2f(l+inset,b-inset);glEnd();}
+        glEnable(GL_TEXTURE_2D);glColor4f(1,1,1,1);
+    };
+    text("VURUS / DEBUG COMMANDER",20,33,515,1.3f);
+    text("PAUSED",548,33,78);
+    box(12,72,316,410,.045f,.078f,.068f);box(324,72,628,410,.045f,.078f,.068f);
+    frame(12,72,316,410);frame(324,72,628,410);
+    text("ACTIONS",26,94,270);const auto actions=view.debugActions();
+    for(size_t i=0;i<actions.size();++i) {
+        const float y=MenuView::DebugTop+30.f*i;
+        if(int(i)==view.debugSection()) {
+            const bool focused=!view.debugListFocused();
+            box(20,y-19,308,y+7,focused?.22f:.11f,focused?.25f:.15f,.10f);
+            box(20,y-19,23,y+7,.85f,.62f,.13f);
+        }
+        text(actions[i].label,26,y,275);
+        if(i==0||i==5)text(">",292,y,15);
+    }
+    const auto choices=view.debugPreview();
+    if(!choices.empty()) {
+        const int first=view.debugPreviewFirst(),selected=view.debugPreviewSelection();
+        text(view.debugSection()==0?"LEVEL SELECT":"SURPRISES",340,94,190);
+        text(std::to_string(selected+1)+" / "+std::to_string(choices.size()),545,94,70);
+        for(int i=first;i<std::min(first+MenuView::DebugVisible,int(choices.size()));++i) {
+            const float y=MenuView::DebugTop+(i-first)*26.f;
+            if(i==selected) {
+                const bool focused=view.debugListFocused();
+                box(332,y-19,612,y+7,focused?.22f:.11f,focused?.25f:.15f,.10f);
+                if(focused)box(332,y-19,335,y+7,.85f,.62f,.13f);
+            }
+            text(choices[i].label,340,y,265);
+        }
+        // A continuous scrollbar, not a set of separate menu pages.
+        box(616,104,619,364,.13f,.19f,.15f);
+        const float n=std::max(1,int(choices.size()));
+        const float thumb=260*std::min(1.f,MenuView::DebugVisible/n);
+        const float top=104+(260-thumb)*first/std::max(1,int(choices.size())-MenuView::DebugVisible);
+        box(616,top,619,top+thumb,.72f,.52f,.15f);
+        text(view.debugListFocused()?(view.debugSection()==0?"ENTER: START FRESH LEVEL":"ENTER: APPLY AND RESUME"):"TAB / RIGHT: BROWSE LIST",340,392,270,1.f);
+    } else {
+        text("INFORMATION",340,94,270);
+        MenuListClip clip(gfx,332,104,620,403);
+        text(view.debugDescription(),340,125,268,1.15f,true);
+    }
+    text(view.error.empty()?"LOCAL TEST CONTROLS / DISK SAVES UNCHANGED":view.error,20,431,600,1.05f);
+    box(12,447,628,477,.12f,.17f,.12f);
+    text("Tab Pane",22,468,110,1.f);text("Enter Apply",144,468,130,1.f);
+    text("Esc Back",290,468,100,1.f);text("PgUp/PgDn Scroll",412,468,200,1.f);
+}
+bool HudRenderer::beginMenuExit(const SceneContent& scene) {
+    bool available=false;
+    for(unsigned i=0;i<2;++i) {
+        const auto* cls=findClass(scene,i?"Explosion":"Small-Explosion");
+        if(!cls)continue;
+        auto& bank=menuExitBanks_[i];menuExitSprites_[i]=cls->sprite;
+        if(bank.animation.sequences.empty()) {
+            std::vector<uint8_t> bytes;
+            if(!read_||!read_(cls->sprite.path,bytes)||!decodeGafAnimation(bytes,bank.animation))continue;
+            bank.textures.resize(bank.animation.frames.size());
+        }
+        const auto n=cls->sprite.sequence.value;
+        if(n&&n<=bank.animation.sequences.size()&&!bank.animation.sequences[n-1].subframes.empty())available=true;
+    }
+    if(available)menuExit_.begin();
+    return available;
+}
+void HudRenderer::advanceMenuExit(uint32_t milliseconds,int refreshHz,const ExitSample& sample) {
+    std::array<const GafSequence*,2> sequences{};
+    for(unsigned i=0;i<2;++i) {
+        const auto n=menuExitSprites_[i].sequence.value;
+        if(n&&n<=menuExitBanks_[i].animation.sequences.size())sequences[i]=&menuExitBanks_[i].animation.sequences[n-1];
+    }
+    menuExit_.advance(milliseconds,refreshHz,menuEffects_.random(),sequences,[&](const auto& p,const auto& frame){
+        sample(menuExitSprites_[p.bank].path,frame);
+    });
+    // User-requested audible exit: retain authored sample timing through the
+    // menu route instead of42163b's z9999 spatial suppression.
+}
+void HudRenderer::drawMenuExit(Gfx& gfx) {
+    // 421679: background only, then screen-space particles in creation order.
+    glDisable(GL_BLEND);sequence(gfx,menu_,4,0,0);glEnable(GL_BLEND);
+    for(const auto& p:menuExit_.particles) {
+        auto& bank=menuExitBanks_[p.bank];const auto n=menuExitSprites_[p.bank].sequence.value;
+        const auto* pose=p.cursor.frame(bank.animation.sequences[n-1]);
+        if(!pose||pose->frameIndex>=bank.animation.frames.size())continue;
+        const auto& frame=bank.animation.frames[pose->frameIndex];auto& texture=bank.textures[pose->frameIndex];
+        if(!texture)texture=gfx.uploadSpriteTexture(frame.image,true);
+        const unsigned op=pose->flags&255;const bool additive=op==6||op==7,shadow=op==8||op==9;
+        if(op==7||op==9){glEnable(GL_ALPHA_TEST);glAlphaFunc(GL_GREATER,.5f);}
+        glBlendFunc(shadow?GL_ZERO:(op==0||additive)?GL_ONE:GL_SRC_ALPHA,
+                    shadow?GL_ONE_MINUS_SRC_COLOR:additive?GL_ONE:op==0?GL_ZERO:GL_ONE_MINUS_SRC_ALPHA);
+        const float sx=(pose->command&0x140)?float(pose->sample)*.01f:1.f;
+        const float sy=(pose->command&0x180)?float(pose->sample)*.01f:1.f;
+        const float x=p.x+std::trunc(pose->offsetX*sx)+std::trunc(frame.originX*sx);
+        const float y=p.y+std::trunc(pose->offsetY*sy)+std::trunc(frame.originY*sy);
+        const float w=std::trunc(frame.image.width*sx),h=std::trunc(frame.image.height*sy);
+        if(pose->command&4)glColor3ub((pose->sample>>16)&255,(pose->sample>>8)&255,pose->sample&255);
+        const float u=pose->flags&0x100?1.f:0.f,v=pose->flags&0x200?1.f:0.f;
+        gfx.beginQuads(texture,op==1||op==3||op==5,&frame.image);
+        gfx.quad(x,y,u,v,x+w,y,1-u,v,x+w,y+h,1-u,1-v,x,y+h,u,1-v);
+        gfx.endQuads();glColor4f(1,1,1,1);glDisable(GL_ALPHA_TEST);
+    }
+    glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);menuExit_.retire();
 }
 void HudRenderer::drawMenuScanline(Gfx& gfx) {
     // 421050 binds V-MENU1 (not the slider decoration in sequence5).

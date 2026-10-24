@@ -38,6 +38,51 @@ void MenuView::showDebug(bool& paused) {
     if(!open())show(paused);
     parent_=MenuPage::Game;page=MenuPage::Debug;selected=0;error.clear();
 }
+std::vector<MenuEntry> MenuView::debugActions() const {
+    return {{"Level select",MenuAction::DebugLevels},{debugAI?"Enemy AI: ON":"Enemy AI: OFF",MenuAction::DebugAI},{debugGod?"God mode: ON":"God mode: OFF",MenuAction::DebugGod},{"Fill all ammo",MenuAction::DebugAmmo},{"Add 1,000,000 money",MenuAction::DebugMoney},{"Surprises",MenuAction::DebugSurprises},{debugInfo?"On-screen info: ON":"On-screen info: OFF",MenuAction::DebugInfo},{"Back",MenuAction::None}};
+}
+std::vector<MenuEntry> MenuView::debugPreview() const {
+    if(debugSection()!=0&&debugSection()!=5)return {};
+    MenuView list;list.page=debugSection()==0?MenuPage::DebugLevels:MenuPage::DebugSurprises;
+    return list.entries();
+}
+int MenuView::debugPreviewSelection() const {
+    return debugListFocused()?selected:debugSection()==0?debugLevelSelected_:debugSurpriseSelected_;
+}
+int MenuView::debugPreviewFirst() const {
+    if(debugListFocused())return firstRow();
+    int first=std::clamp(debugSection()==0?debugLevelFirst_:debugSurpriseFirst_,0,std::max(0,int(debugPreview().size())-DebugVisible));
+    const int selected=debugPreviewSelection();
+    if(selected<first)first=selected;
+    if(selected>=first+DebugVisible)first=selected-DebugVisible+1;
+    return first;
+}
+std::string MenuView::debugDescription() const {
+    switch(debugSection()) {
+    case 0:return "Start a fresh test session on the selected level. Disk saves stay unchanged.";
+    case 1:return "Enable or stop enemy AI. The setting carries into debug level changes.";
+    case 2:return "Protect the player from damage. The setting carries into debug level changes.";
+    case 3:return "Fill every authored weapon and ammunition stock for this player.";
+    case 4:return "Add 1,000,000 to the current balance. Repeat to add more.";
+    case 5:return "Apply a Surprise through its normal activation delay, then resume play.";
+    case 6:return "Show or hide the debug FPS, frame timing, memory and object overlay, plus debug status labels. Debug controls stay available.";
+    default:return "Return to the game menu. Escape again resumes play.";
+    }
+}
+void MenuView::debugFocusLeft() {
+    if(!debugListFocused())return;
+    const int section=debugSection();
+    (section==0?debugLevelFirst_:debugSurpriseFirst_)=firstRow();
+    (section==0?debugLevelSelected_:debugSurpriseSelected_)=selected;
+    page=MenuPage::Debug;selected=section;
+}
+void MenuView::debugFocusRight() {
+    if(page!=MenuPage::Debug)return;
+    const int first=debugPreviewFirst();
+    if(selected==0){page=MenuPage::DebugLevels;selected=debugLevelSelected_;}
+    else if(selected==5){page=MenuPage::DebugSurprises;selected=debugSurpriseSelected_;}
+    debugFirst_=first;
+}
 void MenuView::show(bool& paused,bool main) {
     if(open())return;
     wasPaused_=paused;paused=true;page=main?MenuPage::Main:MenuPage::Game;
@@ -62,7 +107,7 @@ std::vector<MenuEntry> MenuView::entries() const {
         return rows;}
     case MenuPage::Options:{std::vector<MenuEntry> rows;for(const auto& label:optionLabels)rows.push_back({label,MenuAction::None});return rows;}
     case MenuPage::SavedSessions:{if(savedSessionsLoading)return {{"Reading saved sessions...",MenuAction::None},{"Back",MenuAction::None}};std::vector<MenuEntry> rows;for(const auto& label:saveLabels)rows.push_back({label,MenuAction::LoadSelected});if(rows.size()<7)rows.push_back({"",MenuAction::None});rows.push_back({"Back",MenuAction::None});return rows;}
-    case MenuPage::Debug:return {{"Level select",MenuAction::DebugLevels},{debugAI?"Enemy AI: ON":"Enemy AI: OFF",MenuAction::DebugAI},{debugGod?"God mode: ON":"God mode: OFF",MenuAction::DebugGod},{"Fill all ammo",MenuAction::DebugAmmo},{"Add 1,000,000 money",MenuAction::DebugMoney},{"Surprises",MenuAction::DebugSurprises},{"Back",MenuAction::None}};
+    case MenuPage::Debug:return debugActions();
     case MenuPage::DebugLevels:{std::vector<MenuEntry> rows;for(const auto& path:debugLevels())rows.push_back({path.substr(0,path.size()-4),MenuAction::DebugSelectLevel});return rows;}
     case MenuPage::DebugSurprises:{std::vector<MenuEntry> rows={{"Clear active Surprise",MenuAction::DebugSelectSurprise}};for(int id=1;id<=int(SurpriseKind::Nop);++id)rows.push_back({surpriseName(static_cast<SurpriseKind>(id)),MenuAction::DebugSelectSurprise});return rows;}
     case MenuPage::Controls:{
@@ -78,7 +123,10 @@ std::vector<MenuEntry> MenuView::entries() const {
         if(rows.size()<ListVisible)rows.push_back({"",MenuAction::None});
         rows.push_back({"Back",MenuAction::None});return rows;
     }
-    case MenuPage::Confirm:return {{"Cancel",MenuAction::None},{"Confirm",pending_}};
+    case MenuPage::Confirm:
+        if(pending_==MenuAction::Quit)return {{"Yes, bye.",pending_},{"No !",MenuAction::None}};
+        if(pending_==MenuAction::EndGame)return {{"Yes",pending_},{"No",MenuAction::None}};
+        return {{"Cancel",MenuAction::None},{"Confirm",pending_}};
     default:return {};
     }
 }
@@ -93,8 +141,8 @@ std::string MenuView::title() const {
     if(page==MenuPage::Controls)return "Controls";
     if(page==MenuPage::Confirm) {
         if(pending_==MenuAction::LoadGame || pending_==MenuAction::LoadSelected)return "Load saved game?";
-        if(pending_==MenuAction::Quit)return "Quit game?";
-        if(pending_==MenuAction::EndGame)return "End this game?";
+        if(pending_==MenuAction::Quit)return "Exit Now ?";
+        if(pending_==MenuAction::EndGame)return "End this Game ?";
         return pending_==MenuAction::NewGame?"Start a new game?":"Restart this level?";
     }
     return page==MenuPage::Main?"":"Game menu";
@@ -104,10 +152,16 @@ void MenuView::back(bool& paused) {
     if(page==MenuPage::SavedSessions){page=saveParent_;selected=page==MenuPage::Main&&retryAvailable?2:1;}
     else if(page==MenuPage::Benchmark){page=MenuPage::Extras;selected=slidesAvailable?6:5;}
     else if(page==MenuPage::Extras){page=MenuPage::Main;selected=retryAvailable?4:3;}
-    else if(page==MenuPage::DebugLevels || page==MenuPage::DebugSurprises){page=MenuPage::Debug;selected=0;}
+    else if(debugListFocused())debugFocusLeft();
     else if(page==MenuPage::Debug){page=MenuPage::Game;selected=0;}
     else if(page==MenuPage::Game)close(paused);
     else if(page==MenuPage::Controls||page==MenuPage::Confirm||page==MenuPage::Options){page=parent_;selected=0;}
+}
+MenuAction MenuView::escape(bool& paused) {
+    // 4228a0 stores argument7+blank rows at descriptor+0x5c. 421e15
+    // uses that row for Escape/Backspace: both Exit and End Game pass0.
+    if(exitConfirmation())return pending_;
+    back(paused);return MenuAction::None;
 }
 int MenuView::listRowCount() const {
     if(page==MenuPage::SavedSessions)return int(saveLabels.size());
@@ -116,6 +170,12 @@ int MenuView::listRowCount() const {
     return std::max(0,count);
 }
 int MenuView::firstRow() const {
+    if(debugListFocused()) {
+        const int count=int(entries().size());debugFirst_=std::clamp(debugFirst_,0,std::max(0,count-DebugVisible));
+        if(selected<debugFirst_)debugFirst_=selected;
+        if(selected>=debugFirst_+DebugVisible)debugFirst_=selected-DebugVisible+1;
+        return debugFirst_;
+    }
     if(!panelList())return paginated()?selected/10*10:0;
     const int count=listRowCount();
     saveFirst_=std::clamp(saveFirst_,0,std::max(0,count-7));
@@ -145,6 +205,19 @@ void MenuView::move(int delta) {
     do{selected=((selected+delta)%n+n)%n;}while(delta && rows[selected].label.empty());
 }
 bool MenuView::hover(float x,float y) {
+    if(debugScreen()) {
+        if(x>=18&&x<310) {
+            const int hit=int((y-(DebugTop-19))/30);
+            if(y<DebugTop-19||hit>=int(debugActions().size())||y>=DebugTop-19+hit*30+26)return false;
+            debugFocusLeft();selected=hit;return true;
+        }
+        if(x>=332&&x<614&&!debugPreview().empty()) {
+            const int row=int((y-(DebugTop-19))/26),first=debugPreviewFirst();
+            if(y<DebugTop-19||row>=DebugVisible||first+row>=int(debugPreview().size()))return false;
+            debugFocusRight();selected=first+row;return true;
+        }
+        return false;
+    }
     const auto rows=entries();
     if(x<rowLeft()||x>=(panelList()?ListRight:rowLeft()+Width))return false;
     for(int hit:visibleRows()){
@@ -173,8 +246,7 @@ MenuAction MenuView::activate(bool& paused) {
     if(page==MenuPage::Options)return MenuAction::None;
     if(page==MenuPage::DebugLevels || page==MenuPage::DebugSurprises)return action;
     if(page==MenuPage::Debug){
-        if(action==MenuAction::DebugLevels){page=MenuPage::DebugLevels;selected=0;return MenuAction::None;}
-        if(action==MenuAction::DebugSurprises){page=MenuPage::DebugSurprises;selected=0;return MenuAction::None;}
+        if(action==MenuAction::DebugLevels || action==MenuAction::DebugSurprises){debugFocusRight();return MenuAction::None;}
         if(action==MenuAction::None)back(paused);
         return action;
     }

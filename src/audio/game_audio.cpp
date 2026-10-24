@@ -195,6 +195,15 @@ void GameAudio::consumeWeapons(const GameWorld& world,const SceneContent& scene)
         if(action.playDry)device_.playNative(sound.dry,route.mask,route.priority);
     }
 }
+void GameAudio::menuExitSample(const std::string& bank,uint32_t command,uint32_t sample) {
+    // Audible menu-exit adaptation requested by the user: authored ANM samples
+    // use45e6e0's unbound all-channel/priority127 route without world pausing.
+    if(!(command&1)||!sample)return;
+    const auto key=(command&0x10000)&&!sharedSampleBank_.empty()?sharedSampleBank_:normalized(bank);
+    const auto found=banks_.find(key);
+    if(found!=banks_.end()&&sample<=found->second.size())
+        device_.playNative(found->second[sample-1],0xffff,127,65535,0,false,false);
+}
 void GameAudio::consume(GameWorld& world,const SceneContent& scene,const std::vector<SceneAudioCue>& cues) {
     const auto events=world.takeAudioEvents();const auto input=world.takeAudioInput();
     if(!device_.available()||world.actors().empty()||world.playerIndex()>=scene.objects.size())return;

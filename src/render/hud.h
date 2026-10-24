@@ -12,6 +12,7 @@
 #include "render/gfx.h"
 #include "render/animation.h"
 #include "render/menu_effects.h"
+#include "render/menu_exit.h"
 #include <array>
 #include <string_view>
 namespace vyruz {
@@ -34,6 +35,12 @@ public:
     void drawSurpriseWorld(Gfx&,const GameWorld&,float cameraX,float cameraY);
     void drawSurpriseStatus(Gfx&,const GameWorld&,float width=640,float height=480);
     void drawMenu(Gfx&,const MenuView&,bool backgroundOnly=false);
+    void setDebugInfoVisible(bool visible) { debugInfoVisible_=visible; }
+    bool beginMenuExit(const SceneContent&);
+    using ExitSample=std::function<void(const std::string&,const GafSubframe&)>;
+    void advanceMenuExit(uint32_t milliseconds,int refreshHz,const ExitSample&);
+    void drawMenuExit(Gfx&);
+    bool menuExitActive() const {return menuExit_.active;}
     void drawControlsHelp(Gfx&,const std::vector<std::pair<std::string,int>>&,int first);
     unsigned advanceMenu(MenuPage page,uint32_t elapsedMs,int refreshHz,bool pointerVisible=false);
     void drawMenuScanline(Gfx&);
@@ -52,6 +59,8 @@ public:
     void drawPresentation(Gfx&,const Presentation&);
     void drawInventory(Gfx&,const GameWorld&,const InventoryView&,int width=640,int height=480,std::string_view closeKey="I");
 private:
+    bool debugInfoVisible_=true;
+    void drawDebugMenu(Gfx&,const MenuView&);
     static inline bool notificationPreload_=true;
     int language_=1;
     ContentReader read_;
@@ -72,6 +81,9 @@ private:
     float xtcPhase_=0,xtcY_=0;
     bool xtcActive_=false;
     MenuEffects menuEffects_;
+    MenuExitEffect menuExit_;
+    std::array<Bank,2> menuExitBanks_;
+    std::array<SpriteReference,2> menuExitSprites_;
     uint64_t saveLabelClock_=0,saveLabelStart_=0;
     int saveLabelSelection_=-1;
     std::string saveLabelText_;

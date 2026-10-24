@@ -66,6 +66,7 @@ std::string optionKeyName(int value){
 }
 void refreshOptions(App& a) {
     auto& m=a.menu;const auto& o=a.options;const auto on=[](bool b){return b?"On":"Off";};
+    m.optionRowHeight=a.optionsPage==0?vyruz::MenuView::RowHeight:30;
     m.optionHelp.clear();
     switch(a.optionsPage) {
     case 0:m.optionTitle="Options";m.optionLabels={"Video","Audio","Control","Session","Back"};
