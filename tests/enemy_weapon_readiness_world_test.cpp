@@ -101,6 +101,73 @@ void spiderGatlingRegression(){
  for(int tick=0;tick<180;++tick){for(auto* w:{&world,&replay}){w->tick(.014f,{});drain(*w);}need(encoded(world)==encoded(replay),"Spider slope disk continuation across rescan and cooldown");}
  std::filesystem::remove_all(dir);
 }
+void ordinaryGatlingRegression(){
+ const auto terrain=arena();std::string error;
+ for(const std::string family:{"Cop","Walker","Burner","Jeep","Roller","Heli","Turret","Tank"}){
+  auto scene=fixture(family);auto& gun=scene.classes[2].properties[0].children;
+  gun.push_back(value("Initial-slope","-45"));gun.push_back(value("Slope-step","0.5"));
+  const auto authored=scene;GameWorld world;need(world.load(scene,terrain,error),error);prepare(world);
+  for(int tick=0;tick<2;++tick){world.tick(.014f,{});drain(world);}
+  auto initial=world.snapshot();auto& actor=initial.actors[1];
+  need(actor.ordinaryAI&&actor.ordinaryAI->targeting.clock.active,"Ordinary route admitted: "+family);
+  actor.ordinaryAI->targeting.clock.scanRemainingMs=10000;
+  actor.weapons[0].state.slopeHeld=false;
+  need(world.restoreSnapshot(initial,error),error);
+  const auto config=world.actors()[1].weapons[0].config;
+  float expected=config.initialSlope;unsigned cooldowns=0,volleys=0;
+  for(unsigned visit=0;visit<120;++visit){
+   if(visit)expected=std::min(0.f,expected+config.slopeStep);
+   const auto shots=world.shotsFired;world.tick(.014f,{});drain(world);
+   const auto& weapon=world.actors()[1].weapons[0];
+   need(weapon.state.slopeHeld&&weapon.state.slopeRadians==expected,"Ordinary once-per-steering slope: "+family);
+   if(world.shotsFired==shots)++cooldowns;
+   else {++volleys;need(world.projectiles().back().slopeRadians==expected,"Ordinary projectile captures slope: "+family);}
+  }
+  need(expected==0&&cooldowns>90&&volleys>8,"Ordinary sustained aim levels through cooldown: "+family);
+  auto rescan=initial;auto& r=rescan.actors[1];r.ordinaryAI->targeting.clock.scanRemainingMs=0;
+  r.weapons[0].state.slopeHeld=true;r.weapons[0].state.slopeRadians=-.25f;
+  need(world.restoreSnapshot(rescan,error),error);const auto shots=world.shotsFired;world.tick(.014f,{});drain(world);
+  need(world.actors()[1].weapons[0].state.slopeHeld&&world.actors()[1].weapons[0].state.slopeRadians==-.25f&&world.shotsFired==shots,"Ordinary scan-only slope retention: "+family);
+  auto lost=rescan;lost.actors[1].ordinaryAI->targeting.sampledTarget.x+=1;
+  need(world.restoreSnapshot(lost,error),error);world.tick(.014f,{});drain(world);
+  need(!world.actors()[1].ordinaryAI->targeting.clock.active&&world.actors()[1].weapons[0].state.slopeHeld&&world.actors()[1].weapons[0].state.slopeRadians==-.25f,"Ordinary target-change scan retains slope: "+family);
+  auto shortScene=authored;for(auto& n:shortScene.classes[2].properties[0].children)if(n.key=="Fire-Range")n.values={"50"};
+  GameWorld shortRange;need(shortRange.load(shortScene,terrain,error),error);prepare(shortRange);
+  for(int t=0;t<2;++t){shortRange.tick(.014f,{});drain(shortRange);}
+  auto rejected=shortRange.snapshot();rejected.actors[1].ordinaryAI->targeting.clock.scanRemainingMs=10000;
+  rejected.actors[1].weapons[0].state.slopeHeld=true;rejected.actors[1].weapons[0].state.slopeRadians=-.25f;
+  need(shortRange.restoreSnapshot(rejected,error),error);shortRange.tick(.014f,{});drain(shortRange);
+  need(!shortRange.actors()[1].weapons[0].state.slopeHeld&&shortRange.actors()[1].weapons[0].state.slopeRadians==config.initialSlope,"Ordinary rejected aim releases slope: "+family);
+  for(bool hiddenUntilFire:{false,true}){
+   auto farScene=authored;
+   for(auto* props:{&farScene.classes[1].properties,&farScene.objects[1].properties}){
+    for(auto& n:*props){
+     if(n.key=="Visible-when-firing")n.values={hiddenUntilFire?"1":"0"};
+     if(n.key=="TYPE"&&!n.arguments.empty()&&n.arguments[0]=="Seeker")
+      for(auto& v:n.children)if(v.key=="Min-distance")v.values={"0"};
+    }
+   }
+   GameWorld far;need(far.load(farScene,terrain,error),error);prepare(far);
+   for(int t=0;t<2;++t){far.tick(.014f,{});drain(far);}
+   auto state=far.snapshot();state.actors[1].ordinaryAI->targeting.clock.scanRemainingMs=10000;
+   state.actors[1].weapons[0].state.slopeHeld=true;state.actors[1].weapons[0].state.slopeRadians=-.25f;
+   need(far.restoreSnapshot(state,error),error);far.tick(.014f,{});drain(far);
+   const auto& aim=far.actors()[1].weapons[0].state;
+   need(aim.slopeHeld==!hiddenUntilFire&&aim.slopeRadians==(hiddenUntilFire?config.initialSlope:-.25f),"Ordinary non-near class branch: "+family);
+  }
+  if(family=="Cop"||family=="Turret"){
+   need(world.restoreSnapshot(initial,error),error);for(int t=0;t<30;++t){world.tick(.014f,{});drain(world);}
+   auto state=world.snapshot();state.actors[1].ordinaryAI->targeting.clock.scanRemainingMs=28;
+   need(world.restoreSnapshot(state,error),error);
+   const auto dir=hostTempDirectory("ordinary-slope");SaveGame save,read;save.currentLevel=scene.mapPath;save.levels[scene.mapPath].world=world.snapshot();
+   need(writeSaveFile((dir/"slope.vzs").string(),save,error)&&readSaveFile((dir/"slope.vzs").string(),read,error),error);
+   auto replayScene=authored;GameWorld replay;need(replay.load(replayScene,terrain,error)&&replay.restoreSnapshot(read.levels.at(scene.mapPath).world,error),error);drain(replay);
+   for(int t=0;t<180;++t){for(auto* w:{&world,&replay}){w->tick(.014f,{});drain(*w);}need(encoded(world)==encoded(replay),"Ordinary slope disk continuation: "+family);}
+   std::filesystem::remove_all(dir);
+  }
+ }
+}
+
 }
 int main(){try{
  unsigned families=0;
@@ -130,5 +197,6 @@ int main(){try{
   for(unsigned t=0;t<60;++t){for(auto*w:{&live,&resumed}){w->tick(.014f,{});drain(*w);}need(encoded(live)==encoded(resumed),"Initial readiness disk continuation");}std::filesystem::remove_all(dir);
  }
  spiderGatlingRegression();
- std::cout<<"PASS"<<families<<"enemy families,54initial admissions,Player,latebirth,Spider slope/scan/pose/range and240disk ticks\n";
+ ordinaryGatlingRegression();
+ std::cout<<"PASS"<<families<<"enemy families,54initial admissions,Player,latebirth,Spider/ordinary slope and scan/class/range branches,600disk ticks\n";
 }catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -268,6 +268,12 @@ bool GameWorld::advanceOrdinaryEnemyAI(size_t id,float seconds,std::span<const C
                 motionCommand.routeCorrection=enemyRouteCorrection({native.x,native.y},{route.segmentStart.x,route.segmentStart.y},
                     {route.segmentEnd.x,route.segmentEnd.y},config.targeting.subtype==0x19||config.targeting.subtype==0x20);
                 if(more)commands.movementCommand=200;
+                // 42caa0 skips the slope helpers on this route branch except
+                // for classes hidden until firing, which visit42c280.
+                if(actor.visibleWhenFiring&&!actor.weapons.empty()){
+                    auto& weapon=actor.weapons[actor.selectedWeapon];
+                    advanceWeaponAim(weapon.config,weapon.state,false);
+                }
             }else{
                 turn(true);
                 if(route.status&2){commands.movementCommand=208;actor.contactMotion=false;actor.enemyThrust=std::min(actor.enemyThrust,0.f);}
@@ -285,6 +291,12 @@ bool GameWorld::advanceOrdinaryEnemyAI(size_t id,float seconds,std::span<const C
                 aim.turnCommand=actor.enemyTurn?actor.enemyTurn->turnCommand:0;
                 const auto gate=nativeEnemyWeaponAim(aim);commands.movementCommand=gate.movementCommand;
                 firing={gate.admitted,gate.fire};
+                // 42c210/42c280 follow admitted aim, independently of shot
+                // readiness. Scan/search visits never enter this callback.
+                if(!actor.weapons.empty()){
+                    auto& weapon=actor.weapons[actor.selectedWeapon];
+                    advanceWeaponAim(weapon.config,weapon.state,gate.admitted);
+                }
                 if(actor.enemyTurn&&actor.enemyTurnConfig.twoPieces&&route.target)actor.enemyTurn->gunInRange=gate.admitted;
                 if(firing.inRange&&commands.movementCommand==200)commands.movementCommand=0;
             }
@@ -349,7 +361,7 @@ bool GameWorld::advanceOrdinaryEnemyAI(size_t id,float seconds,std::span<const C
     actor.walkingCommand=config.targeting.subtype==0x19&&actor.enemyMoveCommand==200;
     actor.locomoting=nativeDistanceSquared(position,scene_->objects[id].position)>.0001f;
     actor.enemyRevealed=firing.inRange&&actor.visibleWhenFiring;
-    fire(id,firing.fire,false,{},firing.inRange);
+    fire(id,firing.fire,false,{},firing.inRange,WeaponFireVisit::AimAlreadyUpdated);
     return locked;
 }
 }

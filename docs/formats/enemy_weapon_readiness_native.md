@@ -9,10 +9,18 @@ starts the timestamp at zero, so a late birth does not wait Delay from its birth
 A declined fire bit retains the separate admitted/in-range state and reveal.
 Player first-input policy is a separate accepted boundary.
 
-Spider slope is advanced/released from42caa0 steering independently of this
+Ordinary enemy and Spider sweeps are advanced/released from42caa0 steering
+independently of this
 readiness result. Scan-only visits retain it, and deferred emission must not
 repeat the slope visit. Passing readiness as the slope trigger would reset a
-Gatling during every cooldown; the live World regression now covers this case.
+Gatling during every cooldown; the live World regression covers this case.
+Ordinary action scans also skip steering: a default false aim at the common
+fire tail must not release the retained sweep. Near steering advances/releases
+according to admitted aim; non-near steering releases only Visible-when-firing
+classes and otherwise retains it. The common fire tail uses AimAlreadyUpdated,
+including deferred emission, to avoid a second slope visit. World controls cover
+eight ordinary families, scan/target-change retention, non-near class branches,
+range release, sustained aim through cooldown, and Cop/Turret disk continuation.
 
 `enemy_weapon_readiness_test` compares30,000 retained original-instruction results;
 `enemy_weapon_readiness_world_test` covers live native callers, raw wrap and disk
