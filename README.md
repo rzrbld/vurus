@@ -65,46 +65,32 @@ settings and command-line options.
 
 ## Performance
 
-On-device results (2026-10-23), with ground details, shadows, reactor FX and
-vignette on; music off. **H700**: Anbernic RG40XX H, muOS, 640×480, trilinear,
-VSync off, **991 points**. **RK3326**: ArkOS, native 480×320, nearest filtering;
-the driver retains VSync, so this run is **unscored**. Different rendering
-conditions and populations make these separate results, not a controlled hardware comparison.
-Both use Mali-G31 graphics.
+**H700:** Anbernic RG40XX H, muOS, 640×480, trilinear filtering,
+VSync off; **1002 points**. Run: 2026-10-24T23:22:49Z.
+**RK3326:** ArkOS, 480×320, nearest filtering; 2026-10-23.
+Driver VSync remains enabled, so the RK3326 run is unscored.
 
-The original camera-cell draw path improves the matched H700 Burner control
-from **47.9 to 58.4 bench FPS (+22%)**.
-
-| Map / start position | Enemies nearby¹ | H700 FPS | H700 RSS MiB² | RK3326 FPS | RK3326 RSS MiB² |
+| Map / start position | Enemies nearby¹ | H700 bench FPS | H700 RSS MiB² | RK3326 bench FPS | RK3326 RSS MiB² |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| CAVE/T1C2 · 5230,1080 | 30 | 58.2 | 130.8 | 38.3 | 128.1 |
-| CPU/T3P2 · 3523,2763 | 11 | 60.0 | 139.0 | 49.4 | 115.8 |
-| UNDERGROUND/T2U1 · 4870,2180 | 39 | 59.9 | 148.2 | 43.1 | 130.2 |
-| UNDERGROUND/T2U1 · 3968,348 | 8 | 60.0 | 142.3 | 50.2 | 130.4 |
-| HITEK/T1H1 · 3670,2570 | 18 | 59.9 | 137.4 | 44.1 | 126.7 |
-| HITEK/T1H1 · 2166,1107 | 19 | 60.0 | 137.8 | 46.1 | 128.3 |
-| HITEK/T2H2 · 4571,2841 | 30 | 58.4 | 137.8 | 33.3 | 127.5 |
+| CAVE/T1C2 · 5230,1080 | 30 | 59.4 | 131.9 | 38.3 | 128.1 |
+| CPU/T3P2 · 3523,2763 | 11 | 60.0 | 137.6 | 49.4 | 115.8 |
+| UNDERGROUND/T2U1 · 4870,2180 | 39 | 59.9 | 145.8 | 43.1 | 130.2 |
+| UNDERGROUND/T2U1 · 3968,348 | 8 | 60.1 | 143.7 | 50.2 | 130.4 |
+| HITEK/T1H1 · 3670,2570 | 18 | 60.0 | 140.6 | 44.1 | 126.7 |
+| HITEK/T1H1 · 2166,1107 | 19 | 60.1 | 141.3 | 46.1 | 128.3 |
+| HITEK/T2H2 · 4571,2841 | 30 | 61.1 | 141.8 | 33.3 | 127.5 |
 
-Median timings for **HITEK/T2H2 · 4571,2841** (milliseconds). CPU columns are
-per tick; render/present is per frame and includes CPU preparation, driver work
-and swap. CPU total includes World, animation, audio and other update work.
+Seven scenes, 120 warmup + 1,200 measured steps each; ground details, shadows,
+reactor FX and vignette on, music off. Bench FPS measures one fixed simulation
+tick and rendered frame per step. Different settings and combat populations
+mean these are separate runs, not a controlled hardware comparison.
+¹ Alive enemies within 1,000 world units at spawn. ² Highest sampled process RSS.
+Raw results: [H700](docs/benchmarks/h700-2026-10-25-beta2.json) ·
+[RK3326](docs/benchmarks/rk3326-2026-10-23-user.json).
 
-| Device | World | Animation | CPU total | Render / present |
-| --- | ---: | ---: | ---: | ---: |
-| H700 | 5.14 | 2.54 | 9.50 | 6.65 |
-| RK3326 | 7.36 | 2.78 | 11.99 | 17.51 |
+<img src="docs/images/h700-benchmark-results-2026-10-25.png" alt="H700 benchmark results: 1002 points" width="48%"> <img src="docs/images/rk3326-benchmark-results-2026-10-23.png" alt="RK3326 benchmark results at 480×320: unscored, driver VSync enabled" width="48%">
 
-Seven scenes, 120 warmup + 1,200 measured steps each. Bench FPS = 1,000 / mean
-step time, with one fixed simulation tick and frame per step; it is not ordinary
-gameplay FPS. ¹ Alive enemies within 1,000 world units at spawn. ² Highest periodic
-process RSS sample. Full per-map timings, settings and raw data:
-[H700 report](docs/performance_update_2026-10-23.md) ·
-[RK3326 report](docs/performance_rk3326_2026-10-23.md).
-
-<img src="docs/images/h700-benchmark-results-2026-10-23.png" alt="H700 benchmark: 991 points, Burner 58.4 bench FPS" width="48%"> <img src="docs/images/rk3326-benchmark-results-2026-10-23.png" alt="RK3326 native 480x320 benchmark: complete, unscored because driver VSync remains enabled" width="48%">
-
-*Actual results screens: H700 left, RK3326 right. The native-resolution fallback
-leaves saved game settings unchanged; small text at 480×320 remains a usability limitation.*
+*Results screens: H700 left, RK3326 right.*
 
 ## Screenshots
 
