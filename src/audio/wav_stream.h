@@ -7,6 +7,8 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <condition_variable>
+#include <mutex>
 
 namespace vyruz {
 // Single producer (disk worker), single consumer (audio callback). No I/O,
@@ -46,5 +48,8 @@ private:
     std::atomic<uint64_t> produced_{0},consumed_{0};
     std::atomic<bool> stop_{false},failed_{false};
     std::thread worker_;
+    // Worker/shutdown only. The callback never touches this mutex or signals.
+    std::mutex wakeMutex_;
+    std::condition_variable wake_;
 };
 }

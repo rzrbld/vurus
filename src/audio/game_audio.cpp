@@ -1,5 +1,6 @@
 #include "audio/game_audio.h"
 #include "audio/native_audio.h"
+#include "audio/scene_audio.h"
 #include "assets/gaf_audio.h"
 #include "game/world.h"
 #include "game/properties.h"
@@ -128,10 +129,31 @@ bool GameAudio::load(const SceneContent& scene,const ContentReader& read,const s
     fullShieldAlarm_.reset(shieldSequence_);
     error.clear();return true;
 }
+bool GameAudio::setVoiceLanguage(const ContentReader& read,const std::string& language,std::string& error) {
+    const std::string next=folded(language)=="french"?"FRENCH":"ENGLISH";
+    if(next==language_){error.clear();return true;}
+    const auto oldPrefix=normalized("common/data/sound/"+language_+"/");
+    const auto newPrefix=normalized("common/data/sound/"+next+"/");
+    std::vector<std::pair<std::string,AudioClipPtr>> prepared;
+    for(const auto& [path,clip]:clips_)if(path.starts_with(oldPrefix)){
+        const auto target=newPrefix+path.substr(oldPrefix.size());
+        std::vector<uint8_t> bytes;Wave wave;AudioClipPtr loaded;
+        if(read(target,bytes)&&loadWav(bytes,wave))loaded=makeAudioClip(std::move(wave),error);
+        if(!loaded){error="Unavailable voice sample: "+target;return false;}
+        prepared.emplace_back(target,std::move(loaded));
+    }
+    // No changes before every replacement is ready. Keep other buses and the
+    // delayed speech schedule intact. Already playing speech may finish in its
+    // original voice; queued and subsequent lines use the new pack.
+    speech_.remapPrefix(oldPrefix,newPrefix);
+    std::erase_if(clips_,[&](const auto& entry){return entry.first.starts_with(oldPrefix);});
+    for(auto& [path,clip]:prepared)clips_[std::move(path)]=std::move(clip);
+    language_=next;error.clear();return true;
+}
 void GameAudio::reset() {
     music_.resetOverlay();surpriseMusic_=0;device_.stopEffects(preservingDeparture_?departureVoice_:0);firing_.clear();
     weaponActors_.clear();weaponActorsInitialized_=false;spatialSamples_.clear();
-    lastSoundWorldTime_=-1;motorBlocked_=false;shieldAlarm_={};fullShieldAlarm_.reset(shieldSequence_);speech_.clear();
+    lastSoundWorldTime_=-1;motorBlocked_=false;weaponSamples_.clear();shieldAlarm_={};fullShieldAlarm_.reset(shieldSequence_);speech_.clear();
 }
 AudioClipPtr GameAudio::clip(const std::string& name) const {
     const auto found=clips_.find(normalized(name));return found==clips_.end()?AudioClipPtr{}:found->second;
@@ -140,10 +162,10 @@ uint64_t GameAudio::raw(const std::string& name,uint32_t mask,int priority,bool 
     return device_.playNative(clip(name),mask,priority,65535,0,loop,pause,bus);
 }
 void GameAudio::explicitSample(const std::string& name,unsigned channel){
-    const uint32_t mask=1u<<(channel-1);device_.stopNativeChannels(mask);raw(soundPath(name),mask,191);
+    const uint32_t mask=1u<<(channel-1);device_.stopNativeChannels(mask);raw(soundPath(name),mask,191,false,true,AudioBus::Cues);
 }
 void GameAudio::briefingBip(){raw(soundPath("bip.wav"),0x40000000u,127,false,false);}
-void GameAudio::fade(){raw(soundPath("fade.wav"),0xffff,191,false,false);}
+void GameAudio::fade(){raw(soundPath("fade.wav"),0xffff,191,false,false,AudioBus::Ui);}
 void GameAudio::beginLiftDeparture(){
     preservingDeparture_=true;departureVoice_=0;speech_.clear();
     speech("V-WELL-DONE.WAV",0,1000,10000);updateSpeech();
@@ -151,7 +173,7 @@ void GameAudio::beginLiftDeparture(){
 void GameAudio::endLiftDeparture(){preservingDeparture_=false;departureVoice_=0;}
 void GameAudio::cue(const std::string& filename,bool voice) {
     if(voice){speech(filename);return;}
-    raw(soundPath(filename),0xffff,191,false,false);
+    raw(soundPath(filename),0xffff,191,false,false,AudioBus::Ui);
 }
 void GameAudio::speech(const std::string& filename,unsigned delay,unsigned hold,unsigned tail) {
     const auto path=normalized("COMMON/DATA/SOUND/"+language_+"/"+filename);
@@ -164,6 +186,10 @@ void GameAudio::updateSpeech() {
         const auto handle=raw(path,1u<<4,191,false,false,AudioBus::Voices);
         if(preservingDeparture_&&path==normalized("COMMON/DATA/SOUND/"+language_+"/V-WELL-DONE.WAV"))departureVoice_=handle;
     }
+}
+std::pair<unsigned,int> GameAudio::spatial(NativeAudioPosition source,NativeAudioPosition listener)const{
+    if(sceneAware_){const auto result=sceneAudioParameters(source,listener,listenerHalfWidth_);return {result.volume,result.pan};}
+    return {unsigned(std::clamp(nativeSpatialVolume({},source,listener),0,65535)),nativeSpatialPan(source[0]-listener[0],listenerHalfWidth_)};
 }
 void GameAudio::consumeWeapons(const GameWorld& world,const SceneContent& scene){
     if(!weaponActorsInitialized_){
@@ -196,10 +222,17 @@ void GameAudio::consumeWeapons(const GameWorld& world,const SceneContent& scene)
         const auto action=advanceNativeWeaponAudio(firing_[id],in);
         if(action.stopMask)device_.stopNativeChannels(route.mask);
         if(action.stopChannel)device_.stopNativeChannels(route.channelMask());
-        if(action.playStart)device_.playNative(sound.start,route.mask,route.priority);
-        if(action.playFire)device_.playNative(sound.sound,route.mask,route.priority,65535,0,action.loop);
-        if(action.playEnd)device_.playNative(sound.end,route.mask,route.priority);
-        if(action.playDry)device_.playNative(sound.dry,route.mask,route.priority);
+        auto play=[&](const AudioClipPtr& clip,bool loop=false){
+            const auto source=audioPosition(scene,world,id);
+            const auto listener=audioPosition(scene,world,world.playerIndex());
+            const auto [volume,pan]=player||!sceneAware_?std::pair<unsigned,int>{65535,0}:spatial(source,listener);
+            const auto handle=device_.playNative(clip,route.mask,route.priority,volume,pan,loop);
+            if(handle&&!player&&sceneAware_)weaponSamples_[handle]={id,source,loop};
+        };
+        if(action.playStart)play(sound.start);
+        if(action.playFire)play(sound.sound,action.loop);
+        if(action.playEnd)play(sound.end);
+        if(action.playDry)play(sound.dry);
     }
 }
 void GameAudio::menuExitSample(const std::string& bank,uint32_t command,uint32_t sample) {
@@ -209,9 +242,10 @@ void GameAudio::menuExitSample(const std::string& bank,uint32_t command,uint32_t
     const auto key=(command&0x10000)&&!sharedSampleBank_.empty()?sharedSampleBank_:normalized(bank);
     const auto found=banks_.find(key);
     if(found!=banks_.end()&&sample<=found->second.size())
-        device_.playNative(found->second[sample-1],0xffff,127,65535,0,false,false);
+        device_.playNative(found->second[sample-1],0xffff,127,65535,0,false,false,AudioBus::Ui);
 }
 void GameAudio::consume(GameWorld& world,const SceneContent& scene,const std::vector<SceneAudioCue>& cues) {
+    device_.collectRetired();
     const auto events=world.takeAudioEvents();const auto input=world.takeAudioInput();
     if(!device_.available()||world.actors().empty()||world.playerIndex()>=scene.objects.size())return;
     if(input)if(const auto line=commentary_.advance(SDL_GetTicks(),*input))speech(line->name,line->delayMs,line->holdMs,line->tailMs);
@@ -221,15 +255,15 @@ void GameAudio::consume(GameWorld& world,const SceneContent& scene,const std::ve
         lastSoundWorldTime_=world.elapsedMilliseconds();
         // Original map entry changes HUD detail5 to1 until map exit.
         if(shieldAlarm_.advance(int32_t(delta),world.mapOpen()?1:5,world.player().vitals.shield,world.player().vitals.shieldMax)){
-            device_.stopNativeChannels(4);raw(soundPath("shield-alarm.wav"),4,127);
+            device_.stopNativeChannels(4);raw(soundPath("shield-alarm.wav"),4,127,false,true,AudioBus::Cues);
         }
         const bool blocked=world.surprise().active(SurpriseKind::Motor);
         if(blocked&&!motorBlocked_)device_.stopNativeChannels(8);
         motorBlocked_=blocked;
         if(world.player().alive){
-            if(blocked){if(world.audioMotorAttempt()&&!device_.nativeChannelPlaying(4))raw(soundPath("start-engine.wav"),8,191);}
+            if(blocked){if(world.audioMotorAttempt()&&!device_.nativeChannelPlaying(4))raw(soundPath("start-engine.wav"),8,191,false,true,AudioBus::Ambience);}
             else {
-                if(!device_.nativeChannelPlaying(4))raw(soundPath("vz-motor.wav"),8,191,true);
+                if(!device_.nativeChannelPlaying(4))raw(soundPath("vz-motor.wav"),8,191,true,true,AudioBus::Ambience);
                 // Native gain follows signed Thrust, not speed or position delta.
                 const auto* thrust=contentProperty(scene.objects[world.playerIndex()].properties,"Thrust");
                 const float maximum=thrust?propertyNumber(thrust->children,"Max"):0;
@@ -275,15 +309,20 @@ void GameAudio::consume(GameWorld& world,const SceneContent& scene,const std::ve
     // This bounds tracking by the16 actual native channels.
     std::erase_if(spatialSamples_,[&](const auto& entry){return !device_.isPlaying(entry.second.handle);});
     const auto listener=audioPosition(scene,world,world.playerIndex());
+    std::erase_if(weaponSamples_,[&](const auto& entry){return !device_.isPlaying(entry.first);});
+    for(const auto& [handle,owned]:weaponSamples_){
+        const auto source=owned.follows&&owned.actor<scene.objects.size()?audioPosition(scene,world,owned.actor):owned.source;
+        const auto [volume,pan]=spatial(source,listener);device_.updateNative(handle,volume,pan);
+    }
     for(const auto& cue:cues){
         if(cue.kind==SceneAudioCueKind::Forget){spatialSamples_.erase(cue.animation);continue;}
         if(cue.kind==SceneAudioCueKind::Held){
             const auto tracked=spatialSamples_.find(cue.animation);if(tracked==spatialSamples_.end())continue;
             const auto& owned=tracked->second;const auto object=owned.object;const auto handle=owned.handle;
             if(!device_.isPlaying(handle)||(!owned.source&&(object>=scene.objects.size()||object>=world.actors().size()))){spatialSamples_.erase(tracked);continue;}
-            const auto source=owned.source?*owned.source:audioPosition(scene,world,object);const int volume=nativeSpatialVolume({},source,listener);
-            if(volume<=0){device_.stop(handle);spatialSamples_.erase(tracked);}
-            else device_.updateNative(handle,unsigned(volume),nativeSpatialPan(source[0]-listener[0],listenerHalfWidth_));
+            const auto source=owned.source?*owned.source:audioPosition(scene,world,object);const auto [volume,pan]=spatial(source,listener);
+            if(volume==0&&!sceneAware_){device_.stop(handle);spatialSamples_.erase(tracked);}
+            else device_.updateNative(handle,unsigned(volume),pan);
             continue;
         }
         if(!cue.sample||(!cue.source&&(cue.object>=scene.objects.size()||cue.object>=world.actors().size())))continue;
@@ -293,20 +332,22 @@ void GameAudio::consume(GameWorld& world,const SceneContent& scene,const std::ve
         const auto key=cue.sharedBank&&!sharedSampleBank_.empty()?sharedSampleBank_:normalized(cue.bankPath);
         const auto bank=banks_.find(key);if(bank==banks_.end()||cue.sample>bank->second.size())continue;
         const auto source=cue.source?*cue.source:audioPosition(scene,world,cue.object);
-        const int volume=nativeSpatialVolume({},source,listener);if(volume<=0)continue;
+        const auto [volume,pan]=spatial(source,listener);if(volume<=0)continue;
         //417aa0 initializes kind4's sample mask and priority directly, without
         //class properties. Ordinary actor cues keep their existing overrides.
         const bool terrain=cue.source.has_value();
         const auto mask=terrain?0xffffu:channelMask(scene.objects[cue.object].properties,0xffff);
         const int priority=terrain?63:int(propertyNumber(scene.objects[cue.object].properties,"Sample-channel-priority",127));
-        const auto handle=device_.playNative(bank->second[cue.sample-1],mask,priority,unsigned(volume),nativeSpatialPan(source[0]-listener[0],listenerHalfWidth_));
+        const auto* fx=terrain?nullptr:attribute(scene.objects[cue.object].properties,"fx");
+        const bool ambient=terrain||(fx&&propertyBool(fx->children,"loop"));
+        const auto handle=device_.playNative(bank->second[cue.sample-1],mask,priority,volume,pan,false,true,ambient?AudioBus::Ambience:AudioBus::Effects);
         if(handle&&mask&&cue.animation)spatialSamples_[cue.animation]={cue.object,handle,cue.source};
     }
     if(stepped){
         const auto samples=fullShieldAlarm_.advance(delta,world.mapOpen()?1:5,world.player().vitals.shield,world.player().vitals.shieldMax);
         const auto panel=banks_.find("common/data/panel/panel.gaf");
         if(panel!=banks_.end())for(const auto sample:samples)if(sample&&sample<=panel->second.size())
-            device_.playNative(panel->second[sample-1],0xffff,127);
+            device_.playNative(panel->second[sample-1],0xffff,127,65535,0,false,true,AudioBus::Cues);
     }
 
 }

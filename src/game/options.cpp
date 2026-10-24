@@ -56,8 +56,10 @@ bool validateOptions(const GameOptions& o,std::string& error) {
     if(o.spriteFiltering<0||o.spriteFiltering>2)return fail("Sprite filtering must be 0..2");
     if(o.hudLanguage<1||o.hudLanguage>2)return fail("Invalid HUD language");
     if(o.hudAspect<0||o.hudAspect>=int(HudAspects.size()))return fail("Invalid HUD aspect ratio");
-    for(float volume:{o.effectsVolume,o.voicesVolume,o.musicVolume})
+    for(float volume:{o.effectsVolume,o.voicesVolume,o.musicVolume,o.ambienceVolume,o.audioDucking})
         if(!std::isfinite(volume)||volume<0||volume>1)return fail("Audio volume must be 0..1");
+    if(!std::isfinite(o.audioHeadroom)||o.audioHeadroom<.25f||o.audioHeadroom>1)return fail("FX mix level must be0.25..1");
+    if(o.voiceLanguage<0||o.voiceLanguage>2)return fail("Invalid voice type");
     if(o.audioBits!=8&&o.audioBits!=16&&o.audioBits!=32)return fail("Unsupported audio quality");
     if(o.audioRate!=11025&&o.audioRate!=22050&&o.audioRate!=48000)return fail("Unsupported audio frequency");
     if(o.audioChannels!=1&&o.audioChannels!=2)return fail("Unsupported audio channels");
@@ -119,8 +121,10 @@ bool loadOptions(const std::string& path,GameOptions& options,std::string& error
         FIELD("audio.effects",soundFx) FIELD("audio.voices",voices) FIELD("audio.music",music)
         FIELD("audio.menu_sounds",menuSounds)
         FIELD("audio.effects_volume",effectsVolume) FIELD("audio.voices_volume",voicesVolume)
-        FIELD("audio.music_volume",musicVolume) FIELD("audio.bits",audioBits)
+        FIELD("audio.music_volume",musicVolume) FIELD("audio.voice_type",voiceLanguage) FIELD("audio.bits",audioBits)
         FIELD("audio.rate",audioRate) FIELD("audio.channels",audioChannels)
+        FIELD("audio.balanced_mix",balancedAudio) FIELD("audio.scene",sceneAudio) FIELD("audio.resampling",qualityResampling)
+        FIELD("audio.ambience",ambienceVolume) FIELD("audio.ducking",audioDucking) FIELD("audio.fx_mix",audioHeadroom)
         FIELD("session.difficulty",difficulty) FIELD("mouse.fire",fireButton) FIELD("mouse.thrust",thrustButton)
         FIELD("controller.move_sensitivity",joystickMoveSensitivity) FIELD("controller.aim_sensitivity",joystickAimSensitivity)
         FIELD("controller.deadzone",joystickDeadzone) FIELD("controller.aim_assist",aimAssist) FIELD("controls.crosshair",crosshair)
@@ -160,8 +164,10 @@ bool saveOptions(const std::string& path,const GameOptions& options,std::string&
     FIELD("audio.effects",soundFx) FIELD("audio.voices",voices) FIELD("audio.music",music)
     FIELD("audio.menu_sounds",menuSounds)
     FIELD("audio.effects_volume",effectsVolume) FIELD("audio.voices_volume",voicesVolume)
-    FIELD("audio.music_volume",musicVolume) FIELD("audio.bits",audioBits)
+    FIELD("audio.music_volume",musicVolume) FIELD("audio.voice_type",voiceLanguage) FIELD("audio.bits",audioBits)
     FIELD("audio.rate",audioRate) FIELD("audio.channels",audioChannels)
+        FIELD("audio.balanced_mix",balancedAudio) FIELD("audio.scene",sceneAudio) FIELD("audio.resampling",qualityResampling)
+        FIELD("audio.ambience",ambienceVolume) FIELD("audio.ducking",audioDucking) FIELD("audio.fx_mix",audioHeadroom)
     FIELD("session.difficulty",difficulty) FIELD("mouse.fire",fireButton) FIELD("mouse.thrust",thrustButton)
     FIELD("controller.move_sensitivity",joystickMoveSensitivity) FIELD("controller.aim_sensitivity",joystickAimSensitivity)
     FIELD("controller.deadzone",joystickDeadzone) FIELD("controller.aim_assist",aimAssist) FIELD("controls.crosshair",crosshair)

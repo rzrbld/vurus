@@ -11,7 +11,11 @@ bool applyOptionsRuntime(App& a,const vyruz::GameOptions& o,std::string& error,b
     a.audio.device().setEffectsVolume(o.soundFx?o.effectsVolume:0);
     a.audio.device().setVoicesVolume(o.voices?o.voicesVolume:0);
     a.audio.device().setMusicVolume(o.musicVolume);
+    a.audio.configureMix({o.balancedAudio,o.qualityResampling,o.ambienceVolume,o.audioDucking,o.audioHeadroom},o.sceneAudio);
     a.audio.setMusicOption(o.music);
+    const auto voiceLanguage=vyruz::voiceLanguageName(o,a.audioLanguage=="FRENCH");
+    if(a.haveLevel&&a.audio.device().available()&&a.audio.voiceLanguage()!=voiceLanguage)
+        if(!a.audio.setVoiceLanguage([&a](const auto& path,auto& bytes){return a.vfs.read(path,bytes);},voiceLanguage,error))return false;
     a.controller.configure(o.joystickMoveSensitivity,o.joystickAimSensitivity,o.joystickDeadzone);
     a.gfx.setGamma(o.gamma);a.gfx.setSpriteFiltering(o.spriteFiltering);a.sceneRenderer.reactorFx=o.reactorFx;a.sceneRenderer.groundDetails=o.groundDetails;a.sceneRenderer.shadows=o.shadows;
     a.gfx.setHudAspect(o.hudAspect);
@@ -67,7 +71,7 @@ std::string optionKeyName(int value){
 void refreshOptions(App& a) {
     auto& m=a.menu;const auto& o=a.options;const auto on=[](bool b){return b?"On":"Off";};
     m.optionRowHeight=a.optionsPage==0?vyruz::MenuView::RowHeight:30;
-    m.optionHelp.clear();
+    m.optionHelp.clear();m.optionVolume=-1;
     switch(a.optionsPage) {
     case 0:m.optionTitle="Options";m.optionLabels={"Video","Audio","Control","Session","Back"};
         m.optionHelp={"Resolution, brightness and visual detail.","Music, Sound FX, Quality, Frequency, Mono/Stereo.","Input device, Key settings.","User name, Game difficulty level.",""};break;
@@ -77,10 +81,10 @@ void refreshOptions(App& a) {
         m.optionHelp={"","Adjust midtones. 50 is neutral; black and white stay unchanged.","Reactor FX, ground details/smoke and shadows.","30 / 60 / Uncapped. Gameplay stays at 60 Hz. VSync may limit uncapped rendering; --fps overrides this setting.","Display mode, HUD aspect, filtering and VSync.","",""};break;
     }
     case 2:
-        m.optionTitle="Audio";m.optionLabels={"Sound FX: "+std::string(on(o.soundFx)),"Voices: "+std::string(on(o.voices)),"Music: "+std::string(on(o.music)),
-            "Quality: "+std::to_string(o.audioBits)+" bit","Frequency: "+std::to_string(o.audioRate)+" Hz",
-            "Channels: "+std::string(o.audioChannels==1?"Mono":"Stereo"),"Advanced","Back"};
-        m.optionHelp={"Sound FX switch and volume.","Voice switch and volume.","Music switch and volume.","","","","Menu sounds and audio reset.",""};break;
+        m.optionTitle="Audio";m.optionLabels={"Music","Sound FX, Voices",
+            "Quality : "+std::to_string(o.audioBits)+" bits","Frequency : "+std::to_string(o.audioRate)+" Hz",
+            "Channels : "+std::string(o.audioChannels==1?"Mono":"Stereo"),"Menu sounds: "+std::string(on(o.menuSounds)),"Advanced","Back"};
+        m.optionHelp={"Music switch and volume.","Sound FX and Voices switches, volumes and voice type.","Sample output precision.","Sample output frequency.","Mono or Stereo output.","Hover and selection sounds in menus.","Additional Linux audio and mixing controls.",""};break;
     case 8: {
         std::string aspect(vyruz::HudAspects[o.hudAspect].name);
         if(o.hudAspect==0){const float actual=float(a.gfx.windowWidth())/std::max(1,a.gfx.windowHeight());const auto closest=std::min_element(vyruz::HudAspects.begin()+1,vyruz::HudAspects.end(),[&](const auto& l,const auto& r){return std::abs(actual-float(l.numerator)/l.denominator)<std::abs(actual-float(r.numerator)/r.denominator);});aspect+=" ("+(std::abs(actual-float(closest->numerator)/closest->denominator)<actual*.03f?std::string(closest->name):std::string("window"))+")";}
@@ -95,14 +99,28 @@ void refreshOptions(App& a) {
 #endif
         break;
     case 13:m.optionTitle="Display mode";m.optionLabels={"Windowed","Fullscreen (exclusive)","Borderless fullscreen","Borderless window","Back"};m.optionHelp={"Resizable window with borders.","Uses a display-supported resolution.","Uses the desktop resolution.","Window without borders, at the selected size.",""};break;
-    case 9:m.optionTitle="Advanced audio";m.optionLabels={"Menu sounds: "+std::string(on(o.menuSounds)),"Reset audio","Back"};m.optionHelp={"Hover and selection sounds in menus.","Restore all audio defaults.",""};break;
-    case 10:case 11:case 12:{
-        const bool enabled=a.optionsPage==10?o.soundFx:a.optionsPage==11?o.voices:o.music;
-        const float volume=a.optionsPage==10?o.effectsVolume:a.optionsPage==11?o.voicesVolume:o.musicVolume;
-        m.optionTitle=a.optionsPage==10?"Sound FX":a.optionsPage==11?"Voices":"Music";
-        m.optionLabels={"Enabled: "+std::string(on(enabled)),"Volume: "+optionPercent(volume),"Back"};
-        m.optionHelp={enabled?"Select to disable this audio source.":"Select to enable this audio source.",enabled?"":"This audio source is disabled.",""};break;
+    case 9:m.optionTitle="Advanced audio";m.optionLabels={"Balanced mix: "+std::string(on(o.balancedAudio)),"Scene audio: "+std::string(on(o.sceneAudio)),"Resampling: "+std::string(o.qualityResampling?"High quality":"Linear"),"Ambience: "+optionPercent(o.ambienceVolume),"Dialogue focus: "+optionPercent(o.audioDucking),"FX mix level: "+optionPercent(o.audioHeadroom),"Reset audio","Back"};
+        m.optionHelp={"Separate ambience, effects, cues and dialogue. Off restores legacy mixing.","Smooth distance and screen-relative stereo for world sounds and enemy weapons. Requires Balanced mix.","Cleaner sample-rate conversion and less aliasing. Uses more CPU.","Persistent environmental sounds and the vehicle motor. Requires Balanced mix.","Gently lower competing sounds during dialogue and gameplay cues. Requires Balanced mix.","Leave room for overlapping effects. Lower values reduce overload and preserve impacts. Requires Balanced mix.","Restore all audio defaults.",""};break;
+    case 10:
+        m.optionTitle="Audio/FX,Voices";
+        m.optionLabels={std::string("Sound FX : ")+(o.soundFx?"ON":"OFF"),"Tune Sound FX Volume",
+            std::string("Voices : ")+(o.voices?"ON":"OFF"),"Tune Voices Volume","Voice type","Back"};
+        m.optionHelp={o.soundFx?"Select to remove Sound FX.":"Select to activate Sound FX.",o.soundFx?"":"Sound FX are removed.",
+            o.voices?"Select to remove Voices.":"Select to activate Voices.",o.voices?"":"Voices are removed.",o.voices?"":"Voices are removed.",""};break;
+    case 12:
+        m.optionTitle="Audio/Music";m.optionLabels={std::string("Music : ")+(o.music?"ON":"OFF"),"Tune Music Volume","","","","Back"};
+        m.optionHelp={o.music?"Select to desactivate Music.":"Select to activate Music.",o.music?"":"Music is desactivated.","","","",""};break;
+    case 11:{
+        m.optionTitle="Audio/Voices/Type";m.optionLabels={"English","French","","","","Back"};
+        const std::string current=std::string("Current voice type is ")+(std::string(vyruz::voiceLanguageName(o,a.audioLanguage=="FRENCH"))=="FRENCH"?"French.":"English.");
+        m.optionHelp={current,current,"","","",""};break;
     }
+    case 17:case 18:case 19:
+        m.optionTitle=a.optionsPage==17?"Audio/Music/Volume":a.optionsPage==18?"Audio/FX/Volume":"Audio/Voices/Volume";
+        m.optionLabels={"","","","","","Back"};m.optionHelp.resize(6);
+        m.optionHelp[5]="Left/Right or wheel: adjust volume. Click or drag the bar.";
+        m.optionVolume=a.optionsPage==17?o.musicVolume:a.optionsPage==18?o.effectsVolume:o.voicesVolume;
+        break;
     case 3:m.optionTitle="Control";m.optionLabels={"Keyboard","Mouse","Joystick / controller","Sensitivity",std::string("Aim assist: ")+std::array{"Off","Slight","Medium","Full","Retaliate"}[o.aimAssist],"Crosshair: "+std::string(on(o.crosshair)),"Restore default controls","Back"};m.optionHelp={"","","","Controller movement, aiming and stick deadzone.","Controller only: Slight/Medium help near enemies; Full selects with stick; Retaliate targets the last enemy to hurt you with a projectile.","Show the gameplay crosshair for mouse and controller.","",""};break;
     case 15:m.optionTitle="Sensitivity";m.optionLabels={"Move sensitivity: "+std::to_string(o.joystickMoveSensitivity),"Aim sensitivity: "+std::to_string(o.joystickAimSensitivity),"Stick deadzone: "+std::to_string(o.joystickDeadzone),"Back"};m.optionHelp={"Controller movement sensitivity.","Controller aiming sensitivity.","Ignore small stick movements near the center.",""};break;
     case 4: {
@@ -173,7 +191,11 @@ void refreshMenuContext(App& a) {
 void optionsBack(App& a) {
     a.menuHold.reset();
     if(a.bindingCapture){a.bindingCapture=0;SDL_StopTextInput();a.menu.error.clear();refreshOptions(a);return;}
-    if(a.optionsPage==0)a.menu.back(a.paused);
+    if(a.optionsPage==17||a.optionsPage==18||a.optionsPage==19){
+        a.menu.selected=a.optionsPage==19?3:1;a.optionsPage=a.optionsPage==17?12:10;refreshOptions(a);
+    }else if(a.optionsPage==11){a.optionsPage=10;a.menu.selected=4;refreshOptions(a);}
+    else if(a.optionsPage==9||a.optionsPage==10||a.optionsPage==12){a.menu.selected=a.optionsPage==9?6:a.optionsPage==10?1:0;a.optionsPage=2;refreshOptions(a);}
+    else if(a.optionsPage==0)a.menu.back(a.paused);
     else {a.optionsPage=a.optionsPage==16?1:a.optionsPage==15?3:(a.optionsPage==13||a.optionsPage==14)?8:a.optionsPage==8?1:a.optionsPage>=9?2:a.optionsPage>=5?3:0;a.menu.selected=0;refreshOptions(a);}
     a.suppressFireUntilRelease=true;
 }
@@ -242,20 +264,39 @@ void changeOption(App& a,int step=1) {
         next.windowMode=row;
     } else if(a.optionsPage==2) {
         if(row==7){optionsBack(a);return;}
-        if(row<3){a.optionsPage=10+row;a.menu.selected=0;refreshOptions(a);return;}
+        if(row<2){a.optionsPage=row==0?12:10;a.menu.selected=0;refreshOptions(a);return;}
         if(row==6){a.optionsPage=9;a.menu.selected=0;refreshOptions(a);return;}
-        if(row==3)next.audioBits=nextOption(next.audioBits,{8,16,32},step);
-        if(row==4)next.audioRate=nextOption(next.audioRate,{11025,22050,48000},step);
-        if(row==5)next.audioChannels=3-next.audioChannels;
+        if(row==2)next.audioBits=nextOption(next.audioBits,{8,16,32},step);
+        if(row==3)next.audioRate=nextOption(next.audioRate,{11025,22050,48000},step);
+        if(row==4)next.audioChannels=3-next.audioChannels;
+        if(row==5)next.menuSounds=!next.menuSounds;
     } else if(a.optionsPage==9){
-        if(row==2){optionsBack(a);return;}
-        if(row==0)next.menuSounds=!next.menuSounds;
-        else {next.soundFx=next.voices=next.music=next.menuSounds=true;next.effectsVolume=next.voicesVolume=next.musicVolume=1;next.audioBits=32;next.audioRate=48000;next.audioChannels=2;}
-    } else if(a.optionsPage>=10&&a.optionsPage<=12){
-        if(row==2){optionsBack(a);return;}
-        bool& enabled=a.optionsPage==10?next.soundFx:a.optionsPage==11?next.voices:next.music;
-        float& volume=a.optionsPage==10?next.effectsVolume:a.optionsPage==11?next.voicesVolume:next.musicVolume;
-        if(row==0)enabled=!enabled;else volume=std::clamp(std::round(volume*10+step)/10.f,0.f,1.f);
+        if(row==7){optionsBack(a);return;}
+        if(row==0)next.balancedAudio=!next.balancedAudio;
+        else if(row==1)next.sceneAudio=!next.sceneAudio;
+        else if(row==2)next.qualityResampling=!next.qualityResampling;
+        else if(row==3)next.ambienceVolume=std::clamp(std::round(next.ambienceVolume*10+step)/10.f,0.f,1.f);
+        else if(row==4)next.audioDucking=std::clamp(std::round(next.audioDucking*10+step)/10.f,0.f,1.f);
+        else if(row==5)next.audioHeadroom=std::clamp(std::round(next.audioHeadroom*20+step)/20.f,.25f,1.f);
+        else {next.voiceLanguage=defaults.voiceLanguage;next.balancedAudio=next.sceneAudio=true;next.qualityResampling=defaults.qualityResampling;next.ambienceVolume=.5f;next.audioDucking=.5f;next.audioHeadroom=.7f;next.soundFx=next.voices=next.music=next.menuSounds=true;next.effectsVolume=next.voicesVolume=next.musicVolume=1;next.audioBits=32;next.audioRate=48000;next.audioChannels=2;}
+    } else if(a.optionsPage==12){
+        if(row==5){optionsBack(a);return;}
+        if(row==0)next.music=!next.music;
+        else if(row==1&&next.music){a.optionsPage=17;a.menu.selected=5;refreshOptions(a);return;}
+        else return;
+    } else if(a.optionsPage==10){
+        if(row==5){optionsBack(a);return;}
+        if(row==0)next.soundFx=!next.soundFx;
+        else if(row==2)next.voices=!next.voices;
+        else if(row==1&&next.soundFx){a.optionsPage=18;a.menu.selected=5;refreshOptions(a);return;}
+        else if(row==3&&next.voices){a.optionsPage=19;a.menu.selected=5;refreshOptions(a);return;}
+        else if(row==4&&next.voices){a.optionsPage=11;a.menu.selected=std::string(vyruz::voiceLanguageName(next,a.audioLanguage=="FRENCH"))=="FRENCH"?1:0;refreshOptions(a);return;}
+        else return;
+    } else if(a.optionsPage==11){
+        if(row==5){optionsBack(a);return;}
+        if(row>1)return;
+        next.voiceLanguage=row+1;
+    } else if(a.optionsPage>=17&&a.optionsPage<=19){optionsBack(a);return;
     } else if(a.optionsPage==3) {
         if(row==7){optionsBack(a);return;}
         if(row==4){next.aimAssist=(next.aimAssist+step+5)%5;}
@@ -286,19 +327,30 @@ void changeOption(App& a,int step=1) {
         a.bindingCapture=row==0?3:4;a.menu.error="Click a button; Esc cancels; Del clears";return;
     }
     const bool saved=commitOptions(a,next);
+    if(saved&&a.optionsPage==11){a.optionsPage=10;a.menu.selected=4;}
     if(saved&&a.optionsPage==13){a.optionsPage=8;a.menu.selected=0;}
     refreshOptions(a);
     if(saved&&a.optionsPage==4&&row==1)a.menu.error="Difficulty applies to new games";
 }
+bool audioVolumePage(const App& a){return a.optionsPage>=17&&a.optionsPage<=19;}
+void setAudioVolume(App& a,int percent){
+    auto next=a.options;float& volume=a.optionsPage==17?next.musicVolume:a.optionsPage==18?next.effectsVolume:next.voicesVolume;
+    const float value=std::clamp(percent,0,100)/100.f;if(volume==value)return;
+    volume=value;commitOptions(a,next);refreshOptions(a);
+}
+void adjustAudioVolume(App& a,int step){
+    const auto& o=a.options;const float volume=a.optionsPage==17?o.musicVolume:a.optionsPage==18?o.effectsVolume:o.voicesVolume;
+    setAudioVolume(a,int(std::lround(volume*100))+step);
+}
 bool repeatableOption(const App& a){
     const int row=a.menu.selected;
-    return (a.optionsPage==1&&row==1)||(a.optionsPage>=10&&a.optionsPage<=12&&row==1)||
+    return (a.optionsPage==1&&row==1)||(a.optionsPage>=17&&a.optionsPage<=19)||
         (a.optionsPage==15&&row>=0&&row<=2);
 }
 void serviceOptionsHold(App& a,uint64_t now){
     if(!a.inputFocused||a.menu.page!=vyruz::MenuPage::Options||a.bindingCapture||!repeatableOption(a)){a.menuHold.reset();return;}
     a.menuHold.context(a.optionsPage*100+a.menu.selected);
-    if(const int step=a.menuHold.repeat(now))changeOption(a,step);
+    if(const int step=a.menuHold.repeat(now)){if(audioVolumePage(a))adjustAudioVolume(a,step);else changeOption(a,step);}
 }
 bool optionsEvent(App& a,SDL_Event event) {
     const bool controllerEvent=event.type==SDL_CONTROLLERBUTTONDOWN||event.type==SDL_CONTROLLERBUTTONUP;
@@ -387,14 +439,19 @@ bool optionsEvent(App& a,SDL_Event event) {
             a.menuHold.press(controllerEvent,event.key.keysym.sym==SDLK_LEFT?-1:1,SDL_GetTicks64());
         } else a.menuHold.reset();
         switch(event.key.keysym.sym){case SDLK_BACKSPACE:case SDLK_ESCAPE:optionsBack(a);break;case SDLK_UP:a.menu.move(-1);break;case SDLK_DOWN:a.menu.move(1);break;
-        case SDLK_LEFT:changeOption(a,-1);break;case SDLK_RIGHT:case SDLK_SPACE:case SDLK_KP_ENTER:case SDLK_RETURN:changeOption(a);break;default:break;}
+        case SDLK_LEFT:if(audioVolumePage(a))adjustAudioVolume(a,-1);else changeOption(a,-1);break;case SDLK_RIGHT:if(audioVolumePage(a))adjustAudioVolume(a,1);else changeOption(a);break;case SDLK_SPACE:case SDLK_KP_ENTER:case SDLK_RETURN:changeOption(a);break;default:break;}
     } else if(event.type==SDL_MOUSEMOTION||event.type==SDL_MOUSEBUTTONDOWN) {
         const auto v=a.gfx.viewport();const auto point=a.gfx.mousePoint(event.type==SDL_MOUSEMOTION?event.motion.x:event.button.x,event.type==SDL_MOUSEMOTION?event.motion.y:event.button.y);
         const float x=point.x-v.uiX(),y=point.y-v.uiY();
-        if(a.menu.hover(x,y)&&event.type==SDL_MOUSEBUTTONDOWN){
+        if(audioVolumePage(a)&&x>=vyruz::MenuView::VolumeLeft&&x<=vyruz::MenuView::VolumeRight&&
+           y>=vyruz::MenuView::VolumeTop&&y<=vyruz::MenuView::VolumeBottom&&
+           ((event.type==SDL_MOUSEBUTTONDOWN&&event.button.button==SDL_BUTTON_LEFT)||
+            (event.type==SDL_MOUSEMOTION&&(event.motion.state&SDL_BUTTON_LMASK)))){
+            setAudioVolume(a,int(std::lround((x-vyruz::MenuView::VolumeLeft)*100/(vyruz::MenuView::VolumeRight-vyruz::MenuView::VolumeLeft))));
+        }else if(a.menu.hover(x,y)&&event.type==SDL_MOUSEBUTTONDOWN){
             if(event.button.button==SDL_BUTTON_LEFT)changeOption(a);
             if(event.button.button==SDL_BUTTON_RIGHT)changeOption(a,-1);
         }
-    } else if(event.type==SDL_MOUSEWHEEL)a.menu.move(-wheelSteps(event.wheel));
+    } else if(event.type==SDL_MOUSEWHEEL){if(audioVolumePage(a))adjustAudioVolume(a,wheelSteps(event.wheel));else a.menu.move(-wheelSteps(event.wheel));}
     return true;
 }

@@ -36,6 +36,10 @@ public:
     // Native411170 clears pending/dedup records, not global5235a0 or the sample
     // already playing on voice channel5. Audio playback is the caller's concern.
     void clear() {events_.clear();}
+    // A voice-pack switch changes sample identity, not its delay/hold/cooldown.
+    void remapPrefix(const std::string& oldPrefix,const std::string& newPrefix) {
+        for(auto& e:events_)if(e.name.starts_with(oldPrefix))e.name.replace(0,oldPrefix.size(),newPrefix);
+    }
     size_t size() const {return events_.size();}
     Time nextAllowed() const {return nextAllowed_;}
 private:

@@ -59,3 +59,11 @@ gating, F2, pane focus/preview, continuous scrolling, Page Up, retained selectio
 mouse/wheel, info-off/on rendering and unchanged encoded World during the info
 toggle. Captures require visual inspection. Original assets are not test fixtures
 and must not be redistributed. This does not claim Windows or hardware parity.
+
+## Audio diagnostics
+
+The existing on-screen information overlay also reports active audio voices by
+role, rejected/stolen requests, underruns, input/output peaks, output clipping,
+minimum limiter gain and callback average/max time. Counters are cumulative for
+the current device session; input overloads are not clipped output. See the
+[scene audio contract](formats/audio_pipeline.md) for profiles and tuning.

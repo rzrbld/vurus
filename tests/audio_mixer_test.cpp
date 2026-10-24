@@ -3,9 +3,10 @@
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <source_location>
 using namespace vyruz;
-void check(bool value) { if (!value) { std::cerr << "Mixer check failed\n"; std::exit(1); } }
-void near(float actual, float expected) { check(std::abs(actual-expected)<0.00001f); }
+void check(bool value,const std::source_location where=std::source_location::current()) { if (!value) { std::cerr << "Mixer check failed at line "<<where.line()<<"\n"; std::exit(1); } }
+void near(float actual, float expected,const std::source_location where=std::source_location::current()) { if(std::abs(actual-expected)>=0.00001f)std::cerr<<"actual="<<actual<<" expected="<<expected<<"\n";check(std::abs(actual-expected)<0.00001f,where); }
 AudioClipPtr clip(std::vector<uint8_t> bytes, unsigned rate=48000, unsigned channels=1, unsigned bits=8) {
     std::string error; auto result=makeAudioClip(Wave{rate,uint16_t(channels),uint16_t(bits),std::move(bytes)},error);
     check(bool(result)); return result;
@@ -160,6 +161,27 @@ int main() {
         }
         check(yy>1000); // No mute/silence shortcut.
         check(std::sqrt(std::max(0.,yy-sy*sy/ss)/yy)<.01);
+    }
+    // Effects overload must not leave the subsequent music/speech suppressed
+    // by the effects envelope. It must still protect the effects themselves.
+    {
+        auto burst=clip(std::vector<uint8_t>(240,224));
+        std::vector<uint8_t> musicBytes(960,144);
+        std::fill_n(musicBytes.begin(),240,128);
+        auto music=clip(musicBytes);
+        AudioMixer musicMix,speechMix,partitioned;
+        for(auto* mixer:{&musicMix,&speechMix,&partitioned})
+            for(int i=0;i<16;++i)mixer->play(burst);
+        musicMix.playMusic(music,1,false);
+        partitioned.playMusic(music,1,false);
+        const auto speech=speechMix.play(music,191,1,0,false,false,AudioBus::Voices);
+        std::vector<float> rendered(960*2),spoken(960*2),split(960*2);
+        musicMix.mix(rendered.data(),960);speechMix.mix(spoken.data(),960);
+        partitioned.mix(split.data(),123);partitioned.mix(split.data()+246,837);
+        check(rendered==split);check(rendered==spoken);
+        near(rendered[0],1);near(rendered[2*240],.125f);
+        near(float(*speechMix.playbackMilliseconds(speech)),20);
+        for(float value:rendered)check(std::isfinite(value)&&std::abs(value)<=1);
     }
     std::string error;check(!makeAudioClip(Wave{},error));check(!error.empty());
     SDL_setenv("SDL_AUDIODRIVER","dummy",1);

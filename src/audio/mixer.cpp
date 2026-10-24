@@ -1,5 +1,6 @@
 #include "audio/mixer.h"
 #include "audio/native_audio.h"
+#include "audio/resample_kernel.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -37,61 +38,86 @@ AudioClipPtr makeAudioClip(Wave wave, std::string& error) {
     return clip;
 }
 uint64_t AudioMixer::play(AudioClipPtr clip, int priority, float gain, float pan, bool loop, bool pauseWithWorld, AudioBus bus) {
-    if (!clip || !clip->frames) return 0;
+    ++stats_.requests;
+    if (!clip || !clip->frames) {++stats_.rejected;return 0;}
     Voice* selected = nullptr;
     for (auto& voice : voices_) if (!voice.active) { selected = &voice; break; }
     if (!selected) {
         selected = &*std::min_element(voices_.begin(), voices_.end(), [](const Voice& a, const Voice& b) {
             return a.priority != b.priority ? a.priority < b.priority : a.handle < b.handle;
         });
-        if (selected->priority > priority) return 0;
+        if (selected->priority > priority) {++stats_.rejected;return 0;}
     }
+    if(selected->active)++stats_.stolen;retire(*selected);
     if (!nextHandle_) ++nextHandle_;
     *selected = {std::move(clip), 0, nextHandle_++, priority, gainValue(gain),
                  std::isfinite(pan) ? std::clamp(pan, -1.0f, 1.0f) : 0, loop, true, pauseWithWorld, bus};
+    initializeVoice(*selected);
     return selected->handle;
 }
 uint64_t AudioMixer::playNative(AudioClipPtr clip,uint32_t mask,int priority,unsigned volume,int pan,bool loop,bool pauseWithWorld,AudioBus bus) {
-    if(!clip||!clip->frames)return 0;
+    ++stats_.requests;
+    if(!clip||!clip->frames){++stats_.rejected;return 0;}
+    volume=std::min(volume,65535u);pan=std::clamp(pan,-32767,32767);
+    if(mixSettings_.balanced&&(bus==AudioBus::Effects||bus==AudioBus::Ambience)){
+        unsigned similar=0,ambient=0;
+        for(size_t i=0;i<16;++i){const auto& v=voices_[i];if(!v.active)continue;
+            ambient+=v.bus==AudioBus::Ambience;
+            if((mask&(1u<<i))&&v.clip==clip&&v.bus==bus&&v.priority>=priority&&
+               v.position*1000/clip->wave.sampleRate<12&&std::abs(v.nativePan-pan)<4096&&v.nativeVolume>=volume)++similar;
+        }
+        // Prevent phase-coherent same-position bursts from becoming a wall of
+        // identical PCM. Return no shared handle: animation ownership stays unique.
+        if(similar>=2||(bus==AudioBus::Ambience&&priority<191&&ambient>=4)){
+            ++stats_.rejected;++stats_.repetitions;return 0;
+        }
+    }
     std::array<NativeAudioChannel,16> candidates;
     for(size_t i=0;i<candidates.size();++i){const auto& v=voices_[i];
         double remaining=0;
         if(v.active&&v.clip){const auto position=v.loop?std::fmod(v.position,double(v.clip->frames)):v.position;
             remaining=std::max(0.0,double(v.clip->frames)-position)*1000/v.clip->wave.sampleRate;}
         candidates[i]={v.active,v.priority,static_cast<int32_t>(std::min(remaining,double(INT32_MAX)))};
+        if(mixSettings_.balanced&&v.active&&v.bus==AudioBus::Voices&&bus!=AudioBus::Voices)
+            candidates[i].priority=INT32_MAX;
         if(i==0&&(musicOverlay_.active||(musicNativeChannel_&&music_.active)))candidates[i]={true,255,INT32_MAX};
     }
-    const auto selected=selectNativeAudioChannel(candidates,mask,priority);if(!selected)return 0;
-    if(*selected==0){musicOverlay_.active=false;if(musicNativeChannel_)music_.active=false;}
+    const auto selected=selectNativeAudioChannel(candidates,mask,priority);if(!selected){++stats_.rejected;return 0;}
+    if(*selected==0){retire(musicOverlay_);if(musicNativeChannel_)retire(music_);}
     if(!nextHandle_)++nextHandle_;
-    auto& v=voices_[*selected];v={std::move(clip),0,nextHandle_++,priority,1,0,loop,true,pauseWithWorld,bus};
-    v.native=true;v.nativeVolume=std::min(volume,65535u);v.nativePan=std::clamp(pan,-32767,32767);return v.handle;
+    auto& v=voices_[*selected];if(v.active)++stats_.stolen;retire(v);v={std::move(clip),0,nextHandle_++,priority,1,0,loop,true,pauseWithWorld,bus};
+    initializeVoice(v);v.native=true;v.nativeVolume=std::min(volume,65535u);v.nativePan=std::clamp(pan,-32767,32767);return v.handle;
 }
 void AudioMixer::updateNative(uint64_t handle,unsigned volume,int pan){
     for(auto& v:voices_)if(v.active&&v.handle==handle){v.nativeVolume=std::min(volume,65535u);v.nativePan=std::clamp(pan,-32767,32767);}
 }
 void AudioMixer::updateNativeChannel(unsigned channel,unsigned volume,int pan){if(channel>0&&channel<=16){auto& v=voices_[channel-1];if(v.active){v.nativeVolume=std::min(volume,65535u);v.nativePan=std::clamp(pan,-32767,32767);}}}
 bool AudioMixer::nativeChannelPlaying(unsigned channel) const{return channel>0&&channel<=16&&(voices_[channel-1].active||(channel==1&&(musicOverlay_.active||(musicNativeChannel_&&music_.active))));}
-void AudioMixer::stopNativeChannels(uint32_t mask){for(size_t i=0;i<16;++i)if(mask&(1u<<i)){voices_[i].active=false;voices_[i].handle=0;}if(mask&1){musicOverlay_.active=false;if(musicNativeChannel_)music_.active=false;}}
-void AudioMixer::setMusicNativeChannel(bool native){musicNativeChannel_=native;if(native&&music_.active){voices_[0].active=false;voices_[0].handle=0;}}
+void AudioMixer::stopNativeChannels(uint32_t mask){for(size_t i=0;i<16;++i)if(mask&(1u<<i)){retire(voices_[i]);voices_[i].handle=0;}if(mask&1){retire(musicOverlay_);if(musicNativeChannel_)retire(music_);}}
+void AudioMixer::setMusicNativeChannel(bool native){musicNativeChannel_=native;if(native&&music_.active){retire(voices_[0]);voices_[0].handle=0;}}
 void AudioMixer::playMusic(AudioClipPtr clip, float gain, bool loop) {
-    if(musicNativeChannel_&&clip){voices_[0].active=false;voices_[0].handle=0;}
+    if(musicNativeChannel_&&clip){retire(voices_[0]);voices_[0].handle=0;}
+    retire(music_,.04f);
     queuedMusic_ = {};
     ++musicSerial_;
     music_ = {std::move(clip), 0, 0, 0, gainValue(gain), 0, loop, false};
-    music_.bus = AudioBus::Presentation;
+    music_.bus = AudioBus::Music;
     music_.active = music_.clip && music_.clip->frames;
+    initializeVoice(music_);music_.fadeSeconds=.04f;
 }
 void AudioMixer::queueMusic(AudioClipPtr clip, float gain) {
     queuedMusic_ = {std::move(clip), 0, 0, 0, gainValue(gain), 0, false, false};
     queuedMusic_.active = queuedMusic_.clip && queuedMusic_.clip->frames;
+    initializeVoice(queuedMusic_);queuedMusic_.bus=AudioBus::Music;
 }
 void AudioMixer::playMusicOverlay(AudioClipPtr clip, float gain) {
-    if(clip){voices_[0].active=false;voices_[0].handle=0;}
+    if(clip){retire(voices_[0]);voices_[0].handle=0;}
+    retire(musicOverlay_,.02f);
     musicOverlay_ = {std::move(clip), 0, 0, 0, gainValue(gain), 0, true, false};
     musicOverlay_.active = musicOverlay_.clip && musicOverlay_.clip->frames;
+    initializeVoice(musicOverlay_);musicOverlay_.bus=AudioBus::Music;musicOverlay_.fadeSeconds=.02f;
 }
-void AudioMixer::stopMusicOverlay() { musicOverlay_.active = false; }
+void AudioMixer::stopMusicOverlay() { retire(musicOverlay_); }
 AudioMixer::MusicState AudioMixer::musicState() const {
     return {musicSerial_, music_.active, queuedMusic_.active,
             music_.clip ? music_.position * 1000.0 / music_.clip->wave.sampleRate : 0.0};
@@ -116,12 +142,12 @@ void AudioMixer::update(uint64_t handle, float gain, float pan) {
 }
 void AudioMixer::stopEffects(uint64_t preserveHandle) {
     for (auto& voice : voices_) if(!preserveHandle || voice.handle!=preserveHandle) {
-        voice.active=false;voice.handle=0;
+        retire(voice);voice.handle=0;
     }
 }
-void AudioMixer::stop(uint64_t handle) { for (auto& voice : voices_) if (handle && voice.handle == handle) voice = {}; }
-void AudioMixer::stopMusic() { music_.active = queuedMusic_.active = musicOverlay_.active = false; }
-void AudioMixer::stopAll() { stopEffects(); stopMusic(); outputGain_ = 1; }
+void AudioMixer::stop(uint64_t handle) { for (auto& voice : voices_) if (handle && voice.handle == handle) {retire(voice);voice = {};} }
+void AudioMixer::stopMusic() { retire(music_,.04f);queuedMusic_.active=false;retire(musicOverlay_,.02f); }
+void AudioMixer::stopAll() { stopEffects(); stopMusic();for(auto&v:tails_)v.active=false;effectsOutputGain_ = outputGain_ = 1;dialogueDuck_=cueDuck_=0;lastWorld_={}; }
 void AudioMixer::setMasterVolume(float gain) { master_ = gainValue(gain); }
 void AudioMixer::setEffectsVolume(float gain) { effects_ = gainValue(gain); }
 void AudioMixer::setVoicesVolume(float gain) { voicesGain_ = gainValue(gain); }
@@ -130,58 +156,91 @@ void AudioMixer::setSampleRate(int rate) {
     if (rate >= 1000 && rate <= 384000) {
         sampleRate_ = rate;
         outputRelease_ = 1 - std::exp(-1.0f / (sampleRate_ * .080f));
+        ramp_=1-std::exp(-1.f/(sampleRate_*.005f));
+        duckAttack_=1-std::exp(-1.f/(sampleRate_*.008f));
+        duckRelease_=1-std::exp(-1.f/(sampleRate_*.200f));
+        kernels_.clear();
+        for(auto&v:voices_)v.kernel=kernelFor(v.clip);
+        for(auto&v:tails_)v.kernel=kernelFor(v.clip);
+        for(auto*v:{&music_,&queuedMusic_,&musicOverlay_})v->kernel=kernelFor(v->clip);
     }
 }
 size_t AudioMixer::activeVoices() const {
     return std::count_if(voices_.begin(), voices_.end(), [](const Voice& v) { return v.active; });
 }
-size_t AudioMixer::mixVoice(Voice& voice, float* stereo, size_t frames) {
-    if (!voice.active) return 0;
-    const auto& clip = *voice.clip;
-    const double step = double(clip.wave.sampleRate) / sampleRate_;
-    const float busGain = &voice == &music_ ? (musicOverlay_.active ? 0.0f : musicGain_) : &voice == &musicOverlay_ ? musicGain_ : voice.bus == AudioBus::Effects ? effects_ : voice.bus == AudioBus::Voices ? voicesGain_ : 1.0f;
-    float left,right;
-    if(voice.native){
-        const auto pan=nativeAudioPanGains(voice.nativePan);
-        const float gain=busGain>0?nativeAudioVolumeGain(static_cast<uint16_t>(std::clamp(voice.nativeVolume*busGain,0.f,65535.f))):0;
-        left=gain*pan.first;right=gain*pan.second;
-    }else{
-        left=voice.gain*busGain*(voice.pan>0?1-voice.pan:1);
-        right=voice.gain*busGain*(voice.pan<0?1+voice.pan:1);
-    }
-    size_t i = 0;
-    for (; i < frames; ++i) {
-        if (voice.position >= clip.frames) {
-            if (voice.loop) { if(clip.stream)voice.streamOffset+=uint64_t(voice.position/clip.frames)*clip.frames; voice.position = std::fmod(voice.position, double(clip.frames)); }
-            else { voice.active = false; break; }
-        }
-        const size_t first = size_t(voice.position);
-        const size_t second = first + 1 < clip.frames ? first + 1 : voice.loop ? 0 : first;
-        const float fraction = float(voice.position - first);
-        float streamA[2]{},streamB[2]{};
-        if(clip.stream){
-            const auto next=voice.streamOffset+first+(second==first?0:1);
-            if(!clip.stream->frame(voice.streamOffset+first,streamA)||!clip.stream->frame(next,streamB)){
-                if(clip.stream->failed())voice.active=false;
-                break; // Underrun: silence and hold the source clock; never wait for disk.
-            }
-        }
-        for (unsigned channel = 0; channel < 2; ++channel) {
-            const float a = clip.stream?streamA[channel]:sample(clip, first, channel), b = clip.stream?streamB[channel]:sample(clip, second, channel);
-            stereo[2 * i + channel] += (a + (b - a) * fraction) * (channel ? right : left);
-        }
-        voice.position += step;
-    }
-    if(clip.stream)clip.stream->consume(voice.streamOffset+uint64_t(voice.position));
-    if (!voice.loop && voice.position >= clip.frames) voice.active = false;
-    return i;
-    // Keep clip alive after completion; its memory is freed only by a main-thread
-    // play/replacement or device destruction, never by this callback.
+std::shared_ptr<const AudioResampleKernel> AudioMixer::kernelFor(const AudioClipPtr& clip) {
+    if(!mixSettings_.highQuality||!clip||clip->wave.sampleRate==unsigned(sampleRate_))return {};
+    if(kernels_.size()>=16&&!kernels_.contains(clip->wave.sampleRate))kernels_.erase(kernels_.begin());
+    auto [it,added]=kernels_.try_emplace(clip->wave.sampleRate);
+    if(added)it->second=std::make_shared<AudioResampleKernel>(clip->wave.sampleRate,unsigned(sampleRate_));
+    return clip->frames>=it->second->taps?it->second:nullptr;
 }
+void AudioMixer::prepare(const AudioClipPtr& clip,bool force){
+    if(!mixSettings_.highQuality&&!force)return;
+    if(!clip||clip->wave.sampleRate==unsigned(sampleRate_))return;
+    if(kernels_.size()>=16&&!kernels_.contains(clip->wave.sampleRate))kernels_.erase(kernels_.begin());
+    auto [it,added]=kernels_.try_emplace(clip->wave.sampleRate);
+    if(added)it->second=std::make_shared<AudioResampleKernel>(clip->wave.sampleRate,unsigned(sampleRate_));
+}
+void AudioMixer::initializeVoice(Voice& v){v.kernel=kernelFor(v.clip);v.left=v.right=-1;v.fade=mixSettings_.balanced?0:1;}
+void AudioMixer::retire(Voice& v,float seconds){
+    if(v.active&&mixSettings_.balanced){
+        auto target=std::find_if(tails_.begin(),tails_.end(),[](const auto&t){return !t.active;});
+        if(target!=tails_.end()){*target=v;target->retiring=true;target->fadeSeconds=seconds;}
+    }
+    v.active=false;
+}
+void AudioMixer::configureMix(AudioMixSettings settings){
+    settings.ambience=gainValue(settings.ambience);settings.ducking=gainValue(settings.ducking);
+    settings.headroom=std::isfinite(settings.headroom)?std::clamp(settings.headroom,.25f,1.f):.7f;
+    if(!mixSettings_.balanced&&settings.balanced){
+        masterSmooth_=master_;effectsSmooth_=effects_;voicesSmooth_=voicesGain_;musicSmooth_=musicGain_;
+        ambienceSmooth_=settings.ambience;headroomSmooth_=settings.headroom;duckStrengthSmooth_=settings.ducking;
+        for(auto&v:voices_)v.left=v.right=-1;
+    }
+    mixSettings_=settings;
+    for(auto&v:voices_)v.kernel=kernelFor(v.clip);
+    for(auto&v:tails_)v.kernel=kernelFor(v.clip);
+    for(auto*v:{&music_,&queuedMusic_,&musicOverlay_})v->kernel=kernelFor(v->clip);
+    if(!settings.balanced)for(auto&v:tails_)v.active=false;
+}
+AudioMixer::RetainedClips AudioMixer::retainedClips()const{
+    RetainedClips result;size_t i=0;for(const auto&v:voices_)result[i++]=v.clip;
+    for(const auto&v:tails_)result[i++]=v.clip;
+    for(const auto*v:{&music_,&queuedMusic_,&musicOverlay_})result[i++]=v->clip;
+    return result;
+}
+void AudioMixer::collectRetired(){for(auto&v:tails_)if(!v.active)v={};}
+AudioStatistics AudioMixer::statistics()const{
+    auto result=stats_;result.active={};
+    for(const auto&v:voices_)if(v.active)++result.active[size_t(v.bus)];
+    for(const auto&v:tails_)if(v.active)++result.active[size_t(v.bus)];
+    if(music_.active)++result.active[6];if(musicOverlay_.active)++result.active[6];
+    return result;
+}
+void AudioMixer::recordCallback(uint64_t ticks){++stats_.callbacks;stats_.callbackTicks+=ticks;stats_.maxCallbackTicks=std::max(stats_.maxCallbackTicks,ticks);}
+#include "audio/mixer_dsp.inc"
 void AudioMixer::mix(float* stereo, size_t frames) {
     if (!stereo) return;
+    if(mixSettings_.balanced){mixBalanced(stereo,frames);return;}
     std::fill_n(stereo, frames * 2, 0.0f);
-    for (auto& voice : voices_) if (!paused_ || !voice.pauseWithWorld) mixVoice(voice, stereo, frames);
+    for (auto& voice : voices_)
+        if ((voice.bus == AudioBus::Effects||voice.bus==AudioBus::Cues||voice.bus==AudioBus::Ambience) && (!paused_ || !voice.pauseWithWorld))
+            mixVoice(voice, stereo, frames);
+    // Bound the combined effects before adding music, speech or movie audio.
+    // Detect after the master control so quiet, safe mixes remain untouched.
+    // This uses the same linked envelope as the previous effects-only output:
+    // individual effects and effects-only overload retain their levels/shape.
+    for (size_t i = 0; i < frames; ++i) {
+        const float peak = std::max(std::abs(stereo[2*i]), std::abs(stereo[2*i+1])) * master_;
+        const float ceiling = peak > 1 ? 1 / peak : 1;
+        effectsOutputGain_ = std::min(ceiling, effectsOutputGain_ + outputRelease_ * (1 - effectsOutputGain_));
+        stereo[2*i] *= effectsOutputGain_;
+        stereo[2*i+1] *= effectsOutputGain_;
+    }
+    for (auto& voice : voices_)
+        if (voice.bus != AudioBus::Effects&&voice.bus!=AudioBus::Cues&&voice.bus!=AudioBus::Ambience && (!paused_ || !voice.pauseWithWorld))
+            mixVoice(voice, stereo, frames);
     if (!paused_ && !musicPaused_) {
         size_t count = mixVoice(music_, stereo, frames);
         if (!music_.active && queuedMusic_.active) {
@@ -196,6 +255,7 @@ void AudioMixer::mix(float* stereo, size_t frames) {
     for (size_t i = 0; i < frames; ++i) {
         const float left = stereo[2 * i] * master_, right = stereo[2 * i + 1] * master_;
         const float peak = std::max(std::abs(left), std::abs(right));
+        stats_.inputPeak=std::max(stats_.inputPeak,peak);if(peak>1)++stats_.overloads;
         // Hard-clipping each channel flattened overlapping effects. Reduce the
         // combined signal instead, with one gain for both channels to preserve
         // their spatial balance. Recover across callback boundaries, independent
@@ -204,6 +264,8 @@ void AudioMixer::mix(float* stereo, size_t frames) {
         outputGain_ = std::min(ceiling, outputGain_ + outputRelease_ * (1 - outputGain_));
         stereo[2 * i] = std::clamp(left * outputGain_, -1.0f, 1.0f);
         stereo[2 * i + 1] = std::clamp(right * outputGain_, -1.0f, 1.0f);
+        stats_.minimumGain=std::min(stats_.minimumGain,outputGain_*effectsOutputGain_);
+        stats_.outputPeak=std::max(stats_.outputPeak,std::max(std::abs(stereo[2*i]),std::abs(stereo[2*i+1])));
     }
 }
 AudioDevice::~AudioDevice() { close(); }
@@ -255,6 +317,7 @@ void AudioDevice::close() {
 void AudioDevice::callback(void* userdata, Uint8* stream, int length) {
     if (length <= 0) return;
     auto& device = *static_cast<AudioDevice*>(userdata);
+    const auto started=SDL_GetPerformanceCounter();
     const auto format = device.output_;
     std::memset(stream, format.bitsPerSample == 8 ? 128 : 0, size_t(length));
     const size_t bytesPerFrame = size_t(format.channels * format.bitsPerSample / 8);
@@ -275,14 +338,16 @@ void AudioDevice::callback(void* userdata, Uint8* stream, int length) {
         }
         offset += count;
     }
+    device.mixer_.recordCallback(SDL_GetPerformanceCounter()-started);
 }
 uint64_t AudioDevice::play(AudioClipPtr clip, int priority, float gain, float pan, bool loop, bool pauseWithWorld, AudioBus bus) {
     if (!device_) return 0;
-    DeviceLock lock(device_);
+    mixer_.prepare(clip);const auto incoming=clip;AudioMixer::RetainedClips retired;
+    DeviceLock lock(device_);retired=mixer_.retainedClips();
     return mixer_.play(std::move(clip), priority, gain, pan, loop, pauseWithWorld, bus);
 }
 uint64_t AudioDevice::playNative(AudioClipPtr clip,uint32_t mask,int priority,unsigned volume,int pan,bool loop,bool pauseWithWorld,AudioBus bus){
-    if(!device_)return 0;DeviceLock lock(device_);return mixer_.playNative(std::move(clip),mask,priority,volume,pan,loop,pauseWithWorld,bus);
+    if(!device_)return 0;mixer_.prepare(clip);const auto incoming=clip;AudioMixer::RetainedClips retired;DeviceLock lock(device_);retired=mixer_.retainedClips();return mixer_.playNative(std::move(clip),mask,priority,volume,pan,loop,pauseWithWorld,bus);
 }
 void AudioDevice::updateNative(uint64_t handle,unsigned volume,int pan){DeviceLock lock(device_);mixer_.updateNative(handle,volume,pan);}
 void AudioDevice::updateNativeChannel(unsigned channel,unsigned volume,int pan){DeviceLock lock(device_);mixer_.updateNativeChannel(channel,volume,pan);}
@@ -291,24 +356,31 @@ bool AudioDevice::nativeChannelPlaying(unsigned channel)const{
     if(channel==0 || channel>16)return false;
     DeviceLock lock(device_);return mixer_.nativeChannelPlaying(channel);
 }
-void AudioDevice::stopNativeChannels(uint32_t mask){DeviceLock lock(device_);mixer_.stopNativeChannels(mask);}
-void AudioDevice::setMusicNativeChannel(bool native) { DeviceLock lock(device_);mixer_.setMusicNativeChannel(native); }
-void AudioDevice::playMusic(AudioClipPtr clip, float gain, bool loop) { DeviceLock lock(device_); mixer_.playMusic(std::move(clip), gain, loop); }
-void AudioDevice::queueMusic(AudioClipPtr clip, float gain) { DeviceLock lock(device_); mixer_.queueMusic(std::move(clip), gain); }
-void AudioDevice::playMusicOverlay(AudioClipPtr clip, float gain) { DeviceLock lock(device_); mixer_.playMusicOverlay(std::move(clip), gain); }
-void AudioDevice::stopMusicOverlay() { DeviceLock lock(device_); mixer_.stopMusicOverlay(); }
+void AudioDevice::stopNativeChannels(uint32_t mask) { AudioMixer::RetainedClips retired;DeviceLock lock(device_);retired=mixer_.retainedClips();mixer_.stopNativeChannels(mask); }
+void AudioDevice::setMusicNativeChannel(bool native) { AudioMixer::RetainedClips retired;DeviceLock lock(device_);retired=mixer_.retainedClips();mixer_.setMusicNativeChannel(native); }
+void AudioDevice::playMusic(AudioClipPtr clip, float gain, bool loop) { mixer_.prepare(clip);const auto incoming=clip;AudioMixer::RetainedClips retired;DeviceLock lock(device_);retired=mixer_.retainedClips();mixer_.playMusic(std::move(clip), gain, loop); }
+void AudioDevice::queueMusic(AudioClipPtr clip, float gain) { mixer_.prepare(clip);const auto incoming=clip;AudioMixer::RetainedClips retired;DeviceLock lock(device_);retired=mixer_.retainedClips();mixer_.queueMusic(std::move(clip), gain); }
+void AudioDevice::playMusicOverlay(AudioClipPtr clip, float gain) { mixer_.prepare(clip);const auto incoming=clip;AudioMixer::RetainedClips retired;DeviceLock lock(device_);retired=mixer_.retainedClips();mixer_.playMusicOverlay(std::move(clip), gain); }
+void AudioDevice::stopMusicOverlay() { AudioMixer::RetainedClips retired;DeviceLock lock(device_);retired=mixer_.retainedClips();mixer_.stopMusicOverlay(); }
 AudioMixer::MusicState AudioDevice::musicState() const { DeviceLock lock(device_); return mixer_.musicState(); }
 bool AudioDevice::isPlaying(uint64_t handle) const { DeviceLock lock(device_); return mixer_.isPlaying(handle); }
 std::optional<double> AudioDevice::playbackMilliseconds(uint64_t handle) const { DeviceLock lock(device_); return mixer_.playbackMilliseconds(handle); }
 void AudioDevice::update(uint64_t handle, float gain, float pan) { DeviceLock lock(device_); mixer_.update(handle, gain, pan); }
-void AudioDevice::stopEffects(uint64_t preserveHandle) { DeviceLock lock(device_); mixer_.stopEffects(preserveHandle); }
-void AudioDevice::stop(uint64_t handle) { DeviceLock lock(device_); mixer_.stop(handle); }
-void AudioDevice::stopMusic() { DeviceLock lock(device_); mixer_.stopMusic(); }
-void AudioDevice::stopAll() { DeviceLock lock(device_); mixer_.stopAll(); }
+void AudioDevice::stopEffects(uint64_t preserveHandle) { AudioMixer::RetainedClips retired;DeviceLock lock(device_);retired=mixer_.retainedClips();mixer_.stopEffects(preserveHandle); }
+void AudioDevice::stop(uint64_t handle) { AudioMixer::RetainedClips retired;DeviceLock lock(device_);retired=mixer_.retainedClips();mixer_.stop(handle); }
+void AudioDevice::stopMusic() { AudioMixer::RetainedClips retired;DeviceLock lock(device_);retired=mixer_.retainedClips();mixer_.stopMusic(); }
+void AudioDevice::stopAll() { AudioMixer::RetainedClips retired;DeviceLock lock(device_);retired=mixer_.retainedClips();mixer_.stopAll(); }
 void AudioDevice::setPaused(bool paused) { DeviceLock lock(device_); mixer_.setPaused(paused); }
 void AudioDevice::setMusicPaused(bool paused) { DeviceLock lock(device_); mixer_.setMusicPaused(paused); }
 void AudioDevice::setMasterVolume(float gain) { DeviceLock lock(device_); mixer_.setMasterVolume(gain); }
 void AudioDevice::setEffectsVolume(float gain) { DeviceLock lock(device_); mixer_.setEffectsVolume(gain); }
 void AudioDevice::setVoicesVolume(float gain) { DeviceLock lock(device_); mixer_.setVoicesVolume(gain); }
 void AudioDevice::setMusicVolume(float gain) { DeviceLock lock(device_); mixer_.setMusicVolume(gain); }
+void AudioDevice::collectRetired(){AudioMixer::RetainedClips retired;DeviceLock lock(device_);retired=mixer_.retainedClips();mixer_.collectRetired();}
+void AudioDevice::configureMix(AudioMixSettings settings){
+    AudioMixer::RetainedClips clips;{DeviceLock lock(device_);clips=mixer_.retainedClips();}
+    if(settings.highQuality)for(const auto&clip:clips)mixer_.prepare(clip,true);
+    DeviceLock lock(device_);mixer_.configureMix(settings);
+}
+AudioStatistics AudioDevice::statistics()const{DeviceLock lock(device_);return mixer_.statistics();}
 } // namespace vyruz

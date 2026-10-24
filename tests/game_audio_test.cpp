@@ -25,6 +25,19 @@ static TextNode value(std::string key,std::string text){TextNode n;n.kind=TextKi
 static TextNode block(std::string key,std::vector<TextNode> fields,std::string type={}){
     TextNode n;n.kind=TextKind::Block;n.key=std::move(key);n.children=std::move(fields);if(!type.empty())n.arguments={std::move(type)};return n;
 }
+static void voiceType(){
+    GameAudio audio;SceneContent scene;std::string error;
+    ContentReader read=[](const std::string&,std::vector<uint8_t>&out){out=wave(48000);return true;};
+    check(audio.device().open(error));check(audio.load(scene,read,"ENGLISH",error));
+    std::string clipError;auto clip=makeAudioClip(Wave{48000,1,8,std::vector<uint8_t>(48000,144)},clipError);
+    audio.device().playMusic(clip);const auto serial=audio.device().musicState().serial;
+    auto cue=audio.device().playNative(clip,4,191,65535,0,true,true,AudioBus::Cues);
+    check(audio.setVoiceLanguage(read,"FRENCH",error)&&audio.voiceLanguage()=="FRENCH");
+    check(audio.device().musicState().serial==serial&&audio.device().isPlaying(cue));
+    ContentReader missing=[](const std::string&,std::vector<uint8_t>&){return false;};
+    check(!audio.setVoiceLanguage(missing,"ENGLISH",error)&&audio.voiceLanguage()=="FRENCH");
+    check(audio.device().musicState().serial==serial&&audio.device().isPlaying(cue));
+}
 static void transitionClips(){
     GameAudio audio;SceneContent scene;std::string error;size_t reads=0;
     ContentReader reader=[&](const std::string&,std::vector<uint8_t>& out){++reads;out=wave(48000);return true;};
@@ -114,6 +127,7 @@ static void weaponClips(GameAudio& audio,const ContentReader& reader,size_t& rea
     }
 }
 int main(){try{
+ SDL_setenv("SDL_AUDIODRIVER","dummy",1);voiceType();
     const auto musicDir=hostTempDirectory("vyruz-music-playlist-");
     {
     SDL_setenv("SDL_AUDIODRIVER","dummy",0);

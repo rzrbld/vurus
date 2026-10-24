@@ -605,7 +605,7 @@ bool loadLevelData(App& a, const std::string& path,const vyruz::SavedLevel* save
     }
     if(a.audio.device().available()) {
         std::string audioError;
-        a.audio.load(a.content,[&a](const auto& name,auto& bytes){return readLoadingResource(a,name,bytes);},a.audioLanguage,audioError,a.world.nativeTileCatalog());
+        a.audio.load(a.content,[&a](const auto& name,auto& bytes){return readLoadingResource(a,name,bytes);},vyruz::voiceLanguageName(a.options,a.audioLanguage=="FRENCH"),audioError,a.world.nativeTileCatalog());
         for(const auto& diagnostic:a.audio.diagnostics())std::fprintf(stderr,"audio: %s\n",diagnostic.c_str());
     }
     showLoadingProgress(a,1,1);
@@ -1447,6 +1447,19 @@ void presentApplication(App& a) {
         char storage[96];std::snprintf(storage,sizeof(storage),"ROW DATA %.1f MIB (EXCLUDES DYNAMIC DATA)",
             double(actors.size()*sizeof(vyruz::ActorState)+a.content.objects.size()*sizeof(vyruz::ObjectPlacement))/(1024*1024));
         a.debugMemoryText.push_back(storage);
+        const auto audio=a.audio.device().statistics();
+        unsigned playing=0;for(auto n:audio.active)playing+=n;
+        char sound[128];std::snprintf(sound,sizeof(sound),"AUDIO %u PLAYING  DROP %llu  STEAL %llu  UNDERRUN %llu",playing,
+            (unsigned long long)audio.rejected,(unsigned long long)audio.stolen,(unsigned long long)audio.underruns);
+        a.debugMemoryText.push_back(sound);
+        std::snprintf(sound,sizeof(sound),"FX %u  CUE %u  AMBIENT %u  VOICE %u  MUSIC %u",audio.active[0],audio.active[3],audio.active[4],audio.active[1],audio.active[6]);
+        a.debugMemoryText.push_back(sound);
+        std::snprintf(sound,sizeof(sound),"MIX IN %.2f  OUT %.2f  GAIN %.2f  OVER %llu",audio.inputPeak,audio.outputPeak,audio.minimumGain,(unsigned long long)audio.overloads);
+        a.debugMemoryText.push_back(sound);
+        const double frequency=double(SDL_GetPerformanceFrequency());
+        std::snprintf(sound,sizeof(sound),"PEAK %.3f  CLIP %llu  AUDIO AVG/MAX %.2f/%.2f MS",audio.outputPeak,
+            (unsigned long long)audio.clipped,audio.callbacks?audio.callbackTicks*1000./(frequency*audio.callbacks):0.,audio.maxCallbackTicks*1000./frequency);
+        a.debugMemoryText.push_back(sound);
         }
     }
     if(!a.menu.commanderScreen() && (debugInfo || a.options.fpsCounter)){
@@ -1756,7 +1769,7 @@ int runApplication(int argc, char** argv, BenchmarkLaunch& benchmark, bool retur
     bool checkData=false,checkAllData=false,debugEnabled=false;
     std::string levelPath = "Underground\\T1U1.3DG";
     bool mute=false,noMusic=false;float volume=.7f;
-    std::string musicDir,audioLanguage="ENGLISH";int musicTrack=2,musicTheme=1;bool musicTrackExplicit=false;
+    std::string musicDir,audioLanguage="ENGLISH";int musicTrack=2,musicTheme=1;bool musicTrackExplicit=false,audioLanguageExplicit=false;
     std::string controllerMap;
     std::string shotPath,savePath=defaultSavePath(),loadPath,writePath;
     bool explicitSavePath=false;
@@ -1795,7 +1808,7 @@ int runApplication(int argc, char** argv, BenchmarkLaunch& benchmark, bool retur
             if(!std::isfinite(volume)||volume<0||volume>1||end==argv[i]||*end){std::fprintf(stderr,"--volume must be 0..1\n");return 1;}
         }
         else if (!std::strcmp(argv[i], "--audio-language") && i+1<argc){
-            audioLanguage=levelKey(argv[++i]);
+            audioLanguage=levelKey(argv[++i]);audioLanguageExplicit=true;
             if(audioLanguage!="ENGLISH"&&audioLanguage!="FRENCH"){std::fprintf(stderr,"--audio-language expects english or french\n");return 1;}
         }
         else if (!std::strcmp(argv[i], "--save-file") && i+1<argc){savePath=argv[++i];explicitSavePath=true;}
@@ -1921,6 +1934,7 @@ int runApplication(int argc, char** argv, BenchmarkLaunch& benchmark, bool retur
     a.savePath=loadPath.empty()?savePath:loadPath;
     a.saveHistory=!explicitSavePath && loadPath.empty();
     a.audioLanguage=audioLanguage;
+    if(audioLanguageExplicit)a.options.voiceLanguage=audioLanguage=="FRENCH"?2:1;
     a.forcedDir = forcedDir;
     a.forcedStep = forcedStep;
     std::printf("data dir: %s (rsc=%s)\n", dataDir.c_str(), a.vfs.hasRsc() ? "yes" : "no");

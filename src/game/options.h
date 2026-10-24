@@ -37,6 +37,16 @@ struct GameOptions {
     bool menuSounds = true; // Menu hover/selection cues; independent of game FX.
     float effectsVolume = 1.f, voicesVolume = 1.f, musicVolume = 1.f;
     int audioBits = 32, audioRate = 48000, audioChannels = 2;
+    int voiceLanguage=0; // 0 follows startup language; native choices1 English,2 French.
+    bool balancedAudio=true,sceneAudio=true;
+    // The filtered path is measured on desktop; retain the light path by default
+    // on handheld builds until their callback budget has been validated.
+#if VYRUZ_PORTMASTER
+    bool qualityResampling=false;
+#else
+    bool qualityResampling=true;
+#endif
+    float ambienceVolume=.5f,audioDucking=.5f,audioHeadroom=.7f;
     std::string playerName = "Player";
     // Stable save directory identity; empty preserves legacy name-based storage.
     std::string saveProfile;
@@ -53,6 +63,9 @@ struct GameOptions {
     int joystickDeadzone = 22; // Percent; defaults retain the accepted controller response.
     bool operator==(const GameOptions&) const = default;
 };
+inline const char* voiceLanguageName(const GameOptions& options,bool frenchFallback=false) {
+    return options.voiceLanguage==2||(options.voiceLanguage==0&&frenchFallback)?"FRENCH":"ENGLISH";
+}
 bool validateOptions(const GameOptions& options, std::string& error);
 // Missing files succeed without changing options; invalid files fail atomically.
 // Known keys are strict; unknown keys are ignored for forward compatibility.

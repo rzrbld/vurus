@@ -10,6 +10,9 @@ struct ImportProgress {
     ImportStage stage=ImportStage::Checking;
     std::string item;
     uint64_t completed=0,total=0;
+    // Full import work: copied payload plus verification reads. Zero means the
+    // total is not yet known (discovery, cached launch or intro-only backfill).
+    uint64_t overallCompleted=0,overallTotal=0;
 };
 // Called on the importer thread; return false to cancel before publication.
 using ImportProgressCallback=std::function<bool(const ImportProgress&)>;

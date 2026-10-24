@@ -367,7 +367,19 @@ bool verifyImportedData(const std::string& directory,std::string& error,const Im
 std::string defaultImportRoot(const std::string& executableDirectory){
     return (fs::path(executableDirectory)/"data").string();
 }
-bool prepareData(const std::string& input,const std::string& cacheRoot,DataLocation& result,std::string& error,const ImportProgressCallback& progress){
+bool prepareData(const std::string& input,const std::string& cacheRoot,DataLocation& result,std::string& error,const ImportProgressCallback& notify){
+    uint64_t overallDone=0,overallTotal=0,previous=0;std::string task;
+    ImportStage taskStage=ImportStage::Checking;
+    const ImportProgressCallback progress=[&](const ImportProgress& p){
+        if(p.total){
+            if(task!=p.item||taskStage!=p.stage){task=p.item;taskStage=p.stage;previous=0;}
+            const auto current=std::min(p.completed,p.total);
+            if(current>=previous)overallDone+=current-previous;
+            previous=current;
+        }
+        auto next=p;next.overallCompleted=std::min(overallDone,overallTotal);next.overallTotal=overallTotal;
+        return !notify||notify(next);
+    };
     result={};error.clear();fs::path temporary;std::vector<fs::path> receiptTemps;std::unique_ptr<CacheLock> lock;
     try {
         report(progress,ImportStage::Checking,"Looking for game resources");
@@ -436,6 +448,9 @@ bool prepareData(const std::string& input,const std::string& cacheRoot,DataLocat
             }
             if(disc.tracks.size()>1){const auto bytes=fs::file_size(disc.image);require(bytes%2352==0,"BIN ends in a partial audio sector");
                 for(size_t i=1;i<disc.tracks.size();++i){const auto start=disc.tracks[i].start*2352,end=i+1<disc.tracks.size()?disc.tracks[i+1].start*2352:bytes;require(start<end&&end<=bytes&&end-start<=UINT32_MAX-36,"Invalid CUE audio extent");required+=end-start+44;}}
+            // Copy callbacks count CD payload, while verification also reads
+            // each generated44-byte WAV header. Count both passes exactly.
+            overallTotal=required*2-(disc.tracks.size()>1?44*(disc.tracks.size()-1):0);
             checkSpace(cache,required);
             temporary=cache/(".import-"+key+"-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
             require(fs::create_directory(temporary),"Cannot create import staging directory");

@@ -1,5 +1,6 @@
 #pragma once
 #include "audio/mixer.h"
+#include "audio/native_audio.h"
 #include "audio/voice_schedule.h"
 #include "audio/music_playback.h"
 #include "audio/input_commentary_native.h"
@@ -20,8 +21,13 @@ struct NativeTileBodyCatalog;
 class GameAudio {
 public:
     AudioDevice& device() { return device_; }
+    void configureMix(AudioMixSettings settings,bool sceneAware=true) {
+        balanced_=settings.balanced;sceneAware_=settings.balanced&&sceneAware;device_.configureMix(settings);
+    }
     bool load(const SceneContent&, const ContentReader&, const std::string& language, std::string& error,const NativeTileBodyCatalog* terrain=nullptr,const std::string& sharedSampleBank={});
     void reset();
+    const std::string& voiceLanguage() const { return language_; }
+    bool setVoiceLanguage(const ContentReader&,const std::string&,std::string& error);
     void consume(GameWorld&, const SceneContent&, const std::vector<SceneAudioCue>&);
     void cue(const std::string& filename, bool voice=false);
     void briefingBip(); // Original428690 mask/priority, including its silent invalid channel.
@@ -53,6 +59,10 @@ private:
     uint64_t raw(const std::string&,uint32_t mask,int priority,bool loop=false,bool pause=true,AudioBus bus=AudioBus::Effects);
     void explicitSample(const std::string&,unsigned channel);
     void consumeWeapons(const GameWorld&,const SceneContent&);
+    std::pair<unsigned,int> spatial(NativeAudioPosition source,NativeAudioPosition listener) const;
+    struct WeaponSample {size_t actor;NativeAudioPosition source;bool follows;};
+    std::map<uint64_t,WeaponSample> weaponSamples_;
+    bool balanced_=false,sceneAware_=false;
     AudioDevice device_;
     MusicPlayback music_{device_};
     NativeShieldAlarm shieldAlarm_;

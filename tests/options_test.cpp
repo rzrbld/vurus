@@ -39,7 +39,7 @@ int main() {
     GameOptions duplicate;assert(!loadOptions(path.string(),duplicate,error));
     options.windowMode=3;options.width=1280;options.height=800;options.gamma=0;options.spriteFiltering=2;options.hudAspect=11;options.hudLanguage=2;
     options.fpsCounter=true;options.vsync=false;options.frameCap=30;
-    options.fxaa=options.bloom=options.sharpen=true;options.crt=true;options.crtRetro=true;options.crtBright=true;options.vignette=false;options.shadows=false;options.reactorFx=false;options.soundFx=false;options.music=false;options.menuSounds=false;
+    options.fxaa=options.bloom=options.sharpen=true;options.crt=true;options.crtRetro=true;options.crtBright=true;options.vignette=false;options.shadows=false;options.reactorFx=false;options.soundFx=false;options.music=false;options.menuSounds=false;options.balancedAudio=false;options.sceneAudio=false;options.qualityResampling=false;options.voiceLanguage=2;options.ambienceVolume=.3f;options.audioDucking=.8f;options.audioHeadroom=.55f;
     options.effectsVolume=.375f;options.voicesVolume=.125f;options.musicVolume=.875f;
     options.audioBits=8;options.audioRate=11025;options.audioChannels=1;
     options.crosshair=false;options.aimAssist=4;options.playerName="Pilot \"One\" \\ = #";options.difficulty=3;
@@ -67,7 +67,7 @@ int main() {
         "video.width=800px\n", "video.width=999999999999999999999\n",
         "video.gamma=1\nvideo.gamma=2\n", "version=2\n",
         "audio.effects=true\n", "audio.menu_sounds=2\n", "audio.menu_sounds=true\n", "audio.menu_sounds=0\naudio.menu_sounds=1\n", "audio.rate=44100\n", "audio.bits=24\n",
-        "audio.channels=0\n", "session.difficulty=4\n", "session.name=unquoted\n",
+        "audio.fx_mix=0.1\n", "audio.ambience=nan\n", "audio.ducking=1.1\n", "audio.resampling=2\n", "audio.balanced_mix=2\n", "audio.voice_type=3\n", "audio.voice_type=-1\n", "audio.channels=0\n", "session.difficulty=4\n", "session.name=unquoted\n",
         "session.name=\"ok\" junk\n", "session.name=\"unfinished\n", "session.name=\"\"\n",
         "session.name=\"   \"\n", "key.forward=41\n", "key.forward=512\n",
         "key.forward=22\n", "controller.fire=1\n", "controller.fire=6\n",
@@ -86,6 +86,7 @@ int main() {
     }
     write(path,"version=1\naudio.effects=1\n");loaded=original;
     assert(loadOptions(path.string(),loaded,error)&&loaded.crosshair&&loaded.menuSounds&&loaded.hudAspect==0&&loaded.windowMode==0);
+    assert(original.voiceLanguage==0&&std::string(voiceLanguageName(original,true))=="FRENCH");
     // Legacy configs keep their existing folder; display renames retain it.
     write(path,"session.name=\"Old Pilot\"\n");loaded=original;
     assert(loadOptions(path.string(),loaded,error)&&loaded.storageProfile()=="Old Pilot");

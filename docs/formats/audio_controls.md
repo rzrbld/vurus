@@ -83,3 +83,12 @@ Shield; Energy is only an alive guard there. The actual voice loader requests
 48sounds and leaves slot25unwritten. Neither language's NRJ recording has an
 identical decoded PCM alias among126standalone WAVs. NRJ-LOW appears unused in
 this executable; no supported Energy threshold was established.
+
+## Scene mix and Audio options
+
+The requested [balanced scene adapter](audio_pipeline.md) retains gameplay event
+and native helper rules while adding output roles, headroom, smooth positioning,
+selective ducking, filtered resampling and debug diagnostics. The original Audio
+menu hierarchy and separate Music/FX/Voices volumes drive the corresponding
+levels; added controls live under Advanced. Menu sounds stays on the Audio root.
+Voice type selects English/French gameplay speech independently of HUD language.

@@ -52,3 +52,14 @@ sample-bank selection follows [the existing bank rules](animation_sample_banks.m
 
 The port-only [Debug Commander](../testing_debug_menu.md) presentation and
 main-menu-style top-level Options spacing are independent of these confirmations.
+
+## Audio options (2026-10-25)
+
+Audio uses the original Music and combined Sound FX, Voices hierarchy, separate
+0–100% Tune Volume pages and English/French Voice type. Disabled sources gate
+their volume/type entries. Volume pages retain five blank rows and Back, with
+a 20-segment text slider; Escape/Back returns to the invoking row. The accepted
+32-bit/48 kHz output choices remain, and Advanced contains the added Linux mixer
+controls. Original callbacks and scoped App checks are recorded in
+`work/quirk-audit/audio-menu-native-20261024/README.md`; the
+[audio pipeline contract](audio_pipeline.md) describes control behavior.

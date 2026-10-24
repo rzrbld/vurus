@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cmath>
 #include <memory>
+#include <map>
 #include <optional>
 #include <string>
 #include <SDL2/SDL.h>
@@ -17,7 +18,19 @@ using AudioClipPtr = std::shared_ptr<const AudioClip>;
 AudioClipPtr makeAudioClip(Wave wave, std::string& error);
 
 // Separate native FX/voice controls without stopping playback or its source clock.
-enum class AudioBus { Effects, Voices, Presentation };
+enum class AudioBus { Effects, Voices, Presentation, Cues, Ambience, Ui, Music };
+
+struct AudioMixSettings {
+    bool balanced=false, highQuality=false;
+    float ambience=.5f, ducking=.5f, headroom=.7f;
+};
+struct AudioStatistics {
+    std::array<unsigned,7> active{}; // buses above, then music
+    uint64_t requests=0,rejected=0,stolen=0,underruns=0,overloads=0,clipped=0,repetitions=0;
+    float inputPeak=0,outputPeak=0,minimumGain=1;
+    uint64_t callbacks=0,callbackTicks=0,maxCallbackTicks=0;
+};
+struct AudioResampleKernel;
 
 class AudioMixer {
 public:
@@ -55,6 +68,13 @@ public:
     void setSampleRate(int rate);
     void mix(float* stereo, size_t frames);
     size_t activeVoices() const;
+    void configureMix(AudioMixSettings);
+    void prepare(const AudioClipPtr&,bool force=false); // main thread only; builds cached filters
+    AudioStatistics statistics() const;
+    void recordCallback(uint64_t ticks);
+    void collectRetired(); // main thread; caller retains ownership until unlock
+    using RetainedClips=std::array<AudioClipPtr,MaxVoices+8+3>;
+    RetainedClips retainedClips() const;
 private:
     struct Voice {
         AudioClipPtr clip;
@@ -68,19 +88,42 @@ private:
         unsigned nativeVolume=65535;
         int nativePan=0;
         uint64_t streamOffset=0;
+        std::shared_ptr<const AudioResampleKernel> kernel;
+        float left=0,right=0,fade=1;
+        bool retiring=false;
+        float fadeSeconds=.001f;
     };
+    void retire(Voice&,float seconds=.003f);
+    void initializeVoice(Voice&);
+    std::shared_ptr<const AudioResampleKernel> kernelFor(const AudioClipPtr&);
+    void mixBalanced(float*,size_t);
     size_t mixVoice(Voice& voice, float* stereo, size_t frames);
     std::array<Voice, MaxVoices> voices_{};
+    std::array<Voice,8> tails_{};
     Voice music_, queuedMusic_, musicOverlay_;
     uint64_t musicSerial_ = 0;
     uint64_t nextHandle_ = 1;
     float master_ = 1, effects_ = 1, voicesGain_ = 1, musicGain_ = 1;
+    // Effects have their own peak control before music/speech are added. A loud
+    // effect must not impose its full gain reduction on the other buses.
+    float effectsOutputGain_ = 1;
     // Stereo-linked output peak control: immediate attack, 80ms recovery.
     // No look-ahead/delay; source clocks and ordinary unity-gain mixes stay intact.
     float outputGain_ = 1;
     float outputRelease_ = 1 - std::exp(-1.0f / (SampleRate * .080f));
     int sampleRate_ = SampleRate;
     bool paused_ = false, musicPaused_ = false, musicNativeChannel_ = false;
+    AudioMixSettings mixSettings_;
+    AudioStatistics stats_;
+    std::map<unsigned,std::shared_ptr<const AudioResampleKernel>> kernels_;
+    float ramp_=1-std::exp(-1.f/(SampleRate*.005f));
+    float duckAttack_=1-std::exp(-1.f/(SampleRate*.008f));
+    float duckRelease_=1-std::exp(-1.f/(SampleRate*.200f));
+    float dialogueDuck_=0,cueDuck_=0;
+    float pauseEnvelope_=1,musicEnvelope_=1;
+    std::array<std::array<float,2>,7> lastWorld_{};
+    float ambienceSmooth_=.5f,headroomSmooth_=.7f,duckStrengthSmooth_=.5f;
+    float masterSmooth_=1,effectsSmooth_=1,voicesSmooth_=1,musicSmooth_=1;
 };
 
 // Main-thread operations lock the callback. AudioMixer itself is deliberately
@@ -133,7 +176,11 @@ public:
     void setEffectsVolume(float gain);
     void setVoicesVolume(float gain);
     void setMusicVolume(float gain);
+    void configureMix(AudioMixSettings);
+    AudioStatistics statistics() const;
+    void collectRetired();
 private:
+    friend struct AudioPipelineAuditAccess; // opt-in deterministic resource captures
     static void callback(void* userdata, Uint8* stream, int length);
     SDL_AudioDeviceID device_ = 0;
     bool ownsAudio_ = false;

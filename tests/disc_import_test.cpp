@@ -90,6 +90,8 @@ void chunkedImportChecks(const fs::path& root){
   assert(read(fs::path(location.directory)/"Vz-slide.rsc")==archive);
   assert(read(fs::path(location.directory)/"Intro.avi")==movie);
   size_t checkpoints=0;for(const auto&p:progress)if(p.stage==vyruz::ImportStage::Resources&&p.completed==65536)++checkpoints;
+  assert(progress.back().overallTotal==2*(archive.size()*2+movie.size()));
+  assert(progress.back().overallCompleted==progress.back().overallTotal);
   assert(checkpoints==3); // both archives and the partial-final-sector movie
   const auto canceled=dir/"canceled";
   assert(!vyruz::prepareData(source.string(),canceled.string(),location,error,[](const auto&p){return p.stage!=vyruz::ImportStage::Resources||p.completed<65536;}));
@@ -200,6 +202,13 @@ int main(){try{
  bool resources=false,music=false,finished=false;
  for(const auto& p:progress){assert(p.completed<=p.total);resources|=p.stage==vyruz::ImportStage::Resources&&p.total&&p.completed==p.total;music|=p.stage==vyruz::ImportStage::Music&&p.total&&p.completed==p.total;finished|=p.stage==vyruz::ImportStage::Finishing;}
  assert(resources&&music&&finished);
+ uint64_t previousOverall=0,knownTotal=0;
+ for(const auto& p:progress)if(p.overallTotal){
+  assert(!knownTotal||knownTotal==p.overallTotal);knownTotal=p.overallTotal;
+  assert(p.overallCompleted>=previousOverall&&p.overallCompleted<=knownTotal);previousOverall=p.overallCompleted;
+ }
+ assert(knownTotal&&previousOverall==knownTotal); // CD WAV headers included only in verification.
+
  // Resource cancellation leaves neither a selected cache nor staged files.
  const auto cancelResources=root/"cancel-resources";
  assert(!vyruz::prepareData((root/"cue").string(),cancelResources.string(),location,error,[](const auto& p){return !(p.stage==vyruz::ImportStage::Resources&&p.completed>0);}));

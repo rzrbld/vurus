@@ -27,5 +27,10 @@ int main(){
  order.clear();need(order.size()==0&&order.nextAllowed()==20,"clear retains native global refractory");
  order.enqueue("e",1,0,0,100);need(order.advance(1).empty(),"clear does not bypass cooldown");
  need(order.advance(20).empty(),"blocked postclear event also oneattempt");
+ VoiceSchedule language;
+ language.enqueue("english/xtc",0,3000,2000,0);language.remapPrefix("english/","french/");
+ need(language.advance(2999).empty(),"voice pack change preserves pending delay");
+ need(language.advance(3000)==std::vector<std::string>{"french/xtc"}&&language.nextAllowed()==5000,"voice pack remaps without changing timing");
+ need(!language.enqueue("french/xtc",3001,0,0,0),"voice pack retains duplicate suppression");
  std::cout<<"voice schedule tests passed\n";
 }

@@ -1,4 +1,5 @@
 #include "audio/mixer.h"
+#include "audio/resample_kernel.h"
 #include "audio/music_playback.h"
 #include "host_temp.h"
 #include <chrono>
@@ -22,14 +23,14 @@ static void waitFrame(WavStream& s,uint64_t frame){
 }
 int main(){
  const auto path=std::filesystem::temp_directory_path()/("vurus-stream-"+std::to_string(getpid())+".wav");
- for(auto bits:{8,16})for(auto channels:{1,2}){
+ for(bool quality:{false,true})for(auto bits:{8,16})for(auto channels:{1,2}){
   Wave wave;wave.bitsPerSample=bits;wave.channels=channels;wave.sampleRate=44100;
   wave.pcm.resize(70000*channels*(bits/8));for(size_t i=0;i<wave.pcm.size();++i)wave.pcm[i]=uint8_t(i*13+41);
   write(path,wave);std::string error;auto resident=makeAudioClip(wave,error),stream=streamed(path);
   need(stream->wave.pcm.empty()&&stream->stream->bufferBytes()==65536u*channels*(bits/8),"bounded PCM independent of file size");
-  AudioMixer a,b;a.playMusic(resident,.2f,true);b.playMusic(stream,.2f,true);
+  AudioMixer a,b;a.configureMix({false,quality});b.configureMix({false,quality});a.playMusic(resident,.2f,true);b.playMusic(stream,.2f,true);
   for(size_t frame=0;frame<180000;frame+=256){
-   waitFrame(*stream->stream,uint64_t((frame+256)*44100./48000)+1);
+   waitFrame(*stream->stream,uint64_t((frame+256)*44100./48000)+(quality?AudioResampleKernel::MaxTaps/2+2:1));
    float x[512],y[512];a.mix(x,256);b.mix(y,256);
    for(int i=0;i<512;++i)need(x[i]==y[i],"stream/resident PCM differ across refill or loop");
    if(frame==512){a.setPaused(true);b.setPaused(true);a.mix(x,256);b.mix(y,256);for(int i=0;i<512;++i)need(x[i]==0&&y[i]==0,"pause silence");a.setPaused(false);b.setPaused(false);}

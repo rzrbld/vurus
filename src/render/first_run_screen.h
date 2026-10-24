@@ -13,40 +13,72 @@ namespace vyruz {
 // Asset-independent bootstrap UI: original fonts/art are not readable yet.
 class FirstRunScreen {
 public:
-    explicit FirstRunScreen(SDL_Renderer* renderer):renderer_(renderer){}
+    explicit FirstRunScreen(SDL_Renderer* renderer,const std::string& source={},const std::string& destination={})
+        :renderer_(renderer),source_(source),destination_(destination),started_(SDL_GetTicks64()){}
     void draw(const ImportProgress& progress,const std::string& error={},bool stopping=false) {
-        SDL_SetRenderDrawColor(renderer_,9,14,21,255);SDL_RenderClear(renderer_);
-        color(105,235,155);text("VURUS",48,42,4);
-        color(231,237,243);text(error.empty()?"PREPARING GAME FILES":"GAME FILES NOT READY",48,112,3);
+        color(9,15,14);SDL_RenderClear(renderer_);
+        gold();text("VURUS / FIRST RUN",24,32,2);
+        color(5,9,8);rect(36,106,584,296); // Modal shadow.
+        color(11,20,17);rect(28,98,584,296);
+        frame(28,98,584,296);
+        color(11,20,17);rect(154,96,332,20);
+        gold();text(error.empty()?" COPY / IMPORT GAME FILES ":" GAME FILES NOT READY ",166,99,2);
         if(!error.empty()) {
-            color(237,190,140);wrapped(error,48,172,58,8);
-            color(38,52,65);rect(40,420,300,40);rect(400,420,200,40);
-            color(183,196,207);text("ENTER / A: RETRY",48,432,2);text("ESC / B: EXIT",408,432,2);
+            wrapped(error,48,140,44,8);
+            button(40,420,300,"ENTER / A: RETRY");button(400,420,200,"ESC / B: EXIT");
         } else {
-            color(183,196,207);text("FIRST RUN COPIES RESOURCES AND CD MUSIC.",48,166,2);
-            text("YOUR ORIGINAL DISC IMAGE STAYS UNCHANGED.",48,190,2);
-            const char* phase=progress.stage==ImportStage::Resources?"EXTRACTING GAME RESOURCES":
-                progress.stage==ImportStage::Music?"RIPPING CD AUDIO":
-                progress.stage==ImportStage::Finishing?"FINISHING IMPORT":"CHECKING GAME RESOURCES";
-            color(105,235,155);text(stopping?"STOPPING SAFELY...":phase,48,238,2);
-            color(38,52,65);rect(48,272,704,24);
-            if(progress.total) {
-                const double fraction=std::clamp(double(progress.completed)/progress.total,0.,1.);
-                color(67,173,119);rect(48,272,int(704*fraction),24);
-                color(231,237,243);text(std::to_string(int(100*fraction))+"% OF FILE",48,314,2);
-            } else {
-                color(67,173,119);rect(48+(SDL_GetTicks()/12)%600,272,104,24);
-            }
-            color(183,196,207);wrapped(progress.item,48,350,58,2);
-            color(38,52,65);rect(40,420,stopping?520:240,40);
-            color(150,167,183);text(stopping?"WAITING FOR PARTIAL FILE CLEANUP":"ESC / B: CANCEL",48,432,2);
+            const char* phase=progress.stage==ImportStage::Resources?"COPYING RESOURCES":
+                progress.stage==ImportStage::Music?"COPYING CD MUSIC":
+                progress.stage==ImportStage::Finishing?"VERIFYING / SAVING":"CHECKING GAME FILES";
+            gold();text(stopping?"STOPPING SAFELY...":phase,48,130,2);
+            text(shortened(progress.item.empty()?"LOOKING FOR ORIGINAL GAME DATA":progress.item,44),48,154,2);
+            text("FROM: "+shortened(source_,38),48,181,2);
+            text("TO:   "+shortened(destination_,38),48,203,2);
+            bar("CURRENT TASK",progress.completed,progress.total,239,0);
+            bar("OVERALL",progress.overallCompleted,progress.overallTotal,295,9);
+            color(122,107,51);rect(32,345,576,1);
+            gold();text("TIME: "+elapsed(),48,362,2);
+            text(stopping?"CLEANING PARTIAL FILES":"ORIGINAL DISC UNCHANGED",258,362,2);
+            button(40,420,stopping?560:240,stopping?"WAITING FOR SAFE CLEANUP":"ESC / B: CANCEL");
         }
         SDL_RenderPresent(renderer_);
     }
 private:
     SDL_Renderer* renderer_;
+    std::string source_,destination_;
+    Uint64 started_;
     void color(Uint8 r,Uint8 g,Uint8 b){SDL_SetRenderDrawColor(renderer_,r,g,b,255);}
+    void gold(){color(235,173,45);}
     void rect(int x,int y,int w,int h){SDL_Rect r{x,y,w,h};SDL_RenderFillRect(renderer_,&r);}
+    void frame(int x,int y,int w,int h){
+        color(122,107,51);
+        for(int inset:{0,3}){SDL_Rect r{x+inset,y+inset,w-inset*2,h-inset*2};SDL_RenderDrawRect(renderer_,&r);}
+    }
+    void button(int x,int y,int w,const std::string& label){
+        color(31,43,31);rect(x,y,w,38);gold();text(label,x+8,y+12,2);
+    }
+    static std::string shortened(const std::string& value,size_t columns){
+        if(value.size()<=columns)return value;
+        const auto left=(columns-3)/2;return value.substr(0,left)+"..."+value.substr(value.size()-(columns-3-left));
+    }
+    std::string elapsed()const{
+        const auto seconds=(SDL_GetTicks64()-started_)/1000;
+        const auto two=[](Uint64 n){return (n<10?"0":"")+std::to_string(n);};
+        return two(seconds/3600)+":"+two(seconds/60%60)+":"+two(seconds%60);
+    }
+    void bar(const char* label,uint64_t done,uint64_t total,int y,int phase){
+        gold();text(label,48,y-16,2);
+        const double fraction=total?std::clamp(double(done)/total,0.,1.):0;
+        text(total?std::to_string(int(fraction*100))+"%":"...",548,y+3,2);
+        color(5,9,8);rect(48,y,482,20);
+        for(int segment=0;segment<60;++segment){
+            const int pulse=(int(SDL_GetTicks64()/70)+phase)%66;
+            const bool filled=total?segment<int(fraction*60):(segment>=pulse-6&&segment<pulse);
+            if(filled)gold();else color(47,58,33);
+            // Three separated strokes per cell resemble DOS shaded blocks.
+            for(int row=0;row<3;++row)rect(50+segment*8,y+3+row*5,5,3);
+        }
+    }
     // Independently authored five-pixel glyphs; no game assets or system fonts.
     static std::array<unsigned char,7> glyph(char c) {
         if(c>='a'&&c<='z')c-=32;
@@ -68,6 +100,7 @@ private:
         if(c>='A'&&c<='Z')return chars[c-'A'];
         if(c>='0'&&c<='9')return chars[26+c-'0'];
         switch(c){case '.':return {0,0,0,0,0,6,6};case ':':return {0,6,6,0,6,6,0};
+        case '\\':return {16,8,8,4,2,2,1};case '>':return {16,8,4,2,4,8,16};
         case '-':return {0,0,0,31,0,0,0};case '/':return {1,2,2,4,8,8,16};
         case '%':return {25,25,2,4,8,19,19};case '(':return {2,4,8,8,8,4,2};
         case ')':return {8,4,2,2,2,4,8};case '_':return {0,0,0,0,0,0,31};
@@ -119,11 +152,11 @@ inline bool prepareDataWithScreen(const std::string& input,const std::string& ca
         error=SDL_GetError();SDL_QuitSubSystem(subsystems);return false;
     }
     SDL_Window* window=SDL_CreateWindow("Vurus - preparing game files",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,
-        800,480,SDL_WINDOW_RESIZABLE|SDL_WINDOW_ALLOW_HIGHDPI);
+        800,600,SDL_WINDOW_RESIZABLE|SDL_WINDOW_ALLOW_HIGHDPI);
     SDL_Renderer* renderer=window?SDL_CreateRenderer(window,-1,SDL_RENDERER_ACCELERATED):nullptr;
     if(window&&!renderer)renderer=SDL_CreateRenderer(window,-1,SDL_RENDERER_SOFTWARE);
     if(!renderer){error=SDL_GetError();if(window)SDL_DestroyWindow(window);SDL_QuitSubSystem(subsystems);return false;}
-    SDL_RenderSetLogicalSize(renderer,800,480);FirstRunScreen screen(renderer);
+    SDL_RenderSetLogicalSize(renderer,640,480);FirstRunScreen screen(renderer,input,cacheRoot);
     const auto clicked=[&](const SDL_Event& e,int left,int right){
         if(e.type!=SDL_MOUSEBUTTONUP || e.button.button!=SDL_BUTTON_LEFT)return false;
         float x=0,y=0;SDL_RenderWindowToLogical(renderer,e.button.x,e.button.y,&x,&y);

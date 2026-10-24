@@ -70,11 +70,15 @@ bool WavStream::start(){
     worker_=std::thread([this]{
         while(!stop_.load(std::memory_order_acquire)){
             if(!fill())break;
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            std::unique_lock lock(wakeMutex_);
+            wake_.wait_for(lock,std::chrono::milliseconds(10),[this]{return stop_.load(std::memory_order_acquire);});
         }
     });return true;
 }
-WavStream::~WavStream(){stop_.store(true,std::memory_order_release);if(worker_.joinable())worker_.join();}
+WavStream::~WavStream(){
+    {std::lock_guard lock(wakeMutex_);stop_.store(true,std::memory_order_release);}
+    wake_.notify_one();if(worker_.joinable())worker_.join();
+}
 bool WavStream::fill(){
     auto write=produced_.load(std::memory_order_relaxed);
     const auto read=consumed_.load(std::memory_order_acquire);

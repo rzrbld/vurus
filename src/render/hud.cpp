@@ -751,6 +751,16 @@ void HudRenderer::drawMenu(Gfx& gfx,const MenuView& view,bool backgroundOnly) {
               list&&selected?std::max(available,width+1):available);
     }
     saveClip.reset();
+    if(view.page==MenuPage::Options&&view.optionVolume>=0){
+        const int percent=std::clamp(int(std::lround(view.optionVolume*100)),0,100);
+        write("Volume : "+std::to_string(percent)+"%",MenuView::VolumeLeft,130,0);
+        // Original421780/4221fd: twenty pipe segments, filled=floor(percent/5).
+        write("[",MenuView::VolumeLeft,185,1);
+        const float spacing=float(MenuView::VolumeRight-MenuView::VolumeLeft-24)/20;
+        for(int segment=0;segment<20;++segment)
+            write("|",MenuView::VolumeLeft+12+segment*spacing,185,segment<percent/5?1:0,spacing);
+        write("]",MenuView::VolumeRight-12,185,1);
+    }
     if(view.page==MenuPage::SavedSessions){
         // Reuse the original inventory/help arrows in the right gutter; they
         // indicate hidden saves only, never horizontal label overflow or Back.

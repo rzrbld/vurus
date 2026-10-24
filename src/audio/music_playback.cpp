@@ -10,7 +10,9 @@
 
 namespace vyruz {
 namespace {
-constexpr float MusicGain=.35f; // Existing accepted port bus gain.
+// The Music volume control is the source level. The former extra .35 trim
+// buried CD tracks beneath effects even with Music set to100%.
+constexpr float MusicGain=1.f;
 AudioClipPtr readMusic(const std::string& path,std::string& error) {
     auto stream=WavStream::open(path,error);if(!stream)return {};
     auto clip=std::make_shared<AudioClip>();clip->frames=stream->frames();
@@ -156,6 +158,7 @@ void MusicPlayback::synchronize(){
     if(enabled())request((index_+1)%paths_.size(),Request::Next);
 }
 void MusicPlayback::update(){
+    device_.collectRetired();
     if(!enabled())return;synchronize();
     if(!worker_||request_==Request::None)return;
     auto result=worker_->poll();if(!result||result->id!=requestId_)return;

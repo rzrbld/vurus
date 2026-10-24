@@ -14,6 +14,8 @@ public:
     std::string error;
     std::string optionTitle="Options";
     int optionRowHeight=30;
+    float optionVolume=-1; // Native-style0..100volume page; negative hides it.
+    static constexpr int VolumeLeft=270,VolumeRight=610,VolumeTop=150,VolumeBottom=205;
     std::vector<std::string> optionLabels;
     std::vector<std::string> optionHelp;
     std::vector<std::string> saveLabels,saveHelp;
