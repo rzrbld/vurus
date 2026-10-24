@@ -159,6 +159,9 @@ struct App {
     std::string savePreviewPath;
     bool restart = false;
     bool paused = false;
+    bool pauseFramePresented=false;
+    unsigned pauseRedrawFrames=0;
+    uint64_t pauseFrameRevision=0;
     vyruz::InventoryView inventory;
     vyruz::MenuView menu;
     bool menuPointerVisible=false;
@@ -1083,6 +1086,17 @@ void handleInput(App& a) {
     if(a.inputFocused&&a.controllerBlockedUntilNeutral&&a.controller.controlsNeutral())a.controllerBlockedUntilNeutral=false;
     SDL_Event ev;
     while (SDL_PollEvent(&ev)) {
+        // A paused window keeps its last presented image. Exposure/display
+        // changes and the diagnostic toggle require one fresh composition.
+        if(ev.type==SDL_WINDOWEVENT) {
+            // Resized/restored double buffers may acquire their new storage on
+            // the first swap. One following draw completes the new drawable.
+            const bool resized=ev.window.event==SDL_WINDOWEVENT_SIZE_CHANGED ||
+                ev.window.event==SDL_WINDOWEVENT_RESIZED || ev.window.event==SDL_WINDOWEVENT_RESTORED ||
+                ev.window.event==SDL_WINDOWEVENT_DISPLAY_CHANGED;
+            a.pauseRedrawFrames=std::max(a.pauseRedrawFrames,resized?2u:1u);
+        } else if(ev.type==SDL_KEYDOWN && ev.key.keysym.sym==SDLK_F1)
+            a.pauseRedrawFrames=std::max(a.pauseRedrawFrames,1u);
         if(a.menuExit) {
             if(ev.type==SDL_QUIT||ev.type==SDL_KEYDOWN||ev.type==SDL_MOUSEBUTTONDOWN||
                (ev.type==SDL_CONTROLLERBUTTONDOWN&&a.controller.owns(ev.cbutton.which)))a.quit=1;
@@ -1703,6 +1717,27 @@ void render(App& a,float alpha=1) {
     presentApplication(a);
 }
 
+bool ordinaryPause(const App& a) {
+    if(!a.paused || !a.haveLevel || !a.sessionStarted || !a.world.player().alive ||
+       a.menu.open() || a.inventory.open || a.presentation.open() || a.menuExit ||
+       a.world.endingRemainingMilliseconds()>0 || a.saveFuture.valid())return false;
+#if VYRUZ_GLES
+    if(a.savePreviewPromise || !a.savePreviewWritePath.empty())return false;
+#endif
+    return true;
+}
+
+bool renderApplicationFrame(App& a,float alpha=1,bool force=false) {
+    const bool paused=ordinaryPause(a);
+    if(!paused)a.pauseFramePresented=false;
+    if(paused && a.pauseFramePresented && !a.pauseRedrawFrames && !force &&
+       a.pauseFrameRevision==a.world.renderActorRevision())return false;
+    render(a,alpha);
+    a.pauseFramePresented=paused;if(a.pauseRedrawFrames)--a.pauseRedrawFrames;
+    a.pauseFrameRevision=a.world.renderActorRevision();
+    return true;
+}
+
 } // namespace
 
 struct BenchmarkLaunch {
@@ -2049,7 +2084,7 @@ int runApplication(int argc, char** argv, BenchmarkLaunch& benchmark, bool retur
     int previousRenderHz=-1;
     std::string lastTitle;
     std::vector<double> frameTimes,tickTimes,renderTimes,workTimes,warmupTimes,worldTimes,animationTimes;
-    int profileFrame=0,profileCatchups=0,profileDroppedTicks=0;
+    int profileFrame=0,profileCatchups=0,profileDroppedTicks=0,profilePresented=0,profilePauseReused=0;
     if(profileFrames) {
         frameTimes.reserve(profileFrames);tickTimes.reserve(profileFrames*2);
         renderTimes.reserve(profileFrames);workTimes.reserve(profileFrames);
@@ -2163,7 +2198,8 @@ int runApplication(int argc, char** argv, BenchmarkLaunch& benchmark, bool retur
         // this frame, so read its final pixels before any swap occurs.
         a.gfx.setSwapEnabled(shotPath.empty());
 #endif
-        render(a,shotPath.empty()?static_cast<float>(pendingTime/kMoveDt):1.f);
+        const bool presented=renderApplicationFrame(a,shotPath.empty()?static_cast<float>(pendingTime/kMoveDt):1.f,!shotPath.empty());
+        if(measuring){if(presented)++profilePresented;else ++profilePauseReused;}
         if(a.options.crt&&!a.gfx.crtEnabled()){a.options.crt=false;a.menu.error="CRT disabled: "+a.gfx.crtError();}
         if(a.options.smaa&&!a.gfx.smaaEnabled()){a.options.smaa=false;a.menu.error="SMAA unavailable; disabled for this run.";}
         if((a.options.fxaa||a.options.bloom||a.options.sharpen)&&!a.gfx.sceneEffectsEnabled()){a.options.fxaa=a.options.bloom=a.options.sharpen=false;a.menu.error="Scene effects unavailable; disabled for this run.";}
@@ -2186,7 +2222,12 @@ int runApplication(int argc, char** argv, BenchmarkLaunch& benchmark, bool retur
         // counts toward the absolute deadline. Zero skips only software pacing.
         if(!renderHzOverride)renderHz=a.options.frameCap;
         if(renderHz!=previousRenderHz){softwareDeadline=static_cast<double>(now);previousRenderHz=renderHz;}
-        if (renderHz>0 && !a.quit) {
+        if(ordinaryPause(a) && !a.quit) {
+            // NULL leaves the event queued for handleInput, preserving order.
+            // Keep audio/save service responsive without an uncapped busy loop.
+            SDL_WaitEventTimeout(nullptr,16);
+            softwareDeadline=static_cast<double>(SDL_GetPerformanceCounter());
+        } else if (renderHz>0 && !a.quit) {
             softwareDeadline+=static_cast<double>(timerFrequency)/renderHz;
             double counter=static_cast<double>(SDL_GetPerformanceCounter());
             // Absolute deadlines avoid adding render time to every frame.
@@ -2201,7 +2242,7 @@ int runApplication(int argc, char** argv, BenchmarkLaunch& benchmark, bool retur
             }
         }
         if(renderHz==0)softwareDeadline=static_cast<double>(SDL_GetPerformanceCounter());
-        recordDebugFrame(a,1000.0*(SDL_GetPerformanceCounter()-now)/timerFrequency);
+        if(presented)recordDebugFrame(a,1000.0*(SDL_GetPerformanceCounter()-now)/timerFrequency);
         if(profileFrames) {
             const double elapsed=1000.0*(SDL_GetPerformanceCounter()-now)/timerFrequency;
             if(measuring)frameTimes.push_back(elapsed);else warmupTimes.push_back(elapsed);
@@ -2222,6 +2263,7 @@ int runApplication(int argc, char** argv, BenchmarkLaunch& benchmark, bool retur
         report("simulation/input/animation/audio tick",tickTimes);
         report("World tick",worldTimes);report("scene/HUD animation tick",animationTimes);
         report("render/present",renderTimes);report("frame before software pacing",workTimes);
+        std::printf("profile presented=%d paused_frames_reused=%d\n",profilePresented,profilePauseReused);
         std::printf("profile level=%s objects=%zu actors=%zu resolution=%dx%d\n",a.content.mapPath.c_str(),a.content.objects.size(),a.world.actors().size(),a.options.width,a.options.height);
         const double budget=renderHz>0?1000.0/renderHz:std::numeric_limits<double>::infinity();
         const auto overruns=std::count_if(frameTimes.begin(),frameTimes.end(),[&](double ms){return ms>budget*1.5;});
