@@ -1,5 +1,6 @@
 #include "render/panel_help_native.h"
 #include "render/hud.h"
+#include "render/commander_ui.h"
 #include "render/menu_marquee.h"
 #include "assets/native_font_text.h"
 #include "render/level_map.h"
@@ -714,6 +715,7 @@ void HudRenderer::drawNameCaret(std::string_view label,float x,float y) {
 void HudRenderer::drawMenu(Gfx& gfx,const MenuView& view,bool backgroundOnly) {
     if(!view.open())return;
     if(view.debugScreen()){drawDebugMenu(gfx,view);return;}
+    if(view.page==MenuPage::Benchmark){drawBenchmarkMenu(gfx,view);return;}
     glDisable(GL_BLEND);sequence(gfx,menu_,4,0,0);glEnable(GL_BLEND);
     if(menuEffects_.takeLogo()) {
         // 421780 draws V-MENU6 at (0,0), with authored (-3,-13) offset
@@ -780,6 +782,35 @@ void HudRenderer::drawMenu(Gfx& gfx,const MenuView& view,bool backgroundOnly) {
         const float statusY=view.page==MenuPage::SavedSessions?335:view.page==MenuPage::Options?(rows.size()>8?385:335):view.paginated()?385:365;
         write(view.error,270,statusY,3);
     }
+}
+void HudRenderer::drawBenchmarkMenu(Gfx& gfx,const MenuView& view) {
+    gfx.clear(.035f,.06f,.055f);const CommanderUi ui{gfx,*this};
+    ui.text("VURUS / BENCHMARK",20,33,600,1.3f);
+    ui.box(12,72,316,410);ui.box(324,72,628,410);
+    ui.frame(12,72,316,410);ui.frame(324,72,628,410);
+    ui.text("RUN CONFIGURATION",26,94,275);
+    const auto rows=view.entries();
+    for(size_t i=0;i<rows.size();++i) {
+        const float y=view.rowBaseline(int(i));
+        if(int(i)==view.selected){ui.box(20,y-19,308,y+7,.22f,.25f,.10f);ui.box(20,y-19,23,y+7,.85f,.62f,.13f);}
+        ui.text(rows[i].label,26,y,265);ui.text(">",292,y,15);
+    }
+    if(view.selected==2) {
+        ui.text("LAST SAVED RESULTS",340,94,270);
+        ui.text("Open the most recent saved benchmark report.",340,128,264,1.15f,true);
+        ui.text(view.benchmarkLastInfo,340,218,264,1.05f,true);
+        ui.text("VIEW ONLY / NO NEW RUN",340,350,264,1.f);
+    }else{
+    const bool defaults=view.selected==0;
+    ui.text(defaults?"DEFAULT PRESET":"YOUR VIDEO SETTINGS",340,94,270);
+    ui.text(defaults?"The fixed reference preset for comparing systems.":"Use the video settings saved in Options.",340,128,264,1.15f,true);
+    ui.text(defaults?"640 X 480\nNEAREST FILTERING\nORIGINAL EFFECTS PRESET":view.benchmarkVideoInfo,340,218,264,1.05f,true);
+    ui.text("VSYNC OFF / UNCAPPED\n7 SCENES / 1200 STEPS EACH",340,331,265,1.f,true);
+    }
+    ui.text("SAVES AND SETTINGS UNCHANGED / HTML + JSON REPORTS",20,431,600,1.f);
+    ui.box(12,447,628,477,.12f,.17f,.12f);
+    ui.text("UP / DOWN: SELECT",22,468,210,1.f);
+    ui.text("ENTER / A: RUN",250,468,185,1.f);ui.text("ESC / B: BACK",458,468,155,1.f);
 }
 void HudRenderer::drawDebugMenu(Gfx& gfx,const MenuView& view) {
     // Same background and native small gold font as benchmark results. The

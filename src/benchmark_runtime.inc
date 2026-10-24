@@ -1,5 +1,6 @@
 // Shared benchmark runner for the game menu and standalone entry point.
 #include "benchmark/report.h"
+#include "render/commander_ui.h"
 #include <ctime>
 #include <iomanip>
 #include <iostream>
@@ -275,30 +276,75 @@ void writeReports(const std::filesystem::path& out, const bench::Report& report)
     }
     std::cout << "REPORT_DIRECTORY " << out.string() << '\n';
 }
-void resultsScreen(App& a, const bench::Report& report, const std::filesystem::path& out, bool returnToMenu) {
+void resultsScreen(App& a, const bench::Report& report, const std::filesystem::path& out, bool returnToMenu,
+                   std::string_view destination="MAIN MENU") {
     benchProgress.clear(); a.audio.device().setPaused(true);
-    a.gfx.beginFrame(640, 480); a.gfx.clear(.035f, .06f, .055f);
-    const auto text = [&](const std::string& s, float x, float y, float width = 600) { a.hud.drawMenuText(a.gfx, s, x, y, 4, width); };
-    text("VURUS BENCH 2 - " + std::string(report.settingsPreset == "default" ? "DEFAULT" : "MENU") + " " +
-        std::to_string(report.drawableWidth) + "X" + std::to_string(report.drawableHeight), 20, 28);
-    text(report.score() ? "SCORE: " + std::to_string(*report.score()) + " POINTS" : "UNSCORED RUN", 20, 62);
-    text(!report.complete ? "INCOMPLETE - NO COMPARABLE SCORE" : report.score() ? "COMPLETE - 1000 POINTS = 60 BENCH STEPS/S" : report.nonstandardReason, 20, 88);
-    text("MAP / POSITION", 20, 126, 260); text("FPS", 290, 126); text("NEAR", 375, 126); text("RSS MIB", 470, 126);
-    float y = 158;
-    for (const auto& result : report.results) {
-        std::string map = result.map; if (map.ends_with(".3DG")) map.resize(map.size() - 4);
-        text(map + " " + std::to_string(int(result.x)) + "," + std::to_string(int(result.y)), 20, y, 260);
-        char number[64]; std::snprintf(number, sizeof(number), "%.1f", 1000 / result.frame.mean); text(number, 290, y);
-        text(std::to_string(result.nearbyEnemies), 375, y);
-        if (result.sampledPeakRssMiB) std::snprintf(number, sizeof(number), "%.1f", *result.sampledPeakRssMiB); else std::snprintf(number, sizeof(number), "N/A");
-        text(number, 470, y); y += 25;
+    a.gfx.beginFrame(640,480);a.gfx.clear(.035f,.06f,.055f);
+    const auto view=a.gfx.viewport();glTranslatef(view.uiX(),view.uiY(),0);
+    const vyruz::CommanderUi ui{a.gfx,a.hud};
+    ui.text("VURUS / BENCHMARK RESULTS",20,33,600,1.3f);
+    ui.box(12,61,628,143);ui.frame(12,61,628,143);
+    const auto score=report.score();
+    ui.text(score?std::to_string(*score)+" POINTS":"UNSCORED RUN",26,94,350,1.5f);
+    ui.text(std::string(report.settingsPreset=="default"?"DEFAULT":"USER")+" / "+
+        std::to_string(report.drawableWidth)+" X "+std::to_string(report.drawableHeight),400,87,210,1.f);
+    ui.text(std::to_string(report.results.size())+" / 7 SCENES",400,113,210,1.f);
+    ui.text(!report.complete?"INCOMPLETE":score?"COMPLETE / 1000 POINTS = 60 STEPS/S":"COMPLETE / CUSTOM OR UNSCORED",26,124,565,1.f);
+    ui.box(12,155,628,381);ui.frame(12,155,628,381);
+    ui.box(20,163,620,190,.12f,.17f,.12f);
+    ui.text("SCENE",26,182,250,1.f);ui.text("FPS",295,182,72,1.f);
+    ui.text("WORLD MS",385,182,100,1.f);ui.text("RAM MIB",515,182,100,1.f);
+    float y=213;
+    for(size_t i=0;i<report.results.size();++i) {
+        const auto& result=report.results[i];
+        if(i%2==0)ui.box(20,y-18,620,y+6,.06f,.10f,.08f);
+        std::string name=result.id;std::replace(name.begin(),name.end(),'-',' ');
+        ui.text(name,26,y,250,1.05f);
+        const auto number=[](double value){char text[40];std::snprintf(text,sizeof(text),"%.1f",value);return std::string(text);};
+        ui.text(result.frame.mean>0?number(1000/result.frame.mean):"N/A",295,y,72,1.05f);
+        ui.text(number(result.world.mean),385,y,100,1.05f);
+        ui.text(result.sampledPeakRssMiB?number(*result.sampledPeakRssMiB):"N/A",515,y,100,1.05f);y+=25;
     }
-    text("FIXED-STEP THROUGHPUT, NOT GAMEPLAY FPS", 20, 344);
-    text("REPORT.HTML + REPORT.JSON SAVED", 20, 376);
-    text(out.parent_path().filename().string() + "/" + out.filename().string(), 20, 402);
-    text(returnToMenu ? "A / B / START / ENTER: MAIN MENU" : "A / B / START / ENTER: EXIT", 20, 450); a.gfx.present();
+    std::string status=!report.error.empty()?report.error:!report.nonstandardReason.empty()?report.nonstandardReason:"FIXED-STEP THROUGHPUT / HTML + JSON REPORTS SAVED";
+    if(status.size()>80){status.resize(76);const auto space=status.rfind(' ');if(space>55&&space!=std::string::npos)status.resize(space);status+="...";}
+    ui.text(status,20,405,600,1.f);
+    std::string path=out.parent_path().filename().string()+"/"+out.filename().string();
+    if(path.size()>72)path="..."+path.substr(path.size()-69);
+    ui.text(path,20,430,600,1.f);
+    ui.box(12,447,628,477,.12f,.17f,.12f);
+    ui.text(std::string("ENTER / ESC / A / B: ")+(returnToMenu?std::string(destination):"EXIT"),22,468,590,1.f);
+    a.gfx.present();
+}
+bool holdResults(App& a,const bench::Report& report,const std::filesystem::path& out,bool returnToMenu,
+                 std::string_view destination="MAIN MENU") {
+    SDL_FlushEvent(SDL_KEYDOWN);SDL_FlushEvent(SDL_CONTROLLERBUTTONDOWN);
+    SDL_Event event;
+    while(SDL_WaitEvent(&event)) {
+        if(event.type==SDL_QUIT)return true;
+        if(event.type==SDL_WINDOWEVENT&&(event.window.event==SDL_WINDOWEVENT_EXPOSED||
+           event.window.event==SDL_WINDOWEVENT_SIZE_CHANGED||event.window.event==SDL_WINDOWEVENT_RESIZED)) {
+            int width=0,height=0;SDL_GetWindowSize(a.window,&width,&height);
+            if(width>0&&height>0)a.gfx.resize(width,height);
+            resultsScreen(a,report,out,returnToMenu,destination);
+        }
+        if(event.type==SDL_KEYDOWN&&!event.key.repeat&&(event.key.keysym.sym==SDLK_RETURN||event.key.keysym.sym==SDLK_ESCAPE))return false;
+        if(event.type==SDL_CONTROLLERBUTTONDOWN&&(event.cbutton.button==SDL_CONTROLLER_BUTTON_A||
+           event.cbutton.button==SDL_CONTROLLER_BUTTON_B||event.cbutton.button==SDL_CONTROLLER_BUTTON_START))return false;
+        a.controller.event(event);
+    }
+    return true;
 }
 } // namespace
+
+namespace {
+void showLastBenchmark(App& a) {
+    if(!a.lastBenchmark)return;
+    const auto& saved=*a.lastBenchmark;
+    resultsScreen(a,saved.report,saved.directory,true,"BENCHMARK MENU");
+    if(holdResults(a,saved.report,saved.directory,true,"BENCHMARK MENU"))a.quit=1;
+    a.audio.device().setPaused(a.paused);
+}
+}
 
 int runBenchmark(int argc, char** argv, bool returnToMenu=false) {
     benchQuitRequested=false;
@@ -366,28 +412,7 @@ int runBenchmark(int argc, char** argv, bool returnToMenu=false) {
                 require(saveScreenshot(shot.c_str(), app.gfx.drawableWidth(), app.gfx.drawableHeight()), "Cannot capture benchmark results");
                 app.gfx.setSwapEnabled(true); SDL_GL_SwapWindow(app.window);
             }
-            if (wait && !benchQuitRequested) {
-                // A cancel press (including a keyboard/controller duplicate)
-                // must not also dismiss the just-presented results.
-                SDL_FlushEvent(SDL_KEYDOWN); SDL_FlushEvent(SDL_CONTROLLERBUTTONDOWN);
-                SDL_Event event; bool done = false;
-                while (!done && SDL_WaitEvent(&event)) {
-                    if (event.type == SDL_QUIT) { benchQuitRequested=true; done=true; }
-                    if (event.type == SDL_WINDOWEVENT &&
-                        (event.window.event == SDL_WINDOWEVENT_EXPOSED || event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
-                         event.window.event == SDL_WINDOWEVENT_RESIZED)) {
-                        int width = 0, height = 0; SDL_GetWindowSize(app.window, &width, &height);
-                        if (width > 0 && height > 0) app.gfx.resize(width, height);
-                        resultsScreen(app, report, runDirectory, returnToMenu);
-                    }
-                    if (event.type == SDL_KEYDOWN && !event.key.repeat &&
-                        (event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_ESCAPE)) done = true;
-                    if (event.type == SDL_CONTROLLERBUTTONDOWN &&
-                        (event.cbutton.button == SDL_CONTROLLER_BUTTON_A || event.cbutton.button == SDL_CONTROLLER_BUTTON_B ||
-                         event.cbutton.button == SDL_CONTROLLER_BUTTON_START)) done = true;
-                    session->app.controller.event(event);
-                }
-            }
+            if(wait&&!benchQuitRequested&&holdResults(app,report,runDirectory,returnToMenu))benchQuitRequested=true;
         } else if (!report.error.empty() && wait) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Vurus benchmark", report.error.c_str(), nullptr);
     } catch (const std::exception& error) { std::fprintf(stderr, "BENCH_ERROR %s\n", error.what()); exitCode = 1; }
     session.reset(); benchProgress.clear(); SDL_Quit();

@@ -4,6 +4,8 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <filesystem>
+#include <string_view>
 #include "benchmark/settings.h"
 
 namespace vyruz::benchmark {
@@ -56,4 +58,7 @@ struct Report {
 };
 std::string jsonReport(const Report&);
 std::string htmlReport(const Report&);
+bool readReport(std::string_view,Report&,std::string& error);
+struct SavedReport {Report report;std::filesystem::path directory;};
+std::optional<SavedReport> latestReport(const std::filesystem::path& resultsDirectory);
 } // namespace vyruz::benchmark

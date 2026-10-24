@@ -62,6 +62,7 @@ public:
 private:
     bool debugInfoVisible_=true;
     void drawDebugMenu(Gfx&,const MenuView&);
+    void drawBenchmarkMenu(Gfx&,const MenuView&);
     static inline bool notificationPreload_=true;
     int language_=1;
     ContentReader read_;

@@ -3,6 +3,8 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <fstream>
+#include <chrono>
 using namespace vyruz::benchmark;
 int main() {
     vyruz::GameOptions menu;
@@ -98,4 +100,25 @@ int main() {
     assert(json.find("line\\nquote\\\"\\\\\\t") != std::string::npos);
     assert(json.find("\"score\":1000") != std::string::npos);
     assert(html.find("https://") == std::string::npos && html.find("http://") == std::string::npos);
+    Report reopened;std::string error;
+    assert(readReport(json,reopened,error));
+    assert(reopened.score()==report.score()&&reopened.results.size()==7&&reopened.gpu==report.gpu&&reopened.error==report.error);
+    assert(std::abs(reopened.results.back().frame.mean-report.results.back().frame.mean)<1e-7&&reopened.options.width==1920);
+    const auto intact=jsonReport(reopened);
+    for(const auto& invalid:{json.substr(0,json.size()-3),json+"false",std::string("{\"schema_version\":3,\"schema_version\":3}"),std::string(2*1024*1024+1,' ')}){
+        assert(!readReport(invalid,reopened,error)&&jsonReport(reopened)==intact);
+    }
+    auto invalid=json;invalid.replace(invalid.find("vurus-bench-2"),13,"vurus-bench-9");assert(!readReport(invalid,reopened,error));
+    report.complete=false;report.results.resize(2);report.standard=false;report.error="Cancelled";
+    assert(readReport(jsonReport(report),reopened,error)&&!reopened.complete&&!reopened.score()&&reopened.results.size()==2);
+    const auto dir=std::filesystem::temp_directory_path()/("vurus-last-bench-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(dir/"older");std::filesystem::create_directories(dir/"newer");
+    assert(!latestReport(dir));
+    {std::ofstream f(dir/"older/report.json");f<<json;}
+    {std::ofstream f(dir/"newer/report.json");f<<"{broken";}
+    std::filesystem::last_write_time(dir/"older/report.json",std::filesystem::file_time_type::clock::now()-std::chrono::seconds(10));
+    assert(latestReport(dir)->directory.filename()=="older");
+    {std::ofstream f(dir/"newer/report.json");f<<jsonReport(report);}
+    assert(latestReport(dir)->directory.filename()=="newer"&&!latestReport(dir)->report.complete);
+    std::filesystem::remove_all(dir);
 }

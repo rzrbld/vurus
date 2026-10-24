@@ -3,7 +3,7 @@
 #include <vector>
 namespace vyruz {
 enum class MenuPage { Closed,Main,Game,Controls,Confirm,Options,Debug,DebugLevels,DebugSurprises,Extras,SavedSessions,Benchmark };
-enum class MenuAction { None,Resume,LoadGame,Restart,NewGame,Quit,Controls,EndGame,Options,Debug,DebugLevels,DebugSelectLevel,DebugAI,DebugGod,DebugAmmo,DebugMoney,DebugSurprises,DebugSelectSurprise,Extras,Scores,Credits,Intro,SlideShow,Demo,LoadSelected,ControlsHelp,Benchmark,BenchmarkDefault,BenchmarkUser,DebugInfo };
+enum class MenuAction { None,Resume,LoadGame,Restart,NewGame,Quit,Controls,EndGame,Options,Debug,DebugLevels,DebugSelectLevel,DebugAI,DebugGod,DebugAmmo,DebugMoney,DebugSurprises,DebugSelectSurprise,Extras,Scores,Credits,Intro,SlideShow,Demo,LoadSelected,ControlsHelp,Benchmark,BenchmarkDefault,BenchmarkUser,DebugInfo,BenchmarkLast };
 const std::vector<std::string>& debugLevels();
 struct MenuEntry { std::string label;MenuAction action; };
 // Port menu flow. Shared keyboard/mouse selection, with pause restoration.
@@ -29,6 +29,10 @@ public:
     bool savedSessionsLoading=false;
     bool debugAI=true,debugGod=false,debugInfo=true;
     bool debugScreen() const { return page==MenuPage::Debug || page==MenuPage::DebugLevels || page==MenuPage::DebugSurprises; }
+    bool commanderScreen() const { return debugScreen() || page==MenuPage::Benchmark; }
+    std::string benchmarkVideoInfo;
+    bool benchmarkLastAvailable=false;
+    std::string benchmarkLastInfo;
     bool debugListFocused() const { return page==MenuPage::DebugLevels || page==MenuPage::DebugSurprises; }
     int debugSection() const { return page==MenuPage::DebugLevels?0:page==MenuPage::DebugSurprises?5:selected; }
     std::vector<MenuEntry> debugActions() const;
@@ -46,9 +50,9 @@ public:
     bool panelList() const { return page==MenuPage::SavedSessions || page==MenuPage::Controls; }
     int listRowCount() const;
     static constexpr int ListLeft=293,ListRight=630,ListTop=40,ListBottom=320,ListVisible=7;
-    int rowHeight() const { return debugScreen()?(debugListFocused()?26:30):page==MenuPage::Options?optionRowHeight:panelList()?35:(paginated()||page==MenuPage::Extras)?30:RowHeight; }
+    int rowHeight() const { return page==MenuPage::Benchmark?42:debugScreen()?(debugListFocused()?26:30):page==MenuPage::Options?optionRowHeight:panelList()?35:(paginated()||page==MenuPage::Extras)?30:RowHeight; }
     bool exitConfirmation() const { return page==MenuPage::Confirm && (pending_==MenuAction::Quit || pending_==MenuAction::EndGame); }
-    int rowLeft() const { return debugScreen()?(debugListFocused()?DebugRight:DebugLeft):exitConfirmation()?Left+30:panelList()?ListLeft:Left; }
+    int rowLeft() const { return page==MenuPage::Benchmark?DebugLeft:debugScreen()?(debugListFocused()?DebugRight:DebugLeft):exitConfirmation()?Left+30:panelList()?ListLeft:Left; }
     bool open() const { return page!=MenuPage::Closed; }
     void show(bool& paused,bool main=false);
     void close(bool& paused);
@@ -59,7 +63,7 @@ public:
     MenuAction activate(bool& paused);
     std::vector<MenuEntry> entries() const;
     std::string title() const;
-    int rowTop() const { return debugScreen()?DebugTop:exitConfirmation()?120:panelList()?70:paginated()?100:page==MenuPage::Main&&!retryAvailable?135:Top; }
+    int rowTop() const { return commanderScreen()?DebugTop:exitConfirmation()?120:panelList()?70:paginated()?100:page==MenuPage::Main&&!retryAvailable?135:Top; }
     static constexpr int Left=270,Top=90,Width=360,RowHeight=45;
 private:
     mutable int saveFirst_=0;

@@ -135,6 +135,15 @@ void refreshOptions(App& a) {
     m.selected=std::clamp(m.selected,0,int(m.optionLabels.size())-1);
 }
 void refreshMenuContext(App& a) {
+    if(a.menu.page==vyruz::MenuPage::Benchmark) {
+        if(!a.benchmarkReportChecked){a.lastBenchmark=vyruz::benchmark::latestReport(std::filesystem::path(binaryDirectory())/"benchmark-results");a.benchmarkReportChecked=true;}
+        a.menu.benchmarkLastAvailable=a.lastBenchmark.has_value();
+        a.menu.benchmarkLastInfo=a.lastBenchmark?a.lastBenchmark->report.startedUtc+"\n"+
+            (a.lastBenchmark->report.complete?"COMPLETE":"INCOMPLETE"):std::string{};
+        static const char* filters[]={"NEAREST","BILINEAR","TRILINEAR"};
+        a.menu.benchmarkVideoInfo=std::to_string(a.options.width)+" X "+std::to_string(a.options.height)+
+            "\n"+filters[std::clamp(a.options.spriteFiltering,0,2)]+" FILTERING\nSAVED VIDEO EFFECTS";
+    }else a.benchmarkReportChecked=false;
     static const char* difficulties[]={"Easy","Normal","Hard","Insane"};
     const auto difficulty=[&](int value){return difficulties[std::clamp(value,0,3)];};
     refreshSaveCatalog(a);

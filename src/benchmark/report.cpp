@@ -7,6 +7,9 @@
 #include <numeric>
 #include <sstream>
 #include <stdexcept>
+#include <charconv>
+#include <fstream>
+#include <map>
 
 namespace vyruz::benchmark {
 Stats summarize(std::vector<double> samples) {
@@ -189,4 +192,5 @@ std::string htmlReport(const Report& r) {
         << "<small>Compare scores only at matching effective video settings, actual resolution, protocol and map fingerprints. Game-menu video settings are read only; no settings, saves or leaderboard files are written. No external fonts, scripts or network access are needed to view this report.</small></html>";
     return out.str();
 }
+#include "report_read.inc"
 } // namespace vyruz::benchmark

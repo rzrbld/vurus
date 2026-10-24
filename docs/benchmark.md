@@ -2,7 +2,7 @@
 
 `vurus-bench` is a separate executable using the game's World, animation,
 audio and renderer. It runs seven scripted encounters automatically and ends with
-a score and a small map/FPS/nearby-enemy/RSS table. Game saves and the
+a score and a scene/FPS/World-time/RSS table. Game saves and the
 leaderboard are never read or written. Video preferences saved by the in-game menus
 are read only. Players supply their own existing game data.
 
@@ -13,6 +13,16 @@ exactly the standalone benchmark's fixed preset and saved menu-video settings,
 respectively; both disable VSync and the FPS cap for the run. Esc/B returns from
 the submenu to Extras. The game releases its active runtime before the benchmark,
 so a suspended game does not add renderer/audio work or inflate benchmark RSS.
+
+The submenu uses the DOS Commander presentation: presets on the left, selected
+preset information on the right. Results use one full-width table with a score
+header and the same gold text, double borders and key strip.
+
+**Last Results** appears when a readable current-format `report.json` exists
+under `benchmark-results` beside the game executable. It opens the newest valid
+saved report without running a benchmark; Esc/B/Enter/A returns to the benchmark
+submenu. Incomplete and unscored runs can be viewed too. Invalid or unsupported
+reports are skipped; saved video options and gameplay state are not applied.
 
 The same seven scenes, score and HTML/JSON reports are used. Results stay visible
 until a fresh A/B/Start/Enter/Esc press returns to the main menu; closing the window

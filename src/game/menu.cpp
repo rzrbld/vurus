@@ -101,7 +101,7 @@ std::vector<MenuEntry> MenuView::entries() const {
         for(const auto& row:std::vector<MenuEntry>{{"Start New Game",MenuAction::NewGame},{"Load game",MenuAction::LoadGame},{"Options",MenuAction::Options},{"Extras",MenuAction::Extras},{"Exit",MenuAction::Quit}})rows.push_back(row);
         return rows;}
     case MenuPage::Extras:{std::vector<MenuEntry> rows={{"Scores",MenuAction::Scores},{"Credits",MenuAction::Credits},{"Intro",MenuAction::Intro}};if(slidesAvailable)rows.push_back({"Slide Show",MenuAction::SlideShow});rows.push_back({"Demo",MenuAction::Demo});rows.push_back({"Controls help",MenuAction::ControlsHelp});rows.push_back({"Benchmark",MenuAction::Benchmark});rows.push_back({"Back",MenuAction::None});return rows;}
-    case MenuPage::Benchmark:return {{"Default",MenuAction::BenchmarkDefault},{"User Settings",MenuAction::BenchmarkUser}};
+    case MenuPage::Benchmark:{std::vector<MenuEntry> rows={{"Default",MenuAction::BenchmarkDefault},{"User Settings",MenuAction::BenchmarkUser}};if(benchmarkLastAvailable)rows.push_back({"Last Results",MenuAction::BenchmarkLast});return rows;}
     case MenuPage::Game:{std::vector<MenuEntry> rows={{"Resume",MenuAction::Resume},{"Load game",MenuAction::LoadGame},{"Restart level",MenuAction::Restart},{"Options",MenuAction::Options},{"Controls",MenuAction::Controls},{"End game",MenuAction::EndGame}};
         if(debugEnabled)rows.push_back({"Debug / testing (F2)",MenuAction::Debug});
         return rows;}
@@ -205,6 +205,12 @@ void MenuView::move(int delta) {
     do{selected=((selected+delta)%n+n)%n;}while(delta && rows[selected].label.empty());
 }
 bool MenuView::hover(float x,float y) {
+    if(page==MenuPage::Benchmark) {
+        if(x<20 || x>=308)return false;
+        for(int i=0;i<int(entries().size());++i)
+            if(y>=rowBaseline(i)-19 && y<rowBaseline(i)+7){selected=i;return true;}
+        return false;
+    }
     if(debugScreen()) {
         if(x>=18&&x<310) {
             const int hit=int((y-(DebugTop-19))/30);

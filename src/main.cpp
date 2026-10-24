@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 #include "io/portable_storage.h"
+#include "benchmark/report.h"
 #include "io/process_memory.h"
 
 #include "assets/gaf.h"
@@ -107,6 +108,8 @@ struct App {
     bool presentationReturnExtras=false,scoresLoaded=false,scoreRecorded=false;
     bool slidesAvailable=false;
     std::optional<bool> benchmarkRequest; // true: fixed preset; false: menu video settings.
+    std::optional<vyruz::benchmark::SavedReport> lastBenchmark;
+    bool benchmarkReportChecked=false;
     bool deathPresented=false,presentationReturnMain=false;
     uint64_t mainMenuIdleSince=0;
     vyruz::HighScores scores{};std::string scorePath;
@@ -213,6 +216,7 @@ struct App {
 
 std::string benchProgress;
 void drawBenchmarkProgress(App&);
+void showLastBenchmark(App&);
 
 bool loadStoryTexture(App& a) {
     if(a.storyTex)return true;
@@ -923,6 +927,7 @@ bool applyMenuAction(App& a) {
             else if(action==vyruz::MenuAction::BenchmarkDefault || action==vyruz::MenuAction::BenchmarkUser){
                 a.benchmarkRequest=action==vyruz::MenuAction::BenchmarkDefault;a.quit=1;
             }
+            else if(action==vyruz::MenuAction::BenchmarkLast)showLastBenchmark(a);
             else if(action==vyruz::MenuAction::Demo){levelChanged=startDemo(a);if(!levelChanged)a.menu.error="Could not play original demo: "+a.loadError;}
             else if(action==vyruz::MenuAction::Scores||action==vyruz::MenuAction::Credits||action==vyruz::MenuAction::Intro||action==vyruz::MenuAction::SlideShow||action==vyruz::MenuAction::ControlsHelp)beginExtra(a,action);
             else if(action==vyruz::MenuAction::DebugAI)a.world.setDebugEnemyAI(!a.world.debugEnemyAI());
@@ -1430,7 +1435,7 @@ void presentApplication(App& a) {
         a.debugMemoryText.push_back(storage);
         }
     }
-    if(!a.menu.debugScreen() && (debugInfo || a.options.fpsCounter)){
+    if(!a.menu.commanderScreen() && (debugInfo || a.options.fpsCounter)){
         const float right=debugInfo?480.f:230.f;
         glMatrixMode(GL_MODELVIEW);glPushMatrix();glLoadIdentity();
         glPushAttrib(GL_ENABLE_BIT|GL_COLOR_BUFFER_BIT|GL_CURRENT_BIT);
@@ -1537,11 +1542,11 @@ void render(App& a,float alpha=1) {
            ((SDL_GetTicks64()-a.nameEditBlinkStart)/500)%2==0)
             a.hud.drawNameCaret(a.menu.optionLabels[0],a.menu.rowLeft(),a.menu.rowTop());
         if(controlsHelp)a.hud.drawControlsHelp(a.gfx,a.helpRows,a.helpFirst);
-        else if(!a.menu.debugScreen()){drawSavePreview(a);a.hud.drawMenuScanline(a.gfx);}
+        else if(!a.menu.commanderScreen()){drawSavePreview(a);a.hud.drawMenuScanline(a.gfx);}
         if(a.menuPointerVisible) {
             int pointerX=0,pointerY=0;SDL_GetMouseState(&pointerX,&pointerY);
             const auto point=a.gfx.mousePoint(pointerX,pointerY);
-            if(a.menu.debugScreen()) {
+            if(a.menu.commanderScreen()) {
                 const float x=point.x-view.uiX(),y=point.y-view.uiY();
                 glDisable(GL_TEXTURE_2D);glColor3f(1,.75f,.2f);glBegin(GL_TRIANGLES);
                 glVertex2f(x,y);glVertex2f(x+9,y+6);glVertex2f(x+3,y+10);glEnd();glEnable(GL_TEXTURE_2D);glColor4f(1,1,1,1);
