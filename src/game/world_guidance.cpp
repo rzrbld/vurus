@@ -17,23 +17,30 @@ void releasePoints(NativeNavGraph& graph,const MissileNativeRoute& route) {
     // 42c2c0 frees the entire seen array in reverse allocation/list order.
     for(auto it=owned.rbegin();it!=owned.rend();++it)removeNativeNavigationObject(graph,it->graphNode);
 }
-// Native grid list order is unavailable in the port. Actor order breaks ties
-// inside a cell; the native ring/column ordering remains in the pure selectors.
+// 41e1e0/42da80 follow each cell's head/next chain. Visit occupied heads via
+// actor slots rather than scanning every map cell; selectors retain their own
+// distinct cross-cell priorities, so only within-cell span order matters here.
 std::vector<GuidanceLaunchCandidate> candidates(const SceneContent& scene,
-    const std::vector<ActorState>& actors,std::optional<ClassId> matching={}) {
+    const std::vector<ActorState>& actors,const NativeActorCells& cells,
+    std::optional<ClassId> matching={}) {
     std::vector<GuidanceLaunchCandidate> result;
-    for(size_t id=0;id<actors.size();++id) {
-        const auto& a=actors[id];const auto& o=scene.objects[id];
-        if(!a.alive || (matching && o.classId!=*matching))continue;
-        // Inert FX do not participate in the original classed-actor grid.
-        if(a.effect || a.pooledTrail)continue;
-        const auto p=o.position;const auto subtype=objectSubtype(o);
-        const bool ordinary=subtype!="fx" && subtype!="item" && subtype!="lift" && subtype!="gate";
-        result.push_back({id,o.classId,p,static_cast<int>(p.x/64),static_cast<int>(p.y/32),
-            true,a.hudEnemy,ordinary,true,!o.flags.invisible.value_or(false),
-            static_cast<int>(a.reactivateMs)});
-        if(const auto* history=a.nativeMotionHistory())
-            result.back().nativeCenter=ContentPosition{history->center.x,history->center.y};
+    for(size_t head=0;head<cells.cell.size();++head) {
+        const size_t cell=cells.cell[head];
+        if(cell==NativeActorCells::Missing || cells.heads[cell]!=head)continue;
+        for(size_t id=head;id!=NativeActorCells::Missing;id=cells.next[id]) {
+            const auto& a=actors[id];const auto& o=scene.objects[id];
+            if(!a.alive || (matching && o.classId!=*matching))continue;
+            // Inert FX do not participate in the original classed-actor grid.
+            if(a.effect || a.pooledTrail)continue;
+            const auto p=o.position;const auto subtype=objectSubtype(o);
+            const bool ordinary=subtype!="fx" && subtype!="item" && subtype!="lift" && subtype!="gate";
+            result.push_back({id,o.classId,p,static_cast<int>(cell/size_t(cells.height)),
+                static_cast<int>(cell%size_t(cells.height)),
+                true,a.hudEnemy,ordinary,true,!o.flags.invisible.value_or(false),
+                static_cast<int>(a.reactivateMs)});
+            if(const auto* history=a.nativeMotionHistory())
+                result.back().nativeCenter=ContentPosition{history->center.x,history->center.y};
+        }
     }
     return result;
 }
@@ -48,7 +55,7 @@ void GameWorld::initializeProjectileGuidance(Projectile& shot,size_t shooter) {
     GuidanceLaunchQuery query;query.position=p;query.cellX=static_cast<int>(p.x/64);query.cellY=static_cast<int>(p.y/32);
     query.heading=heading;query.mapWidth=level_->mapW;query.mapHeight=level_->mapH;
     query.playerShooter=shooter==player_;query.targetClass=actors_[shooter].brain.targetClass;
-    const auto selected=selectGuidanceLaunchTarget(query,candidates(*scene_,actors_,query.playerShooter?std::nullopt:query.targetClass));
+    const auto selected=selectGuidanceLaunchTarget(query,candidates(*scene_,actors_,actorCells_,query.playerShooter?std::nullopt:query.targetClass));
     if(!selected)return; // Native clears Tracker on a launch miss permanently.
     shot.guidanceClass=scene_->objects[*selected].classId;shot.guidanceTarget=selected;
     shot.guidance.pose48=heading*2+1;
@@ -102,7 +109,7 @@ void GameWorld::updateProjectileGuidance(Projectile& shot,float milliseconds) {
         q.heading=(state.pose48-1)/2;q.mapWidth=level_->mapW;q.mapHeight=level_->mapH;q.targetClass=shot.guidanceClass;
         q.sensorRange=static_cast<int>(propertyNumber(tracker->children,"Sensor-Range"));
         q.visionDegrees=static_cast<int>(propertyNumber(tracker->children,"Vision-Angle",360));
-        auto target=selectGuidanceTrackingTarget(q,candidates(*scene_,actors_,q.targetClass));
+        auto target=selectGuidanceTrackingTarget(q,candidates(*scene_,actors_,actorCells_,q.targetClass));
         if(!target)return {};
         if(!spiderNavigation_)initializeSpiderNavigation(true);
         if(!shot.guidanceNative)shot.guidanceNative.emplace();

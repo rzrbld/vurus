@@ -26,7 +26,7 @@ struct GuidanceLaunchCandidate {
 };
 // Native order: expanding square rings, top-to-bottom rows, left-to-right cells,
 // then the cell's linked list. Caller span order breaks ties inside a cell.
-// A stable actor-ID span is an explicit port adapter for native linked-list order.
+// World supplies maintained cell chains; actor IDs do not break same-cell ties.
 std::optional<size_t> selectGuidanceLaunchTarget(const GuidanceLaunchQuery&,
                                                std::span<const GuidanceLaunchCandidate>);
 struct GuidanceTrackingQuery {
