@@ -1,4 +1,5 @@
 #include "snapshot_fixture.h"
+#include "host_temp.h"
 #include "game/world.h"
 #include "game/save_state.h"
 #include "game/save_file.h"
@@ -155,6 +156,61 @@ void invalidMetadataControls() {
  auto corrupt=world.snapshot();corrupt.actors[1].bodyGraphics->binding=NativeBodyGraphicsBinding::Unknown;corrupt.actors[1].bodyGraphics->baseSequence=0;
  SaveGame save;save.currentLevel=scene.mapPath;save.levels[scene.mapPath].world=corrupt;Bytes output{42};check(!encodeSave(save,output,error) && output==Bytes{42},"unknown with noncanonical clocks rejected transactionally by schema");
 }
+void recycledTrailControls(bool graphicNeeded,bool visible,bool graphicsEnabled=true) {
+ auto scene=content();scene.objects.resize(1);scene.objects[0].position={3000,1600};
+ auto& trail=scene.classes[1];trail.name="Trail";trail.behaviours={"Fixed"};
+ trail.properties={value("Managed","1"),value("Sub-type","Thing"),value("Graphic-update-needed",graphicNeeded?"1":"0"),value("Bounding-box-size","0"),value("Speed-max","0"),value("Life-time","42"),block("Energy",{value("Initial","1000")})};
+ ObjectClass ammo;ammo.id={2};ammo.name="Bullet";ammo.behaviours={"Straight"};ammo.sprite={"TEST/AMMO.GAF",{1}};
+ ammo.properties={value("Managed","1"),value("Sub-type","Ammo"),value("Bounding-box-size","0"),value("Speed-max","0"),value("Life-time","5000"),block("Energy",{value("Initial","1000")}),block("TYPE",{value("Ignore-owner","1"),value("Damage-after","5000")},"Ammo"),block("CREATE",{value("Name","Trail"),value("Delay","14"),value("Repeat-timeout","14"),value("At-current-position","1")})};
+ ObjectClass gun;gun.id={3};gun.name="Gun";gun.properties={value("Managed","1"),block("TYPE",{value("Ammo","Bullet"),value("Delay","1000"),value("Start-distance","200"),value("Fire-altitude","24")},"Weapon")};
+ scene.classes.push_back(ammo);scene.classes.push_back(gun);
+ auto& player=scene.classes[0];player.properties.push_back(value("Managed","1"));
+ player.properties.push_back(block("ADD",{value("Name","Gun")},"Weapon"));
+ player.properties.push_back(block("ADD",{value("Name","Bullet"),value("Count","10"),value("Max","10")},"Ammo"));
+ scene.objects[0].properties=player.properties;
+ Level level;level.mapW=level.mapH=100;level.hasTerrainCollision=true;
+ const auto bytes=fixture(),ammoBytes=fixture(1000);ContentReader read=[&](const std::string& path,Bytes& out){out=path=="TEST/AMMO.GAF"?ammoBytes:bytes;return true;};
+ GameWorld world;if(graphicsEnabled)world.setEffectReader(read);std::string error;
+ check(world.load(scene,level,error),error.c_str());const auto authored=scene;
+ world.setDebugEnemyAI(false);world.setPlayerDirection(9);
+ const BodyGraphicsView view=visible?BodyGraphicsView{-2500,-1200,1000,800}:BodyGraphicsView{0,0,640,480};
+ const auto step=[&](GameWorld& w,bool fire=false){WorldInput in;in.fire=fire;w.tick(.014f,in);w.advanceBodyGraphicsPhase(view,BodyGraphicsPhase::VisibleUpdate);w.advanceBodyGraphicsPhase(view,BodyGraphicsPhase::Draw);w.takeAudioEvents();w.takeBodyGraphicsAudio();w.releaseBodyGraphicsAudio();};
+ std::vector<uint64_t> revisions,identities;unsigned reuses=0;
+ const auto inspect=[&]{
+  revisions.resize(world.actors().size());identities.resize(world.actors().size());
+  for(size_t id=0;id<world.actors().size();++id){const auto& a=world.actors()[id];
+   if(!a.alive||scene.objects[id].classId.value!=1)continue;
+   check(a.bodyGraphics.has_value(),"recycled trail owns mandatory body graphics before any camera visit");
+   check(a.bodyGraphicsGraphicUpdate==graphicNeeded,"recycled trail restores authored graphics phase flag");
+   const auto& state=*a.bodyGraphics;
+   check(state.kind==NativeBodyGraphicsKind::Thing,"recycled trail keeps Thing graphics kind");
+   check(state.binding==(graphicsEnabled?NativeBodyGraphicsBinding::Present:NativeBodyGraphicsBinding::Unknown),"recycled graphics binding follows reader availability");
+   if(revisions[id]&&revisions[id]!=a.visualRevision){
+    ++reuses;
+    if(graphicsEnabled){
+     check(state.slots[0].audioIdentity!=identities[id],"recycled birth allocates fresh audio identities");
+     for(size_t h=1;h<24;++h)check(state.slots[h].sequence==1&&state.slots[h].animation.cursor==1&&state.slots[h].animation.remaining==28,"recycled Thing rebinds inactive headings to initial authored clocks");
+    }
+   }
+   revisions[id]=a.visualRevision;identities[id]=state.slots[0].audioIdentity;
+  }
+ };
+ for(int n=0;n<40;++n){step(world,n==0);inspect();}
+ check(world.projectiles().size()==1&&reuses>=10,"real projectile CREATE repeatedly reuses expired trail slots");
+ // Exercise real file encoding plus a separately loaded World, then keep
+ // creating/recycling offscreen bodies across the checkpoint boundary.
+ const auto directory=hostTempDirectory("trail-graphics");SaveGame save,decoded;
+ save.currentLevel=scene.mapPath;save.levels[scene.mapPath].world=world.snapshot();
+ check(writeSaveFile((directory/"trail.vzs").string(),save,error),error.c_str());
+ check(readSaveFile((directory/"trail.vzs").string(),decoded,error),error.c_str());
+ auto replayScene=authored;GameWorld replay;if(graphicsEnabled)replay.setEffectReader(read);
+ check(replay.load(replayScene,level,error)&&replay.restoreSnapshot(decoded.levels.at(scene.mapPath).world,error),error.c_str());replay.setDebugEnemyAI(false);
+ const auto encode=[&](const GameWorld& w){SaveGame v;v.currentLevel=scene.mapPath;v.levels[scene.mapPath].world=w.snapshot();Bytes out;check(encodeSave(v,out,error),error.c_str());return out;};
+ for(int n=0;n<120;++n){step(world);step(replay);inspect();check(encode(world)==encode(replay),"recycled trail disk continuation retains full World state");}
+ check(reuses>=50,"disk continuation includes repeated recycling");
+ std::filesystem::remove_all(directory);
+}
+
 int main(){
  {
   auto headless=content();headless.classes[1].sprite={};
@@ -165,6 +221,8 @@ int main(){
   geometry.tick(.014f,{});
   check(geometry.actors()[1].alive && geometry.actors()[2].alive,"headless stationary bodies are not retired as missing graphics");
  }
+ for(bool needed:{false,true})for(bool visible:{false,true})recycledTrailControls(needed,visible);
+ recycledTrailControls(true,false,false);
  invalidMetadataControls();arrayAndUnknownControls();
  for(int mode=0;mode<4;++mode)activationControls(mode);
  projectileControls(true);projectileControls(false);projectileControls(false,true);projectileControls(false,true,true);

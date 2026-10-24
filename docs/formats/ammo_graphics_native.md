@@ -26,6 +26,13 @@ bindings remain Unknown even in sprite-free geometry fixtures. Installing the
 reader before load enables authoritative native binding/retirement. Adding a
 reader later does not invent past clocks; use a genuine birth/rebind/reload.
 
+Recycled fixed projectile-trail slots follow the same birth contract as new
+objects: forget prior graphics/audio mappings before replacing ActorState, then
+initialize body graphics after the new native identity. Restore the authored
+Graphic-update-needed flag and fresh independent clocks even when offscreen.
+A later visible pass cannot substitute for birth initialization. Repeated reuse
+and real save/reload continuation are covered by native_body_graphics_world_test.
+
 ## Calling phases
 
 431ba8..431bce admits advancement for nonzero mode, or mode0 only when the class

@@ -169,9 +169,13 @@ size_t GameWorld::spawnTrail(ClassId cls,ContentPosition position) {
         const size_t id=*found->second.begin();found->second.erase(found->second.begin());
         auto& object=scene_->objects[id];object.position=position;object.owner.reset();
         const auto revision=actors_[id].visualRevision+1;
+        // Recycled Thing births need the same graphics teardown/binding as
+        // spawn(), even when no camera phase will visit the new body.
+        forgetBodyGraphics(id);
         actors_[id]=makeActor(object);actors_[id].pooledTrail=true;actors_[id].visualRevision=revision;
         registerTransientRecordCandidate(id);
         initializeNativeIdentity(id);
+        initializeBodyGraphics(id);
         updateSpiderNavigation(id,{},false);
         //Reusable products have no CREATE, but still enter the native graph
         //before their final cell link, just like a newly allocated factory body.
