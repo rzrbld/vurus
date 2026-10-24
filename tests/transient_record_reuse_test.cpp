@@ -39,6 +39,10 @@ int main(){try{
  auto roles=w.snapshot();
  roles.objects[2].properties.push_back(block("TyPe",{},"AmMo"));
  roles.actors[2].effect=false;roles.actors[2].hasAmmoAttribute=false;
+ // This fixture changes the native body role itself. Supply the new role's
+ // explicit unknown graphics state; no old FX clock exists to migrate.
+ roles.actors[2].bodyGraphics.emplace();
+ roles.actors[2].bodyGraphics->kind=NativeBodyGraphicsKind::Ammo;
  roles.objects[2].properties.push_back(value("Visible-when-firing","1"));
  roles.actors[2].visibleWhenFiring=false;roles.actors[3].visibleWhenFiring=true;
  roles.actors[3].effect=false;roles.actors[3].hasAmmoAttribute=true;

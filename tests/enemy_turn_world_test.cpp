@@ -32,6 +32,9 @@ static void tickToFirstSteer(GameWorld& w,float dt,std::optional<std::pair<int,i
   w.tick(dt,{});if(steering)return;}
  throw std::runtime_error("native targeting never reaches its first admitted steering pass");
 }
+// These are turn/muzzle fixtures, not initial-readiness fixtures. Start after
+// the original absolute-clock Delay1000 gate while retaining its zero timer.
+static void readyClock(GameWorld& w){auto s=w.snapshot();s.elapsedMs=1000;std::string e;need(w.restoreSnapshot(s,e),e);}
 static Level level(){Level l;l.mapW=l.mapH=100;l.hasTerrainCollision=true;return l;}
 static bool same(const EnemyTurnState&a,const EnemyTurnState&b){return a.bodyPose==b.bodyPose&&a.bodyDesiredPose==b.bodyDesiredPose&&a.bodyPreviousPose==b.bodyPreviousPose&&a.gunPose==b.gunPose&&a.gunDesiredPose==b.gunDesiredPose&&a.gunPreviousPose==b.gunPreviousPose&&a.bodyPeriodMs==b.bodyPeriodMs&&a.gunPeriodMs==b.gunPeriodMs&&a.bodyRemainingMs==b.bodyRemainingMs&&a.gunRemainingMs==b.gunRemainingMs&&a.logicalHeading==b.logicalHeading&&a.orthogonalHeading==b.orthogonalHeading&&a.turnCommand==b.turnCommand&&a.lean==b.lean&&a.fastTurn==b.fastTurn&&a.gunLogicalHeading==b.gunLogicalHeading&&a.gunCommand==b.gunCommand&&a.gunPreviousCommand==b.gunPreviousCommand&&a.gunInRange==b.gunInRange&&a.gunStateKnown==b.gunStateKnown;}
 static void seedFacing(GameWorld&w,int body,int gun){std::string error;auto snap=w.snapshot();auto&a=snap.actors[1];a.direction=body;a.enemyTurn=initializeEnemyTurn(a.enemyTurnConfig,body,gun);need(w.restoreSnapshot(snap,error),error);}
@@ -50,7 +53,7 @@ int main(){try{
   need(sawHalfPose,"Cop regression observes an actual admitted half pose");
  }
  for(const std::string family:{"Tank","Turret"}){
-  auto s=fixture(family,true);GameWorld w;need(w.load(s,l,error),error);
+  auto s=fixture(family,true);GameWorld w;need(w.load(s,l,error),error);readyClock(w);
   tickToFirstSteer(w,.016f,std::pair{18,0});const auto&first=*w.actors()[1].enemyTurn;
   need(first.bodyPose==19&&first.bodyRemainingMs==0&&first.gunPose==2&&w.actors()[1].direction==18,"terminal target-facing holds hull and advances gun separately");
   need(first.turnCommand==0,"held hull cannot leak stale turn command into firing/lean");
@@ -68,7 +71,7 @@ int main(){try{
  {auto s=fixture("Tank",true,100);GameWorld w;need(w.load(s,l,error),error);tickToFirstSteer(w,.016f,std::pair{0,8});const auto&a=*w.actors()[1].enemyTurn;
   need(a.bodyPose==2&&a.gunPose==10&&a.gunPreviousPose==10&&a.gunDesiredPose==9,"route-facing hull turn carries relative gun orientation without changing gun goal");need(w.projectiles().empty(),"outside native attack window remains nonfiring");
  }
- {auto s=fixture("Turret",true,300,true);GameWorld w;need(w.load(s,l,error),error);seedFacing(w,18,0);for(int n=0;n<50&&w.projectiles().empty();++n)w.tick(.016f,{});
+ {auto s=fixture("Turret",true,300,true);GameWorld w;need(w.load(s,l,error),error);readyClock(w);seedFacing(w,18,0);for(int n=0;n<50&&w.projectiles().empty();++n)w.tick(.016f,{});
   need(w.projectiles().size()==1&&w.projectiles()[0].guidanceClass&&w.projectiles()[0].guidanceTarget==0,"Tracker newborn acquires player using gun ring");
   need(w.projectiles()[0].guidance.pose48==9,"Tracker newborn pose matches gunheading4 rather than hull18");
  }

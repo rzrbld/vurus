@@ -134,7 +134,7 @@ add_executable(vurus
   src/render/level_map.cpp
   src/game/world.cpp src/game/world_awake.cpp src/game/world_pool.cpp src/game/tile_body_native.cpp src/game/tile_body_resources.cpp src/game/world_grenade_contacts.cpp src/game/world_actor_contacts.cpp src/game/world_ammo_damage.cpp src/game/world_ordinary_enemy_ai.cpp src/game/ordinary_enemy_ai_native.cpp src/game/world_spider.cpp src/game/world_spider_navigation.cpp src/game/spider_brain.cpp src/game/native_navigation.cpp src/game/world_guidance.cpp src/game/projectile_guidance.cpp src/game/missile_guidance.cpp
   src/game/world_contacts.cpp
-  src/game/world_explosions.cpp src/game/world_projectile_fx.cpp src/game/world_actor_create.cpp src/game/world_codes.cpp src/game/world_held.cpp src/game/world_generators.cpp
+  src/game/world_body_graphics.cpp src/game/world_explosions.cpp src/game/world_projectile_fx.cpp src/game/world_actor_create.cpp src/game/world_codes.cpp src/game/world_held.cpp src/game/world_generators.cpp
   src/game/world_surprise.cpp
   src/game/world_save.cpp
   src/game/save_file.cpp
@@ -395,7 +395,7 @@ if(BUILD_TESTING)
     src/assets/gaf.cpp src/assets/gob.cpp src/assets/lzss.cpp)
   target_include_directories(navigation_test PRIVATE src)
   add_test(NAME navigation COMMAND navigation_test)
-  add_executable(world_test tests/world_test.cpp src/game/difficulty.cpp src/game/world_save.cpp src/game/save_file.cpp src/game/hud_stats.cpp src/game/world.cpp src/game/world_awake.cpp src/game/world_pool.cpp src/game/tile_body_native.cpp src/game/tile_body_resources.cpp src/game/world_grenade_contacts.cpp src/game/world_actor_contacts.cpp src/game/world_ammo_damage.cpp src/game/world_ordinary_enemy_ai.cpp src/game/ordinary_enemy_ai_native.cpp src/game/world_spider.cpp src/game/world_spider_navigation.cpp src/game/spider_brain.cpp src/game/native_navigation.cpp src/game/world_guidance.cpp src/game/projectile_guidance.cpp src/game/missile_guidance.cpp src/game/world_contacts.cpp src/game/world_explosions.cpp src/game/world_projectile_fx.cpp src/game/world_actor_create.cpp src/game/world_codes.cpp src/game/world_held.cpp src/game/world_generators.cpp src/render/animation.cpp src/assets/gaf_sprite.cpp src/game/world_surprise.cpp src/game/world_gates.cpp src/game/gates.cpp src/game/navigation.cpp src/game/brain.cpp
+  add_executable(world_test tests/world_test.cpp src/game/difficulty.cpp src/game/world_save.cpp src/game/save_file.cpp src/game/hud_stats.cpp src/game/world.cpp src/game/world_awake.cpp src/game/world_pool.cpp src/game/tile_body_native.cpp src/game/tile_body_resources.cpp src/game/world_grenade_contacts.cpp src/game/world_actor_contacts.cpp src/game/world_ammo_damage.cpp src/game/world_ordinary_enemy_ai.cpp src/game/ordinary_enemy_ai_native.cpp src/game/world_spider.cpp src/game/world_spider_navigation.cpp src/game/spider_brain.cpp src/game/native_navigation.cpp src/game/world_guidance.cpp src/game/projectile_guidance.cpp src/game/missile_guidance.cpp src/game/world_contacts.cpp src/game/world_body_graphics.cpp src/game/world_explosions.cpp src/game/world_projectile_fx.cpp src/game/world_actor_create.cpp src/game/world_codes.cpp src/game/world_held.cpp src/game/world_generators.cpp src/render/animation.cpp src/assets/gaf_sprite.cpp src/game/world_surprise.cpp src/game/world_gates.cpp src/game/gates.cpp src/game/navigation.cpp src/game/brain.cpp
     src/game/combat.cpp src/game/interactions.cpp src/game/controls.cpp src/game/content.cpp
     src/game/level.cpp src/assets/content_text.cpp src/assets/gaf.cpp src/assets/gob.cpp src/assets/lzss.cpp)
   get_target_property(VYRUZ_WORLD_TEST_SOURCES world_test SOURCES)
@@ -407,6 +407,14 @@ if(BUILD_TESTING)
   target_include_directories(vyruz_world_test_core PRIVATE src)
   set_property(TARGET world_test PROPERTY SOURCES tests/world_test.cpp $<TARGET_OBJECTS:vyruz_world_test_core>)
   set(VYRUZ_WORLD_TEST_SOURCES $<TARGET_OBJECTS:vyruz_world_test_core>)
+  add_executable(enemy_weapon_readiness_test tests/enemy_weapon_readiness_test.cpp src/game/ordinary_enemy_ai_native.cpp src/game/native_navigation.cpp)
+  target_include_directories(enemy_weapon_readiness_test PRIVATE src)
+  add_test(NAME enemy_weapon_readiness COMMAND enemy_weapon_readiness_test)
+  add_executable(enemy_readiness_resource_audit EXCLUDE_FROM_ALL tests/enemy_readiness_resource_audit.cpp ${VYRUZ_WORLD_TEST_SOURCES} src/io/vfs.cpp src/io/rsc.cpp)
+  target_include_directories(enemy_readiness_resource_audit PRIVATE src tests)
+  add_executable(enemy_weapon_readiness_world_test tests/enemy_weapon_readiness_world_test.cpp ${VYRUZ_WORLD_TEST_SOURCES})
+  target_include_directories(enemy_weapon_readiness_world_test PRIVATE src)
+  add_test(NAME enemy_weapon_readiness_world COMMAND enemy_weapon_readiness_world_test)
   add_executable(spatial_dirty_world_test tests/spatial_dirty_world_test.cpp ${VYRUZ_WORLD_TEST_SOURCES})
   target_include_directories(spatial_dirty_world_test PRIVATE src)
   add_test(NAME spatial_dirty_world COMMAND spatial_dirty_world_test)
@@ -1030,4 +1038,25 @@ if(BUILD_TESTING)
   target_include_directories(shared_sample_audio_test PRIVATE src)
   target_link_libraries(shared_sample_audio_test PRIVATE SDL2::SDL2 OpenGL::GL indeo)
   add_test(NAME shared_sample_audio COMMAND shared_sample_audio_test)
+endif()
+
+if(BUILD_TESTING)
+  add_executable(contact_create_world_test tests/contact_create_world_test.cpp ${VYRUZ_WORLD_TEST_SOURCES})
+  target_include_directories(contact_create_world_test PRIVATE src)
+  target_link_libraries(contact_create_world_test PRIVATE ZLIB::ZLIB)
+  add_test(NAME contact_create_world COMMAND contact_create_world_test)
+endif()
+
+if(BUILD_TESTING)
+  add_executable(native_body_graphics_test tests/native_body_graphics_test.cpp src/render/animation.cpp)
+  target_include_directories(native_body_graphics_test PRIVATE src)
+  add_test(NAME native_body_graphics COMMAND native_body_graphics_test)
+  add_executable(native_body_graphics_world_test tests/native_body_graphics_world_test.cpp ${VYRUZ_WORLD_TEST_SOURCES})
+  target_include_directories(native_body_graphics_world_test PRIVATE src tests)
+  add_test(NAME native_body_graphics_world COMMAND native_body_graphics_world_test)
+  add_executable(body_graphics_resource_audit EXCLUDE_FROM_ALL tests/body_graphics_resource_audit.cpp ${VYRUZ_WORLD_TEST_SOURCES} src/io/vfs.cpp src/io/rsc.cpp src/game/menu.cpp)
+  target_include_directories(body_graphics_resource_audit PRIVATE src tests)
+  add_executable(native_body_graphics_app_audit EXCLUDE_FROM_ALL tests/native_body_graphics_app_audit.cpp $<TARGET_OBJECTS:vyruz_save_audit_core>)
+  target_include_directories(native_body_graphics_app_audit PRIVATE src tests)
+  target_link_libraries(native_body_graphics_app_audit PRIVATE SDL2::SDL2 OpenGL::GL indeo)
 endif()

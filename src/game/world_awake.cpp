@@ -126,6 +126,7 @@ void GameWorld::visitNativeActor(size_t id,float seconds,const WorldInput& input
     const auto convertedTail=[&] {
         updateActorCreates(id,scene_->objects[id].position);
         if(!actors_[id].alive)return;
+        if(retireBodyGraphics(id))return;
         if(actors_[id].effect){updateExplosion(id,seconds*1000);return;}
         if(actors_[id].nativeFireRequested)fire(id,true,false);
         if(actors_[id].alive)updateGenerator(id,seconds*1000);
@@ -148,6 +149,7 @@ void GameWorld::visitNativeActor(size_t id,float seconds,const WorldInput& input
         convertedTail();return; //Two-pieces conversion reaches only the common tail.
     }
     if(id!=player_ && !actorUpdateAdmitted(id))return;
+    advanceBodyGraphicsAwake(id,bodyGraphicsStepMs_);
     actors_[id].pickupDelayMs=std::max(0.f,actors_[id].pickupDelayMs-seconds*1000);
     actors_[id].walkingCommand=false;actors_[id].enemyRevealed=false;
     const auto previous=scene_->objects[id].position;
@@ -259,6 +261,7 @@ void GameWorld::visitNativeActor(size_t id,float seconds,const WorldInput& input
     //442aa2/444ca0: CREATE is before subtype FX/Ammo/ordinary fire dispatch.
     updateActorCreates(id,previous);
     if(id>=actors_.size() || !actors_[id].alive)return;
+    if(retireBodyGraphics(id))return;
     if(actors_[id].effect){updateExplosion(id,seconds*1000);return;}
     if(pending)fire(pending->actor,pending->held,pending->sweep,pending->previous,pending->aiming);
     if(id<actors_.size() && actors_[id].alive)updateGenerator(id,seconds*1000);

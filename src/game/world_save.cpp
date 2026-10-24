@@ -52,7 +52,7 @@ uint64_t GameWorld::contentFingerprint() const {
     return h.value;
 }
 WorldSnapshot GameWorld::snapshot() const {
-    WorldSnapshot s;s.actorCells=actorCells_;s.spiderNavigation=spiderNavigation_;s.catalogHash=catalogHash_;s.difficulty=difficulty_.level;s.objects=scene_->objects;s.actors=actors_;s.projectiles=projectiles_;
+    WorldSnapshot s;s.bodyGraphicsStepMs=bodyGraphicsStepMs_;s.actorCells=actorCells_;s.spiderNavigation=spiderNavigation_;s.catalogHash=catalogHash_;s.difficulty=difficulty_.level;s.objects=scene_->objects;s.actors=actors_;s.projectiles=projectiles_;
     s.player=player_;s.navigationCursor=navigationCursor_;s.motion=motion_;s.elapsedMs=elapsedMs_;s.playerKills=playerKills_;s.ammoHits=ammoHits_;s.ammoMisses=ammoMisses_;
     s.shotsFired=shotsFired;s.pickupsTaken=pickupsTaken;s.actorsDestroyed=actorsDestroyed;s.transition=transition_;
     s.rejectedLifts=rejectedLifts_;s.message=message_;std::ostringstream random;random<<random_;s.randomState=random.str();
@@ -145,6 +145,9 @@ bool GameWorld::restoreSnapshot(const WorldSnapshot& saved,std::string& error) {
             held.object.classId.value>=scene_->classes.size() ||
             !contentNameEqual(held.className,scene_->classes[held.object.classId.value].name)))return fail("invalid held source identity");
     }
+    if(saved.bodyGraphicsStepMs<0 || saved.bodyGraphicsStepMs>101)return fail("Invalid body graphics elapsed step");
+    size_t graphicBodies=0;for(const auto& a:saved.actors)graphicBodies+=bool(a.bodyGraphics);
+    if(graphicBodies>(std::numeric_limits<uint64_t>::max()-nextBodyGraphicsIdentity_)/24)return fail("Body graphics audio identity exhausted");
     auto actors=saved.actors;
     // Transient hit/engine presentation is deliberately excluded from checkpoints.
     for(auto& actor:actors){actor.visualThrust=actor.engineGlowMs=actor.hitFlashMs=actor.shieldPulse=0;actor.headlightVisible=true;actor.locomoting=false;actor.ammoHidden=false;actor.ammoContactDisabled=false;actor.ammoAlpha=false;actor.ammoVisibility=49;actor.ammoFadeClockMs=0;actor.nativeAmmoAbort=false;}
@@ -154,6 +157,9 @@ bool GameWorld::restoreSnapshot(const WorldSnapshot& saved,std::string& error) {
         if(a.nativeAmmoContinuation && (!a.nativeMotionHistory() || (!a.alive && a.reactivateMs<0)))return fail("invalid pending Ammo movement");
         if(o.id.value!=i || o.classId.value>=scene_->classes.size() || (o.owner&&o.owner->value>=count) || !position(o.position))return fail("invalid checkpoint object reference");
         a.nativeSubtype=nativeObjectSubtype(o,i==saved.player);
+        a.bodyGraphicsGraphicUpdate=propertyBool(scene_->classes[o.classId.value].properties,"Graphic-update-needed");
+        try {if(!validateBodyGraphics(a,o,error))return false;}
+        catch(const std::runtime_error& failure){return fail(failure.what());}
         a.hasAmmoAttribute=attribute(o.properties,"ammo")!=nullptr;
         a.visibleWhenFiring=propertyBool(o.properties,"Visible-when-firing");
         if((a.enemyMoveCommand!=0 && a.enemyMoveCommand!=200 && a.enemyMoveCommand!=208) || a.direction<0 || a.direction>=24 || (a.weapons.empty()?a.selectedWeapon!=0:a.selectedWeapon>=a.weapons.size()) ||
@@ -321,6 +327,14 @@ bool GameWorld::restoreSnapshot(const WorldSnapshot& saved,std::string& error) {
     reserveRuntimeStorage(actors);reserveRuntimeStorage(objects);
     difficulty_=restoredDifficulty;
     scene_->objects=std::move(objects);actors_=std::move(actors);projectiles_=std::move(projectiles);
+    bodyGraphicsStepMs_=saved.bodyGraphicsStepMs;
+    bodyGraphicsAudio_.clear();bodyGraphicsAudioPins_.clear();
+    for(auto& actor:actors_)if(actor.bodyGraphics){
+        NativeBodyGraphicsIdentities ids;
+        if(nativeBodyGraphicsIdentities(nextBodyGraphicsIdentity_,ids)){
+            nextBodyGraphicsIdentity_+=ids.size();nativeBodyGraphicsRestoreAudio(*actor.bodyGraphics,ids);
+        }
+    }
     nextNativeGeneration_=saved.nativeAmmoLifecycleKnown?saved.nextNativeGeneration:1;
     nextNativeCellOrder_=saved.nativeAmmoLifecycleKnown?saved.nextNativeCellOrder:1;
     nextNativeBodyIdentity_=saved.nativeAmmoLifecycleKnown?saved.nextNativeBodyIdentity:1;

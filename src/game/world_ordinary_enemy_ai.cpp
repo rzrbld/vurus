@@ -1,4 +1,5 @@
 #include "game/world.h"
+#include "game/enemy_weapon_readiness.h"
 #include "game/ordinary_enemy_ai_native.h"
 #include "game/enemy_idle_native.h"
 #include "game/enemy_aim.h"
@@ -277,7 +278,10 @@ bool GameWorld::advanceOrdinaryEnemyAI(size_t id,float seconds,std::span<const C
                 aim.subtype=config.targeting.subtype;aim.bodyPose=actor.enemyTurn?actor.enemyTurn->bodyPose:actor.direction+1;
                 aim.status=route.status;aim.movementCommand=commands.movementCommand;aim.terminal=terminal(route);
                 aim.guided=guided;aim.twoPieces=actor.enemyTurnConfig.twoPieces;aim.canTurnOnPlace=config.canTurnOnPlace;
-                aim.weaponPresent=!actor.weapons.empty();if(aim.weaponPresent)aim.range=static_cast<int32_t>(actor.weapons[actor.selectedWeapon].range);
+                aim.weaponPresent=!actor.weapons.empty();if(aim.weaponPresent){
+                    const auto& weapon=actor.weapons[actor.selectedWeapon];aim.range=static_cast<int32_t>(weapon.range);
+                    aim.ready=nativeEnemyWeaponReady(weapon.config,weapon.state,static_cast<uint64_t>(elapsedMs_),actor.nativeAmmoOwner.activeAmmo);
+                }
                 aim.turnCommand=actor.enemyTurn?actor.enemyTurn->turnCommand:0;
                 const auto gate=nativeEnemyWeaponAim(aim);commands.movementCommand=gate.movementCommand;
                 firing={gate.admitted,gate.fire};

@@ -232,7 +232,7 @@ bool runScene(Session& session, const bench::Scene& spec, size_t index, bench::R
         const auto animationStart = Clock::now();
         advanceSceneAnimation(a, 1000.0 / 60, a.world.elapsedMilliseconds()); a.hud.advance(1000.0 / 60, &a.world);
         const auto animationEnd = Clock::now();
-        a.audio.setListenerHalfWidth(320); a.audio.consume(a.world, a.content, a.sceneRenderer.takeAudioCues());
+        a.audio.setListenerHalfWidth(320); consumeGameplayAudio(a);
         a.audio.updateSpeech(); a.audio.updateMusic(); const auto audioEnd = Clock::now();
         for (auto [id, revision] : a.sceneRenderer.finishedGates(a.world.actors())) a.world.finishGateAnimation(id, revision);
         for (auto id : a.sceneRenderer.finishedEffects(a.world.actors())) a.world.expireVisual(id);

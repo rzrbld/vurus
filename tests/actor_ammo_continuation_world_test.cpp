@@ -120,7 +120,7 @@ int main(){try{unsigned cases=0,resumes=0;
   const auto rested=AmmoImpactNativeTestAccess::step(f.world,id,{},ms);need(!rested.ammoAbort,"rest has no impact");
   need(f.world.actors()[id].nativeAmmoContinuation&&f.world.actors()[id].nativeMotionHistory()->center==old,"rest does not commit retained bounds");
   same(velocity(f.world,id),{},"rest clears velocity");need(f.world.actors()[id].nativeMotionHistory()->previousSurface.x==p.x,"rest copies current surface into previous");
-  SaveGame saved;std::string error;const auto bytes=diskBytes(f.world);need(bytes[8]==36&&decodeSave(bytes,saved,error),"Current writer retains v33 pending-movement checkpoint");
+  SaveGame saved;std::string error;const auto bytes=diskBytes(f.world);need(bytes[8]==37&&decodeSave(bytes,saved,error),"Current writer retains v33 pending-movement checkpoint");
   auto content=blueprint;GameWorld resumed;need(resumed.load(content,f.level,error)&&resumed.restoreSnapshot(saved.levels.begin()->second.world,error),error.c_str());
   need(resumed.actors()[id].nativeAmmoContinuation&&diskBytes(resumed)==bytes,"disk retains continuation and exact cells/history");
   // A malformed saved pending body must fail transactionally.

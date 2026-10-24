@@ -42,6 +42,7 @@ bool GameWorld::updateAmmoActivation(Projectile& shot,float ms) {
         auto& actor=actors_[*shot.visual];
         if(actor.ammoHidden!=shot.phaseHidden)markSpatialDirty(*shot.visual);
         actor.ammoHidden=shot.phaseHidden;
+
         actor.ammoContactDisabled=!ammoContactEnabled(shot);
         actor.ammoFadeClockMs+=ms;
         const float steps=std::floor(actor.ammoFadeClockMs/14.f);
@@ -54,11 +55,13 @@ bool GameWorld::updateAmmoActivation(Projectile& shot,float ms) {
         shot.inactiveMs-=ms;
         if(shot.inactiveMs>0){visible();return false;}
         shot.inactiveMs=0;shot.onMs=0;shot.phaseHidden=false;
+        if(shot.visual)actors_[*shot.visual].bodyGraphicsHidden=false;
         if(shot.onMaximum!=0)shot.onMs=randomTimer(shot.onMinimum,shot.onMaximum);
     }
     // Native explicitly uses <0, not <=0: an exactly-zero on timer stops.
     if(shot.onMs>0 && (shot.onMs-=ms)<0){
         shot.onMs=0;shot.inactiveMs=-1;shot.phaseHidden=true;
+        if(shot.visual)actors_[*shot.visual].bodyGraphicsHidden=true;
         if(shot.offMaximum!=0)shot.inactiveMs=randomTimer(shot.offMinimum,shot.offMaximum);
         visible();return false;
     }

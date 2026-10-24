@@ -1,4 +1,5 @@
 #include "game/world.h"
+#include "game/enemy_weapon_readiness.h"
 #include "game/properties.h"
 #include "game/spider_contact_native.h"
 #include "game/spider_turn_native.h"
@@ -265,7 +266,11 @@ bool GameWorld::advanceSpiderAI(size_t id,float seconds,std::span<const ContentP
     actor.walkingCommand=actor.enemyMoveCommand==200&&actor.direction%6==0;
     actor.locomoting=nativeDistanceSquared(position,scene_->objects[id].position)>.0001f;
     actor.enemyRevealed=firing&&actor.visibleWhenFiring;
-    fire(id,firing);
+    // Preserve the existing target/reveal admission while gating only fire.
+    const bool ready=firing && !actor.weapons.empty() && nativeEnemyWeaponReady(
+        actor.weapons[actor.selectedWeapon].config,actor.weapons[actor.selectedWeapon].state,
+        static_cast<uint64_t>(elapsedMs_),actor.nativeAmmoOwner.activeAmmo);
+    fire(id,ready);
     return locked;
 }
 }

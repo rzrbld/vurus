@@ -27,7 +27,7 @@ template<class K,class V> struct Map<std::map<K,V>>:std::true_type{};
 template<class T> struct Set:std::false_type{};
 template<class T> struct Set<std::set<T>>:std::true_type{};
 struct Archive {
- uint32_t version=36;
+ uint32_t version=37;
  bool reading; std::vector<uint8_t> bytes; std::span<const uint8_t> input; size_t pos=0,depth=0,allocationRemaining=1024*1024*1024;
  Archive():reading(false){} explicit Archive(std::span<const uint8_t> in):reading(true),input(in){}
  uint64_t integer(uint64_t n,size_t size){
@@ -250,6 +250,15 @@ template<class A,class V>void fields(A& a,V& v){
   if(a.version>=34)a(v.nativeHit,v.nativePoolSlot,v.nativeFireRequested);else if(a.reading){v.nativeHit=false;v.nativePoolSlot=SIZE_MAX;v.nativeFireRequested=false;}
   if(a.version>=32)a(v.nativeGeneration,v.nativeCreatorGeneration,v.nativeAmmoOwner);
   else if(a.reading){v.nativeGeneration=v.nativeCreatorGeneration=0;v.nativeAmmoOwner={};}
+  if(a.version>=37)a(v.bodyGraphics,v.bodyGraphicsLegacy,v.bodyGraphicsHidden);
+  else if(a.reading){v.bodyGraphics.reset();v.bodyGraphicsLegacy=true;}
+ }else
+ if constexpr(std::is_same_v<V,NativeBodyGraphicsState>){
+  uint32_t binding=uint32_t(v.binding),kind=uint32_t(v.kind);a(binding,kind,v.baseSequence);
+  if(binding>2 || (kind!=0x10 && kind!=0x15))throw Failure("Invalid body graphics binding");
+  if(a.reading){v.binding=NativeBodyGraphicsBinding(binding);v.kind=NativeBodyGraphicsKind(kind);}
+  for(auto& slot:v.slots){a(slot.sequence,slot.animation);if(a.reading){slot.audioIdentity=0;slot.audioRequested=false;}}
+  if(!validNativeBodyGraphicsShape(v))throw Failure("Invalid directional body graphics state");
  }else
  TYPE(HeldItem,v.object,v.actor,v.mapPath,v.className,v.holder,v.surprise)
  TYPE(MissileTargetSample,v.x,v.y,v.tileX,v.tileY)
@@ -299,6 +308,8 @@ template<class A,class V>void fields(A& a,V& v){
  }else
  TYPE(TransitionRequest,v.lift,v.path,v.cost)
  if constexpr(std::is_same_v<V,WorldSnapshot>){
+  if(a.version>=37)a(v.bodyGraphicsStepMs);else if(a.reading)v.bodyGraphicsStepMs=0;
+  if(v.bodyGraphicsStepMs<0 || v.bodyGraphicsStepMs>101)throw Failure("Invalid body graphics elapsed step");
   if(a.version>=31)a(v.actorCells);else if(a.reading)v.actorCells.reset();
   if(a.version>=24)a(v.spiderNavigation);else if(a.reading)v.spiderNavigation.reset();
   a(v.catalogHash,v.objects,v.actors,v.projectiles,v.player,v.navigationCursor,v.motion,v.elapsedMs,v.playerKills,v.shotsFired,v.pickupsTaken,v.actorsDestroyed,v.transition,v.rejectedLifts,v.randomState,v.message,v.savePlot,v.saveDwellMs,v.saveAttempted);
@@ -416,7 +427,7 @@ bool decodeSave(std::span<const uint8_t> bytes,SaveGame& out,std::string& error)
   if(!complete)throw Failure("Invalid compressed save data");
   bytes=inflated; // The normal magic/checksum/validation below also rejects nested envelopes.
  }
- Archive header(bytes);for(size_t i=0;i<8;++i)if(header.integer(0,1)!=uint8_t(Magic[i]))throw Failure("Not a Vyruz port save");auto version=header.integer(0,4);if(version!=1&&version!=2&&version!=3&&version!=4&&version!=5&&version!=6&&version!=7&&version!=8&&version!=9&&version!=10&&version!=11&&version!=12&&version!=13&&version!=14&&version!=15&&version!=16&&version!=17&&version!=18&&version!=19&&version!=20&&version!=21&&version!=22&&version!=23&&version!=24&&version!=25&&version!=26&&version!=27&&version!=28&&version!=29&&version!=30&&version!=31&&version!=32&&version!=33&&version!=34&&version!=35&&version!=36)throw Failure("Unsupported save version");auto size=header.integer(0,8),checksum=header.integer(0,8);auto payload=bytes.subspan(header.pos);if(size!=payload.size())throw Failure("Invalid save payload length");if(hash(payload)!=checksum)throw Failure("Save checksum mismatch");Archive a(payload);a.version=uint32_t(version);SaveGame s;a(s);if(a.pos!=payload.size())throw Failure("Trailing save data");validate(s);out=std::move(s);error.clear();return true;}catch(const std::exception& e){error=e.what();return false;}}
+ Archive header(bytes);for(size_t i=0;i<8;++i)if(header.integer(0,1)!=uint8_t(Magic[i]))throw Failure("Not a Vyruz port save");auto version=header.integer(0,4);if(version!=1&&version!=2&&version!=3&&version!=4&&version!=5&&version!=6&&version!=7&&version!=8&&version!=9&&version!=10&&version!=11&&version!=12&&version!=13&&version!=14&&version!=15&&version!=16&&version!=17&&version!=18&&version!=19&&version!=20&&version!=21&&version!=22&&version!=23&&version!=24&&version!=25&&version!=26&&version!=27&&version!=28&&version!=29&&version!=30&&version!=31&&version!=32&&version!=33&&version!=34&&version!=35&&version!=36&&version!=37)throw Failure("Unsupported save version");auto size=header.integer(0,8),checksum=header.integer(0,8);auto payload=bytes.subspan(header.pos);if(size!=payload.size())throw Failure("Invalid save payload length");if(hash(payload)!=checksum)throw Failure("Save checksum mismatch");Archive a(payload);a.version=uint32_t(version);SaveGame s;a(s);if(a.pos!=payload.size())throw Failure("Trailing save data");validate(s);out=std::move(s);error.clear();return true;}catch(const std::exception& e){error=e.what();return false;}}
 uint64_t catalogFingerprint(const SceneContent& content){auto classes=content.classes;auto paths=content.paths;Archive a;a(classes,paths);return hash(a.bytes);}
 bool writeSaveFile(const std::string& path,const SaveGame& s,std::string& error){
  std::vector<uint8_t> bytes;if(!encodeStoredSave(s,bytes,error))return false;

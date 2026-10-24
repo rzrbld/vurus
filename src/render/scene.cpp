@@ -882,6 +882,9 @@ void SceneRenderer::advance(double milliseconds,const std::vector<ActorState>* a
         if(channel.skipNewbornAdvance){channel.skipNewbornAdvance=false;continue;}
         if(playerOnly && (!playerObject_ || channel.object!=*playerObject_))continue;
         if(channel.firing)continue;
+        if(actors && !channel.shadow && channel.object<actors->size() && (*actors)[channel.object].bodyGraphics && (*actors)[channel.object].bodyGraphics->binding==NativeBodyGraphicsBinding::Present && !(*actors)[channel.object].bodyGraphicsLegacy) {
+            channel.pendingAudio.clear();continue;
+        }
         if(nativeEnemyPhases_&&nativeItemPhases_&&channel.nativeItem) {
             // Preserve construction/reset audio independently of camera playback.
             for(const auto& frame:channel.pendingAudio)queueAudio(channel,frame);
@@ -958,7 +961,8 @@ std::vector<size_t> SceneRenderer::finishedEffects(const std::vector<ActorState>
     std::vector<size_t> result;
     for(size_t i=0;i<channelScan_.size();++i) {
         const auto object=channelScan_[i].object;
-        if(object>=actors.size()||!actors[object].alive||!actors[object].effect)continue;
+        if(object>=actors.size()||!actors[object].alive||!actors[object].effect||
+           (actors[object].bodyGraphics && actors[object].bodyGraphics->binding==NativeBodyGraphicsBinding::Present && !actors[object].bodyGraphicsLegacy))continue;
         const auto& channel=channels_[i];
         if (!channel.shadow &&
         !channel.cursor.frame(channel.bank->animation.sequences[channel.sequence-1])) result.push_back(channel.object);
@@ -1279,6 +1283,15 @@ void SceneRenderer::draw(Gfx& gfx,const SceneContent& scene,const Level& level,f
             sequence=&drawBank->animation.sequences[24];
             const size_t index=actor->enemyTurn?actor->enemyTurn->gunPose-1:actor->direction;
             pose=index<sequence->subframes.size()?&sequence->subframes[index]:nullptr;
+        } else if(actor && !channel.shadow && !channel.firing && actor->bodyGraphics && actor->bodyGraphics->binding==NativeBodyGraphicsBinding::Present && !actor->bodyGraphicsLegacy) {
+            // Authoritative clocks were advanced in native World/visible phases;
+            // pose lookup is const, including after a same-visit heading change.
+            const auto& state=*actor->bodyGraphics;
+            pose=nativeBodyGraphicsFrame(state,drawBank->animation,actor->direction);
+            if(actor->direction>=0 && actor->direction<24) {
+                const auto selected=state.slots[actor->direction].sequence;
+                if(selected && selected<=drawBank->animation.sequences.size())sequence=&drawBank->animation.sequences[selected-1];
+            }
         } else {
             uint32_t chosen=channel.firing?channel.sequence:player && !channel.shadow?playerBank:(channel.shadow?object.shadow.sequence.value:object.sprite.sequence.value);
             if(channel.lift || channel.spider || channel.walker)chosen=channel.sequence;

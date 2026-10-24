@@ -174,6 +174,15 @@ bool GameWorld::applyNativeActorAmmoContact(size_t incoming,
         shot.hitEffect=propertyText(ammo->children,"hit-fx");
         const auto heading=nativeHeading(actors_[*visual].direction);shot.directionX=heading.x;shot.directionZ=heading.y;
     }else return false; // Resolver guarantees a body for admitted live Ammo.
+    //43d86b..43d879: source CREATE runs at its existing age/current/previous
+    //surface before contact relocation. An actor consuming Ammo does not
+    //refresh that Ammo's motion history as a projectile visit would.
+    ContentPosition createPrevious=shot.position;
+    if(shot.nativeBareBody)createPrevious=shot.nativeBareBody->motion.previousSurface;
+    if(visual)if(const auto* history=actors_[*visual].nativeMotionHistory())createPrevious=history->previousSurface;
+    beginAmmoImpact(shot,incoming,true);
+    if(liveShot)updateProjectileCreates(shot,createPrevious);
+    else if(visual)updateActorCreates(*visual,createPrevious);
     const auto current=spiderSurfaceToNative(shot.position.x,shot.position.y);
     NativeNavPoint radialCenter{current.x,current.y};
     if(shot.nativeBareBody)radialCenter=shot.nativeBareBody->motion.center;
@@ -188,7 +197,8 @@ bool GameWorld::applyNativeActorAmmoContact(size_t incoming,
         auto& consumed=projectiles_[*query.projectile];consumed.position=finitePosition;synchronizeBareAmmoCell(consumed);
     }
     if(visual){scene_->objects[*visual].position=finitePosition;synchronizeActorCell(*visual);}
-    applyAmmoImpact(shot,incoming,true,radialCenter,tickMilliseconds);
+    applyAmmoRadialImpact(shot,radialCenter,tickMilliseconds);
+    finishAmmoImpact(shot,incoming,true);
     //43d7d0 removes only after radial and direct phases. Re-find the body by
     //stable identity because the final callback/FX may grow or clear the vector.
     if(shot.nativeBodyIdentity){

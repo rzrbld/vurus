@@ -1,4 +1,5 @@
 #include "game/world.h"
+#include <stdexcept>
 #include "game/runtime_storage.h"
 #include "game/enemy_idle_native.h"
 #include "game/weapon_muzzle_native.h"
@@ -444,6 +445,7 @@ bool GameWorld::load(SceneContent& scene,const Level& level,std::string& error,i
     spiderNavigation_.reset();spiderNavigationActors_.clear();
     scene_=&scene;level_=&level;player_=scene.player->value;elapsedMs_=0;playerKills_=0;ammoHits_=ammoMisses_=0;motion_={};map_={};
     catalogHash_=contentFingerprint();savePlot_.reset();saveDwellMs_=0;saveAttempted_=false;saveRequest_.reset();
+    bodyGraphicsBanks_.clear();bodyGraphicsAudio_.clear();bodyGraphicsAudioPins_.clear();bodyGraphicsStepMs_=0;
     effectSequences_.clear();attachedProtectionActors_.clear();savingRoles_.reset();pickupCandidates_.clear();navigationItemMetadata_.clear();classNames_.clear();actors_.clear();transientRecordCandidates_.clear();referenceOwnerCandidates_.clear();projectiles_.clear();transition_.reset();rejectedLifts_.clear();diagnostics_.clear();message_.clear();
     damageQueue_.clear();contactDamage_.clear();applyingDamage_=false;surprise_={};touchVictims_.clear();heldItems_.clear();
     actorCells_={};bareAmmoCells_={};bareAmmoIndex_.clear();visualAmmoIndex_.clear();
@@ -468,14 +470,17 @@ bool GameWorld::load(SceneContent& scene,const Level& level,std::string& error,i
     constructingScene_=true;
     //4159b2 finishes each placement (and its recursive CREATE) before the next
     //text record. Stable port IDs need not equal native allocation order.
+    try {
     for(size_t id=0;id<placed;++id) {
         actors_[id]=makeActor(scene.objects[id]);
         initializeNativeIdentity(id);
+        initializeBodyGraphics(id);
         registerSavingPrice(id);
         if(actors_[id].contactMine)contactMines_.push_back(id);
         updateActorCreates(id,scene.objects[id].position,true);
         synchronizeActorCell(id); //415b5a, after all construction children.
     }
+    }catch(const std::runtime_error& failure){constructingScene_=false;error=failure.what();return false;}
     constructingScene_=false;
     for(size_t id=0;id<actors_.size();++id) {
         const auto owner=scene_->objects[id].owner;
@@ -1247,6 +1252,8 @@ void GameWorld::collectReleasedTransientRecords() {
     for(const auto& e:audioEvents_)pin(e.actor);
     for(const auto& e:damageQueue_){pin(e.target);optional(e.source);}
     for(const auto& e:contactDamage_){pin(e.target);optional(e.source);}
+    for(const auto& cue:bodyGraphicsAudio_)pin(cue.actor);
+    for(const auto id:bodyGraphicsAudioPins_)pin(id);
     for(const auto& shot:projectiles_){pin(shot.owner);optional(shot.visual);optional(shot.guidanceTarget);}
     for(const auto& held:heldItems_){pin(held.holder);pin(held.object.id.value);}
     for(const size_t i:referenceOwnerCandidates_){
@@ -1297,11 +1304,13 @@ size_t GameWorld::spawn(ClassId id,ContentPosition position) {
     object.id={static_cast<uint32_t>(created)};object.classId=id;object.position=position;
     object.flags=cls.flags;object.sprite=cls.sprite;object.shadow=cls.shadow;
     object.behaviours=cls.behaviours;object.properties=cls.properties;
+    if(reused)forgetBodyGraphics(created);
     if(reused){scene_->objects[created]=std::move(object);actors_[created]=makeActor(scene_->objects[created]);}
     else {scene_->objects.push_back(std::move(object));actors_.push_back(makeActor(scene_->objects.back()));}
     registerTransientRecordCandidate(created);
     actors_[created].visualRevision=revision;actors_[created].reusedRecord=reused;
     initializeNativeIdentity(created);
+    initializeBodyGraphics(created);
     registerSavingPrice(created);
     if(actors_[created].contactMine)contactMines_.push_back(created);
     audioEvent(AudioEventKind::Spawn,created,cls.name);
@@ -1908,11 +1917,29 @@ void GameWorld::updateProjectile(size_t index,float seconds,bool nativeRouting) 
         if(shot.visual)actors_[*shot.visual].projectileAltitude=shot.slopeAltitude;
     }
     if(!groundImpact && !updateAmmoActivation(shot,seconds*1000)){if(nativeRouting)syncNavigation(shot);return;}
+    // Native440bxx admission precedes440cee. Keep the existing accepted slope
+    // adapter order, but never advance an inactive/on-expiry return.
+    if(shot.visual)advanceBodyGraphicsAwake(*shot.visual,bodyGraphicsStepMs_);
     // 4406e0 detonates an expired Damage-after fuse before propulsion or
     // collision, even if Tracker has lost its target. It is not Life-time.
     const bool fuseExpired=shot.fuseMs>0 && shot.damageRemainingMs<=0;
     if(!groundImpact && !fuseExpired)updateProjectileGuidance(shot,seconds*1000);
     const auto from=shot.position;
+    //440ebe fuse/ground exits before441797 refreshes previous surface.
+    //Moving CREATE instead sees the old native centre projected by4417aa.
+    ContentPosition retainedCreatePrevious=from,movingCreatePrevious=from;
+    if(!shot.creates.empty()) {
+        if(shot.nativeBareBody) {
+            retainedCreatePrevious=shot.nativeBareBody->motion.previousSurface;
+            const auto p=spiderNativeToSurface(shot.nativeBareBody->motion.center.x,shot.nativeBareBody->motion.center.y);
+            movingCreatePrevious={p.x,p.y};
+        }
+        if(shot.visual)if(const auto* history=actors_[*shot.visual].nativeMotionHistory()) {
+            retainedCreatePrevious=history->previousSurface;
+            const auto p=spiderNativeToSurface(history->center.x,history->center.y);
+            movingCreatePrevious={p.x,p.y};
+        }
+    }
     const auto fromNative=spiderSurfaceToNative(from.x,from.y);
     const NativeNavPoint radialCenter=shot.visual && actors_[*shot.visual].nativeMotionHistory()
         ?actors_[*shot.visual].nativeMotionHistory()->center:NativeNavPoint{fromNative.x,fromNative.y};
@@ -2042,7 +2069,23 @@ void GameWorld::updateProjectile(size_t index,float seconds,bool nativeRouting) 
             terrain=false;
         }
     }
-    updateProjectileCreates(shot,from);
+    const bool timedImpact=groundImpact || (shot.fuseMs>0 && shot.damageRemainingMs<=0);
+    const bool terminalImpact=groundImpact || terrain || target || (shot.fuseMs>0 && shot.damageRemainingMs<=0);
+    const bool contactImpact=terrain || target.has_value();
+    if(terminalImpact) {
+        //43d7d0 counters precede CREATE;440ebe radial precedes it instead.
+        beginAmmoImpact(shot,target,contactImpact);
+        if(timedImpact)applyAmmoRadialImpact(shot,radialCenter,seconds*1000.f);
+    }
+    const auto contactPosition=shot.position;
+    if(nativeContact.terminal) {
+        //4417ea/4417ff publish proposed surface BEFORE43d879 CREATE.
+        //Keep cell/graph membership unchanged until contact relocation below.
+        shot.position={nativeContact.proposedX,nativeContact.proposedY};
+        if(shot.visual)scene_->objects[*shot.visual].position=shot.position;
+    }
+    updateProjectileCreates(shot,timedImpact?retainedCreatePrevious:nativeContact.used?movingCreatePrevious:from);
+    if(nativeContact.terminal)shot.position=contactPosition;
     if(target && !nativeContact.used) {
         // 43d7d0 moves Ammo to 4069d0's contact coordinate before its
         // radial hit and removal. Keep the accepted swept selection; only
@@ -2053,11 +2096,12 @@ void GameWorld::updateProjectile(size_t index,float seconds,bool nativeRouting) 
         shot.position={static_cast<float>((point.x-point.z)*.8944271909999159),
                        static_cast<float>((point.x+point.z)*.4472135954999579)};
     }
-    if (groundImpact || terrain || target || (shot.fuseMs>0 && shot.damageRemainingMs<=0)) {
+    if (terminalImpact) {
         if(shot.visual){scene_->objects[*shot.visual].position=shot.position;synchronizeActorCell(*shot.visual);}
         const auto finitePosition=shot.position;
         if(nativeContact.impactSurface)shot.position=*nativeContact.impactSurface;
-        applyAmmoImpact(shot,target,terrain || target.has_value(),radialCenter,seconds*1000.f);
+        if(!timedImpact)applyAmmoRadialImpact(shot,radialCenter,seconds*1000.f);
+        finishAmmoImpact(shot,target,contactImpact);
         shot.position=finitePosition;
         shot.alive=false;
     }
@@ -2079,6 +2123,7 @@ void GameWorld::updateProjectile(size_t index,float seconds,bool nativeRouting) 
         }
         synchronizeBareAmmoCell(shot);
     }
+    if(shot.alive && shot.visual && retireBodyGraphics(*shot.visual))shot.alive=false;
     if(nativeRouting || nativeContact.publicationPending)syncNavigation(shot,nativeContact.contactHint);
 }
 void GameWorld::updateProjectiles(float seconds) {
@@ -2402,6 +2447,7 @@ void GameWorld::tick(float seconds,const WorldInput& suppliedInput) {
     if (!(seconds>0) || !std::isfinite(seconds) || seconds>0.1f || !scene_) return;
     invalidateRenderActors();
     collectReleasedTransientRecords();
+    bodyGraphicsStepMs_=static_cast<int32_t>(std::floor(elapsedMs_+double(seconds*1000.f))-std::floor(elapsedMs_));
     currentTickMilliseconds_=seconds*1000.f;
     const WorldInput input=endingSource_?WorldInput{}:suppliedInput;
     audioMotorAttempt_=input.movement.forward>0;

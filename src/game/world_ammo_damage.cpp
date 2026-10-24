@@ -313,8 +313,7 @@ void GameWorld::applyNativeBareAmmoDamage(std::uint64_t identity,float amount,Pr
     }
     body.nativeHit=(nativeHitLatchSet(input.actorFlags)&0x200u)!=0;
 }
-void GameWorld::applyAmmoImpact(Projectile& shot,std::optional<size_t> target,bool contact,
-                               NativeNavPoint center,float tickMilliseconds) {
+void GameWorld::beginAmmoImpact(Projectile& shot,std::optional<size_t> target,bool contact) {
     //441b9a: selected moving-Ammo contact latches before43d7d0, even if the
     //following Hit-fx admission suppresses direct health. Fuse-only calls do not.
     if(contact && target && *target<actors_.size()) {
@@ -324,6 +323,9 @@ void GameWorld::applyAmmoImpact(Projectile& shot,std::optional<size_t> target,bo
     //World26e0/e4 contact counters precede all damage/Hit-fx. The separate
     //owner264/268 direct-phase counters are not these exposed global counters.
     if(contact)recordAmmoContact(nativeAmmoOwner(shot),target);
+
+}
+void GameWorld::applyAmmoRadialImpact(Projectile& shot,NativeNavPoint center,float tickMilliseconds) {
     //43d7d0: the source's retained/current native bounds are independent of
     //the relocated contact surface. Radial first, including the direct target.
     const int radius=std::isfinite(shot.damageRadius) && shot.damageRadius>=1 && shot.damageRadius<=46340?
@@ -404,6 +406,9 @@ void GameWorld::applyAmmoImpact(Projectile& shot,std::optional<size_t> target,bo
                 }
         }
     }
+
+}
+void GameWorld::finishAmmoImpact(Projectile& shot,std::optional<size_t> target,bool contact) {
     //43d350: duplicate or invalid TYPE FX returns from the entire direct phase.
     if(!spawnProjectileHitEffect(shot,contact))return;
     if(target && *target<actors_.size()){
@@ -415,5 +420,13 @@ void GameWorld::applyAmmoImpact(Projectile& shot,std::optional<size_t> target,bo
     }
     if(const auto owner=nativeAmmoOwner(shot))
         nativeAmmoOwnerDirectContact(actors_[*owner].nativeAmmoOwner,true,target&&*target<actors_.size());
+}
+void GameWorld::applyAmmoImpact(Projectile& shot,std::optional<size_t> target,bool contact,
+                               NativeNavPoint center,float tickMilliseconds) {
+    // Standalone impact consumers have no CREATE transaction. Production
+    // terminal callers place CREATE between these original phase boundaries.
+    beginAmmoImpact(shot,target,contact);
+    applyAmmoRadialImpact(shot,center,tickMilliseconds);
+    finishAmmoImpact(shot,target,contact);
 }
 }

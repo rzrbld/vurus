@@ -1,5 +1,6 @@
 #pragma once
 #include "game/saving_role_index.h"
+#include "game/native_body_graphics.h"
 #include "game/pickup_candidate_index.h"
 #include "game/effect_camera_native.h"
 #include "game/indirect_optional.h"
@@ -75,7 +76,14 @@ struct GeneratorState {
     float delayMs=0,durationMs=0,remainingMs=0;
     bool stressable=false,active=false,stablePopulation=false;
 };
+struct BodyGraphicsAudioCue { size_t actor=0;std::string path;NativeBodyGraphicsAudioEvent event; };
+struct BodyGraphicsView { int32_t translationX=0,translationY=0;uint32_t width=0,height=0;bool playerOnly=false,suspended=false; };
+enum class BodyGraphicsPhase { VisibleUpdate, Draw };
 struct ActorState {
+    IndirectOptional<NativeBodyGraphicsState> bodyGraphics;
+    bool bodyGraphicsHidden=false; // Runtime native+128 bit8, not a constant authored property.
+    bool bodyGraphicsLegacy=false; // Explicit old-save single-channel policy.
+    bool bodyGraphicsGraphicUpdate=false; // Derived class flag, not persisted.
     std::uint32_t nativeSubtype=0; // Placement-derived, not serialized; rebuilt on restore.
     bool nativeAwake=false,nativeManaged=false;
     bool nativeFireRequested=false; // actor flag2, retained through Two-pieces conversion.
@@ -311,7 +319,7 @@ public:
     // Application view/mode context, deliberately outside gameplay saves.
     // Headless callers may leave it unset for camera-independent mechanics.
     void setEffectCamera(NativeEffectCamera camera) { effectCamera_=camera; }
-    void setEffectReader(ContentReader reader) { effectReader_=std::move(reader);effectSequences_.clear(); }
+    void setEffectReader(ContentReader reader) { effectReader_=std::move(reader);effectSequences_.clear();bodyGraphicsBanks_.clear(); }
     bool load(SceneContent&,const Level&,std::string& error,int difficulty=1);
     const SurpriseState& surprise() const { return surprise_; }
     void cancelSurprise();
@@ -370,6 +378,10 @@ public:
     const NativeActorCells& nativeActorCells() const { return actorCells_; }
     size_t spawn(ClassId,ContentPosition);
     void expireVisual(size_t id);
+    void advanceBodyGraphicsPhase(BodyGraphicsView,BodyGraphicsPhase);
+    std::vector<BodyGraphicsAudioCue> takeBodyGraphicsAudio() { for(const auto& cue:bodyGraphicsAudio_)bodyGraphicsAudioPins_.insert(cue.actor);auto out=std::move(bodyGraphicsAudio_);bodyGraphicsAudio_.clear();return out; }
+    void releaseBodyGraphicsAudio() { bodyGraphicsAudioPins_.clear(); }
+    void discardBodyGraphicsAudio() { bodyGraphicsAudio_.clear();bodyGraphicsAudioPins_.clear(); }
     void initializeGates();
     void updateGates(float milliseconds);
     void finishGateAnimation(size_t actor,uint64_t revision);
@@ -539,6 +551,9 @@ private:
     void configureProjectileCreates(Projectile&,bool fromConstructor=false);
     void updateProjectileCreates(Projectile&,ContentPosition previous);
     bool spawnProjectileHitEffect(const Projectile&,bool contact);
+    void beginAmmoImpact(Projectile&,std::optional<size_t> target,bool contact);
+    void applyAmmoRadialImpact(Projectile&,NativeNavPoint radialCenter,float tickMilliseconds);
+    void finishAmmoImpact(Projectile&,std::optional<size_t> target,bool contact);
     void applyAmmoImpact(Projectile&,std::optional<size_t> target,bool contact,NativeNavPoint radialCenter,float tickMilliseconds);
     void applyNativeAmmoDamage(size_t target,float amount,Projectile&,bool radial,bool radialPlayerOwned=false,
                               bool sourceIsAmmo=true);
@@ -585,6 +600,19 @@ private:
     void updateExplosion(size_t actor,float milliseconds);
     void updateExplosions(float milliseconds);
     const GafSequence* effectSequence(const SpriteReference&);
+    const GafAnimation* bodyGraphicsBank(const std::string&);
+    void initializeBodyGraphics(size_t);
+    void forgetBodyGraphics(size_t);
+    void advanceBodyGraphicsAwake(size_t,int32_t);
+    void advanceBodyGraphics(size_t,int32_t);
+    bool retireBodyGraphics(size_t);
+    bool validateBodyGraphics(const ActorState&,const ObjectPlacement&,std::string&);
+    NativeBodyGraphicsAudioSink bodyGraphicsSink(size_t);
+    std::map<std::string,std::optional<GafAnimation>> bodyGraphicsBanks_;
+    std::vector<BodyGraphicsAudioCue> bodyGraphicsAudio_;
+    std::set<size_t> bodyGraphicsAudioPins_;
+    uint64_t nextBodyGraphicsIdentity_=uint64_t{1}<<63;
+    int32_t bodyGraphicsStepMs_=0;
     ContentReader effectReader_;
     std::map<std::pair<std::string,uint32_t>,std::optional<GafSequence>> effectSequences_;
     void updateLifts(float milliseconds=0);

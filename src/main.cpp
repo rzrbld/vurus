@@ -189,6 +189,7 @@ struct App {
 
     vyruz::SceneRenderer sceneRenderer;
     double enemyDrawStepMs=0; // last native slice pending one draw (43f07f–43fc42)
+    std::vector<vyruz::SceneAudioCue> pendingAnimationAudio;
     int forcedDir = -1;      // dev: force a facing direction
     std::optional<SDL_Rect> windowedBounds;
     int forcedStep = -1;     // dev: select a raw bitmap (zero-based)
@@ -219,6 +220,42 @@ bool loadStoryTexture(App& a) {
     a.storyTex = a.gfx.uploadTexture(img.rgba.data(), img.width, img.height);
     std::printf("loaded story image (%dx%d)\n", img.width, img.height);
     return true;
+}
+
+// Keep phase producers in their actual adapter order. Body slot identities use
+// a separate World range; they remain independent when a heading is deselected.
+void collectSceneAnimationAudio(App& a) {
+    for(auto& cue:a.sceneRenderer.takeAudioCues())a.pendingAnimationAudio.push_back(std::move(cue));
+}
+void collectBodyAnimationAudio(App& a) {
+    for(auto& cue:a.world.takeBodyGraphicsAudio()) {
+        const auto kind=cue.event.kind==vyruz::NativeBodyGraphicsAudioKind::Entered?vyruz::SceneAudioCueKind::Play:
+            cue.event.kind==vyruz::NativeBodyGraphicsAudioKind::Held?vyruz::SceneAudioCueKind::Held:vyruz::SceneAudioCueKind::Forget;
+        a.pendingAnimationAudio.push_back({cue.actor,std::move(cue.path),cue.event.sample,kind,
+            cue.event.identity,{},bool(cue.event.command&0x10000)});
+    }
+}
+void collectPendingAnimationAudio(App& a) {
+    // Any previous Scene draw precedes the current World awake visit.
+    collectSceneAnimationAudio(a);collectBodyAnimationAudio(a);
+}
+void consumeGameplayAudio(App& a) {
+    collectPendingAnimationAudio(a);
+    auto cues=std::move(a.pendingAnimationAudio);a.pendingAnimationAudio.clear();
+    a.audio.consume(a.world,a.content,cues);
+    // Drained body cues still pin their actor slots until their source/route is
+    // resolved above, including when they were retained across a rendered frame.
+    a.world.releaseBodyGraphicsAudio();
+}
+vyruz::BodyGraphicsView bodyGraphicsView(App& a,float cameraX,float cameraY,bool playerOnly=false) {
+    const auto view=a.gfx.viewport();
+    vyruz::BodyGraphicsView result;
+    result.translationX=static_cast<int32_t>(-cameraX);result.translationY=static_cast<int32_t>(-cameraY);
+    result.width=static_cast<uint32_t>(view.width);result.height=static_cast<uint32_t>(view.height);
+    result.playerOnly=playerOnly;
+    const bool liveDeath=a.presentation.page==vyruz::PresentationPage::DeathPrompt&&!a.presentation.suspended;
+    result.suspended=a.paused||!a.sessionStarted||(a.presentation.open()&&!liveDeath);
+    return result;
 }
 
 void bindEffectCamera(App& a) {
@@ -253,6 +290,7 @@ vyruz::EnemyAnimationView enemyAnimationView(App& a,float cameraX,float cameraY)
     return result;
 }
 void advanceSceneAnimation(App& a,double milliseconds,double worldTimeMs) {
+    collectPendingAnimationAudio(a);
     a.sceneRenderer.setNativeEnemyPhases();
     //Retain the existing non-enemy newborn/FX clock admission. Newly bound
     //enemy channels then receive their separate native visible-cell phase.
@@ -275,6 +313,10 @@ void advanceSceneAnimation(App& a,double milliseconds,double worldTimeMs) {
     auto view=enemyAnimationView(a,x,y);
     view.playerOnly=a.world.surprise().active(vyruz::SurpriseKind::TimeWarp)&&a.world.surprise().timeWarpPhase!=1;
     a.sceneRenderer.advanceEnemyPhase(enemyMs,a.world.actors(),view,vyruz::EnemyAnimationPhase::VisibleUpdate);
+    collectSceneAnimationAudio(a);
+    // Native43f91b uses the stored camera, before the outer draw recomputes it.
+    a.world.advanceBodyGraphicsPhase(bodyGraphicsView(a,a.camX,a.camY,view.playerOnly),vyruz::BodyGraphicsPhase::VisibleUpdate);
+    collectBodyAnimationAudio(a);
 }
 
 std::string presentationText(App& a,const std::string& path) {
@@ -519,6 +561,7 @@ bool loadLevelData(App& a, const std::string& path,const vyruz::SavedLevel* save
     if(entering)nextHud.inheritInventory(a.hud);
     a.hud.clear(a.gfx);a.hud=std::move(nextHud);a.deathPresented=false;a.presentationReturnMain=false;a.presentationReturnExtras=false;a.paused=false;a.inventory={};a.menu={};a.menu.debugEnabled=a.debugEnabled;a.menu.slidesAvailable=a.slidesAvailable;
     a.hud.preloadNotificationFonts(a.gfx);
+    a.pendingAnimationAudio.clear();
     a.world=std::move(validation);a.world.rebind(a.content,a.level);
     a.hud.rebuildMapMarkers(a.content,a.world);
     a.presentation.close();a.audio.device().stop(a.presentationVoice);a.presentationVoice=0;
@@ -1489,13 +1532,18 @@ void render(App& a,float alpha=1) {
         };
         drawTiles();
 
-        // One native phase0 before composition, including its timed bank
-        // updates. Darkness's second player-only draw must not repeat this.
-        // Fixed-step simulation and presentation can run at different rates.
-        // Consume World101c time once; a redraw must not replay the last tick.
+        // Existing Enemy/Item phase0 consumes its pending fixed-step slice.
+        // World-owned Ammo/Thing uses its explicit Draw clock policy below.
+        // Darkness's second player-only composition repeats neither phase.
         const double enemyDrawMs=a.enemyDrawStepMs;a.enemyDrawStepMs=0;
+        collectPendingAnimationAudio(a);
+        // Explicit pre-composition mutation phase; SceneRenderer::draw only
+        // mirrors the World-owned body cursors. Paused/menu clocks stay frozen.
+        a.world.advanceBodyGraphicsPhase(bodyGraphicsView(a,a.camX,a.camY),vyruz::BodyGraphicsPhase::Draw);
+        collectBodyAnimationAudio(a);
         a.sceneRenderer.advanceEnemyPhase(enemyDrawMs,a.world.actors(),
             enemyAnimationView(a,a.camX,a.camY),vyruz::EnemyAnimationPhase::Draw);
+        collectSceneAnimationAudio(a);
         a.world.consumePlayerHitForRender();
         a.sceneRenderer.draw(a.gfx, a.content, L, a.camX, a.camY,
                              player.x, player.y, a.motion.direction, a.forcedStep,
@@ -1876,7 +1924,7 @@ int runApplication(int argc, char** argv, BenchmarkLaunch& benchmark, bool retur
         std::string error;
         if (!a.sceneRenderer.sync(a.content,error)) { std::fprintf(stderr,"%s\n",error.c_str());a.renderFailed=true;break; }
         advanceSceneAnimation(a,kMoveDt*1000,a.world.elapsedMilliseconds());a.hud.advance(kMoveDt*1000,&a.world);
-        a.audio.consume(a.world,a.content,a.sceneRenderer.takeAudioCues());
+        consumeGameplayAudio(a);
         for (auto [id,revision]:a.sceneRenderer.finishedGates(a.world.actors())) a.world.finishGateAnimation(id,revision);
         for (auto id:a.sceneRenderer.finishedEffects(a.world.actors())) a.world.expireVisual(id);
         serviceSave(a);
@@ -1959,7 +2007,7 @@ int runApplication(int argc, char** argv, BenchmarkLaunch& benchmark, bool retur
             if(measuring)animationTimes.push_back(1000.0*(SDL_GetPerformanceCounter()-animationStart)/timerFrequency);
             if(a.inventory.open)a.hud.advanceInventory(kMoveDt*1000,a.world,a.inventory);
             a.audio.setListenerHalfWidth(unsigned(std::max(1.f,a.gfx.viewport().width*.5f)));
-            if(a.sessionStarted&&(!a.presentation.open()||liveDeath))a.audio.consume(a.world,a.content,a.sceneRenderer.takeAudioCues());
+            if(a.sessionStarted&&(!a.presentation.open()||liveDeath))consumeGameplayAudio(a);
             if(!a.presentation.open()||liveDeath)a.audio.updateSpeech();
             a.audio.updateMusic();
             for (auto [id,revision]:a.sceneRenderer.finishedGates(a.world.actors())) a.world.finishGateAnimation(id,revision);

@@ -4,6 +4,7 @@
 #include "render/scene_state.h"
 namespace vyruz {
 struct WorldSnapshot {
+    int32_t bodyGraphicsStepMs=0; // Last native101c delta retained by active redraw.
     std::optional<NativeActorCells> actorCells;
     std::optional<NativeNavGraph> spiderNavigation;
     uint64_t catalogHash=0;
