@@ -1,0 +1,64 @@
+name: Make published desktop and PortMaster Beta normal releases
+'on':
+  push:
+    branches:
+    - promote-beta-20261024
+    paths:
+    - .github/workflows/promote-beta-20261024.yml
+permissions:
+  contents: write
+concurrency:
+  group: promote-beta-20261024
+  cancel-in-progress: false
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+    - name: Verify existing releases and remove prerelease flags
+      shell: python
+      run: |
+        import os,json,hashlib,urllib.request,urllib.parse
+        from pathlib import Path
+        repo=os.environ['GH_REPO'];token=os.environ['GH_TOKEN']
+        SOURCE='362a35eb4e317d5b66f5b549a3ff44151bbf77fb'
+        EXPECTED=json.loads('[{"id": 422840023, "tag": "v202610241546-beta", "title": "Vurus 202610241546 Beta", "body_sha256": "eb9d8ebad9c50a6c7523810ed3035ce3e94971f76bb7dafae9a9f0da7d4495b1", "assets": [{"id": 672719673, "name": "SHA256SUMS.txt", "digest": "sha256:fb3aca7a9d9725e284af3ec620b1dbeb28283b5ab9f5acd0b9f3f7503843b3f7", "size": 354}, {"id": 672719672, "name": "vurus-darwin-arm64.zip", "digest": "sha256:f312081509935a5a3bebfbe207f43c172c1538c6fdd7493c35dbab4b7b4b324d", "size": 4911301}, {"id": 672719675, "name": "vurus-darwin-x86_64.zip", "digest": "sha256:a54607ce8c05199d32f2d61e5f018d5230aa52cb192bbd6550f4b45dd2148e6c", "size": 5297711}, {"id": 672719674, "name": "vurus-linux.tar.gz", "digest": "sha256:09d4db3749ac42f5bf2a485394885cc763a75612485687d374353f9cea3dcbc6", "size": 4482599}, {"id": 672719678, "name": "vurus-windows-amd64.zip", "digest": "sha256:f5d99b36c8ff1397f26c2dfd8d3a2cd6f7542b7230a415b9d0a6ccdd55132348", "size": 4761019}]}, {"id": 422831146, "tag": "portmaster-v202610241546-beta", "title": "Vurus PortMaster 202610241546 Beta", "body_sha256": "b14edba98ba0f102e347043809ce4042c82ae319f78a9b9d1369790349884cd9", "assets": [{"id": 672683311, "name": "SHA256SUMS.txt", "digest": "sha256:88912e164d51e2f6828d0c4e06fc067f2c0bfe833619a3f6e3e481a01182ce91", "size": 87}, {"id": 672683312, "name": "vurus-portmaster.zip", "digest": "sha256:45ff6f979e52e75601ec1f86597bb1087316faca58f0b2852e7f913d96db3e1d", "size": 4112847}]}]')
+        def api(path,payload=None):
+         data=None if payload is None else json.dumps(payload).encode()
+         req=urllib.request.Request('https://api.github.com/repos/'+repo+'/'+path,data=data,method='GET' if payload is None else 'PATCH',headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'})
+         with urllib.request.urlopen(req,timeout=60) as response:return json.load(response)
+        def validate(r,e):
+         assert r['id']==e['id'] and r['tag_name']==e['tag'] and r['name']==e['title'] and not r['draft']
+         assert hashlib.sha256(r['body'].encode()).hexdigest()==e['body_sha256']
+         actual=[{k:a[k] for k in ['id','name','digest','size']} for a in r['assets']]
+         assert sorted(actual,key=lambda a:a['id'])==sorted(e['assets'],key=lambda a:a['id'])
+         ref=api('git/ref/tags/'+urllib.parse.quote(e['tag'],safe=''))
+         assert ref['object']['type']=='commit' and ref['object']['sha']==SOURCE
+        latest_before=api('releases/latest')
+        before=[]
+        for e in EXPECTED:
+         r=api('releases/'+str(e['id']));validate(r,e);before.append(r)
+        Path('before.json').write_text(json.dumps(before,indent=2))
+        for r,e in zip(before,EXPECTED):
+         payload={'draft':False,'prerelease':False,'make_latest':'false','tag_name':e['tag'],'target_commitish':SOURCE,'name':r['name'],'body':r['body']}
+         edited=api('releases/'+str(e['id']),payload);validate(edited,e);assert edited['prerelease'] is False
+        result=[]
+        for e in EXPECTED:
+         r=api('releases/'+str(e['id']));validate(r,e);assert r['prerelease'] is False
+         result.append({'id':r['id'],'tag':r['tag_name'],'url':r['html_url'],'draft':r['draft'],'prerelease':r['prerelease']})
+        latest_after=api('releases/latest');assert latest_after['id']==latest_before['id']
+        Path('normal-releases.json').write_text(json.dumps({'releases':result,'source':SOURCE,'latest_unchanged':latest_after['tag_name']},indent=2))
+        print(json.dumps(result,indent=2))
+    - name: Retain metadata receipts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: normal-release-metadata-receipts
+        path: |-
+          before.json
+          normal-releases.json
+        if-no-files-found: warn
+        retention-days: 7
