@@ -1,0 +1,83 @@
+name: Finalize verified desktop and PortMaster Beta releases
+'on':
+  push:
+    branches:
+    - finalize-beta-202610241546
+    paths:
+    - .github/workflows/finalize-beta-202610241546.yml
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: publish-beta-202610241546
+  cancel-in-progress: false
+jobs:
+  publish-both:
+    name: Publish both verified Beta releases
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        pattern: beta-release-receipts-*
+        path: receipts
+        run-id: 40109270177
+        github-token: ${{ github.token }}
+    - name: Verify both drafts and publish Beta prereleases
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 - <<'CHECK'
+        from pathlib import Path
+        import json
+        r=[json.loads(p.read_text()) for p in Path('receipts').rglob('prepared.json')]
+        assert len(r)==2 and {x['stream'] for x in r}=={'desktop','portmaster'}
+        assert all(x['source']=='362a35eb4e317d5b66f5b549a3ff44151bbf77fb' and x['prerelease'] is True and x['make_latest']=='false' for x in r)
+        Path('prepared-both.json').write_text(json.dumps(r,indent=2))
+        CHECK
+        gh api "repos/$GH_REPO/releases/latest" > latest-before.json
+        for stream in desktop portmaster; do
+         receipt=$(find receipts -path "*/prepared.json" -exec grep -l "\"stream\": \"$stream\"" {} +)
+         test -n "$receipt"
+         rid=$(jq -r .release_id "$receipt")
+         tag=$(jq -r .tag "$receipt")
+         source=$(jq -r .source "$receipt")
+         title=$(jq -r .title "$receipt")
+         test "$(gh api "repos/$GH_REPO/git/ref/tags/$tag" --jq .object.sha)" = "$source"
+         gh api "repos/$GH_REPO/releases/$rid" > "before-$stream.json"
+         printf 'Expected tag=%s title=%s release=%s\n' "$tag" "$title" "$rid"
+         jq '{id,name,tag_name,draft,prerelease,target_commitish}' "before-$stream.json"
+         jq -e --arg tag "$tag" --arg title "$title" '.draft==true and .prerelease==true and .tag_name==$tag and .name==$title' "before-$stream.json"
+         python3 - "$receipt" "before-$stream.json" <<'ASSETS'
+        import json,sys
+        r=json.load(open(sys.argv[1]));d=json.load(open(sys.argv[2]))
+        assert {a['name']:a['digest'] for a in d['assets']}==r['assets']
+        ASSETS
+        done
+        # Both streams are validated and still match their reviewed drafts before either publishes.
+        for stream in desktop portmaster; do
+         receipt=$(find receipts -path "*/prepared.json" -exec grep -l "\"stream\": \"$stream\"" {} +)
+         rid=$(jq -r .release_id "$receipt")
+         printf '%s\n' '{"draft":false,"prerelease":true,"make_latest":"false"}' > publish.json
+         gh api --method PATCH "repos/$GH_REPO/releases/$rid" --input publish.json > "published-$stream.json"
+         jq -e '.draft==false and .prerelease==true' "published-$stream.json"
+        done
+        gh api "repos/$GH_REPO/releases/latest" > latest-after.json
+        test "$(jq -r .id latest-before.json)" = "$(jq -r .id latest-after.json)"
+    - name: Retain publication receipts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: beta-publication-receipts
+        path: |-
+          prepared-both.json
+          before-*.json
+          published-*.json
+          latest-*.json
+        if-no-files-found: warn
+        retention-days: 7
