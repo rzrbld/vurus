@@ -75,6 +75,7 @@ void readTexture(int width,int height,void* pixels);
 #define glVertex2i vyruz::gles::vertex
 #define glTexCoord2f vyruz::gles::texCoord
 #define glColor4f vyruz::gles::color
+#define glColor3f(r,g,b) vyruz::gles::color((r),(g),(b),1.f)
 #define glColor3ub(r,g,b) vyruz::gles::color((r)/255.f,(g)/255.f,(b)/255.f,1.f)
 #define glEnable vyruz::gles::enable
 #define glDisable vyruz::gles::disable

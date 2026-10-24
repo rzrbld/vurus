@@ -174,14 +174,17 @@ void GameWorld::updateExplosion(size_t id,float milliseconds) {
         if(!blast.initialized) {cursor.reset(*sequence);blast.initialized=true;}
         else if(!cursor.restore(*sequence,blast.animation))return;
         const bool active=cursor.frame(*sequence)!=nullptr;
-        // 444ca0 evaluates the active cursor before advancing its animation.
+        // 440cee -> 431ae0 advances FX graphics before 442aa9 -> 444ca0
+        // consumes Explosion's halfway cursor. Keep the visit's binding
+        // admission: native +5c remains bound when a long step finishes, so
+        // an already-due timer may still fire before the FX is retired.
+        cursor.advance(*sequence,milliseconds);blast.animation=cursor.capture();
         const bool halfway=cursor.capture().cursor >= (sequence->subframes.size()>>1);
         bool apply=false;
         if(active && blast.damage!=0) {
             if(halfway || (blast.remainingMs>0 && blast.remainingMs<=milliseconds))apply=true;
             else if(blast.remainingMs>0)blast.remainingMs-=milliseconds;
         }
-        cursor.advance(*sequence,milliseconds);blast.animation=cursor.capture();
         const auto payload=blast; // damage/destroy may grow actors and invalidate references.
         if(apply) {
             blast.remainingMs=-1;

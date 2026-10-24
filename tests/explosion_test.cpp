@@ -30,7 +30,7 @@ Bytes streams(const std::array<Bytes, 4>& components) {
     }
     return result;
 }
-Bytes fixture(uint32_t duration=2) {
+Bytes fixture(uint32_t duration=2,uint32_t count=8,uint32_t flags=0) {
     Bytes descriptor(44); put(descriptor, 0, 1); put(descriptor, 4, 3);
     put(descriptor, 8, 1); put(descriptor, 16, static_cast<uint32_t>(-2));
     put(descriptor, 20, 5);
@@ -46,8 +46,8 @@ Bytes fixture(uint32_t duration=2) {
     bitmap[68] = 0; bitmap[69] = 0x7c;
     bitmap[72] = 0x1f; bitmap[73] = 0x7c;
     bitmap[74] = 0xaa; bitmap[75] = 0xbb;
-    Bytes sequence(32); put(sequence, 0, 8); put(sequence, 4, 0); put(sequence, 8, 1);
-    Bytes poses(8*28);for(int i=0;i<8;++i){put(poses,i*28,1);put(poses,i*28+24,duration);}
+    Bytes sequence(32); put(sequence, 0, count); put(sequence, 4, flags); put(sequence, 8, 1);
+    Bytes poses(count*28);for(uint32_t i=0;i<count;++i){put(poses,i*28,1);put(poses,i*28+24,duration);}
     Bytes headG(36), headA(36); put(headG, 0, 1); put(headA, 0, 1);
     Bytes head; append(head, chunk("GOB_", headG)); append(head, chunk("ANM_", headA));
     Bytes data; append(data, chunk("GOB_", streams({descriptor, bitmap, {}, {}})));
@@ -75,7 +75,7 @@ int main(){
   check(vyruz_test::loadManagedFixture(world,content,level,error),"load Explosion fixture");world.damage(1,1,0);
   check(world.actors().size()==5 && world.actors()[4].explosion.has_value(),"destruction transfers payload to authored FX");
   check(world.actors()[2].vitals.energy==10000,"no immediate damage on destruction");
-  const int ticks=duration==2?7:31; // cursor4 reached after84ms;500ms wins for slow sequence.
+  const int ticks=duration==2?6:31; // cursor4 reached after84ms;500ms wins for slow sequence.
   for(int i=0;i<ticks-1;++i)world.tick(1.f/60,{});
   check(world.actors()[2].vitals.energy==10000,"damage waits for native half-animation/timer");
   SaveGame save;save.currentLevel=content.mapPath;save.levels[save.currentLevel].world=world.snapshot();Bytes encoded;
@@ -88,5 +88,51 @@ int main(){
   check(world.actors()[3].vitals.energy>=9990,"native radial boundary excludes radius edge");
   for(int i=0;i<120;++i)world.tick(1.f/60,{});
   check(world.actors()[2].vitals.energy==9000,"Explosion damage applied once");
+ }
+ // Native 45e7e0 + 444e41 controls using EXPLO sequence1/4 timing metadata.
+ // Expected ticks are original-instruction results, not derived from the port
+ // cursor. Exercise the real awake World path and a disk checkpoint immediately
+ // before damage, then compare complete encoded continuation through expiry.
+ const auto encode=[&](const GameWorld& world,const SceneContent& content){
+  SaveGame save;save.currentLevel=content.mapPath;save.levels[save.currentLevel].world=world.snapshot();Bytes bytes;
+  check(encodeSave(save,bytes,error),error.c_str());return bytes;
+ };
+ struct Timing {unsigned duration,count;std::array<int,4> ticks;};
+ for(const auto& timing:{Timing{4,17,{28,25,24,12}},Timing{2,16,{14,13,12,6}}}) {
+  const std::array<int,4> steps{14,16,17,33};
+  for(size_t k=0;k<steps.size();++k) {
+   const int dt=steps[k],damageTick=timing.ticks[k];
+   const auto bytes=fixture(timing.duration,timing.count,5);
+   auto reader=[&](const std::string&,Bytes& b){b=bytes;return true;};
+   auto content=scene();GameWorld world;world.setEffectReader(reader);
+   check(vyruz_test::loadManagedFixture(world,content,level,error),error.c_str());world.damage(1,1,0);
+   for(int tick=1;tick<damageTick;++tick) {
+    world.tick(float(dt)/1000,{});
+    check(world.actors()[2].vitals.energy==10000,"original FX damage must not occur early");
+   }
+   SaveGame decoded;check(decodeSave(encode(world,content),decoded,error),error.c_str());
+   auto resumedContent=scene();GameWorld resumed;resumed.setEffectReader(reader);
+   check(vyruz_test::loadManagedFixture(resumed,resumedContent,level,error),error.c_str());
+   check(resumed.restoreSnapshot(decoded.levels.at(content.mapPath).world,error),error.c_str());
+   const int expiryTick=(int(timing.duration*14*timing.count)+dt-1)/dt;
+   for(int tick=damageTick;tick<=expiryTick+2;++tick) {
+    world.tick(float(dt)/1000,{});resumed.tick(float(dt)/1000,{});
+    check(world.actors()[2].vitals.energy==9000,"FX damage matches original visit and fires once");
+    check(encode(world,content)==encode(resumed,resumedContent),"FX exact disk continuation through damage and expiry");
+    if(tick<expiryTick)check(world.actors()[4].alive,"FX remains live until sequence finishes");
+    else check(!world.actors()[4].alive&&!world.actors()[4].explosion,"finished FX releases its payload");
+   }
+  }
+ }
+ // Native +5c is a retained sequence binding, not a post-advance frame test.
+ // A due timer still fires when this visit also finishes the port cursor.
+ {
+  auto content=scene();GameWorld world;
+  world.setEffectReader([](const std::string&,Bytes& b){b=fixture(1,4,5);return true;});
+  check(vyruz_test::loadManagedFixture(world,content,level,error),error.c_str());world.damage(1,1,0);
+  auto state=world.snapshot();state.actors[4].explosion->remainingMs=1;
+  check(world.restoreSnapshot(state,error),error.c_str());world.tick(.1f,{});
+  check(world.actors()[2].vitals.energy==9000,"due timer remains eligible on the finishing visit");
+  check(!world.actors()[4].alive&&!world.actors()[4].explosion,"coarse-step finished FX retires");
  }
 }

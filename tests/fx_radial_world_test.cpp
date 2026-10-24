@@ -44,10 +44,12 @@ int main(){try{
  }
  for(bool delayed:{false,true}){auto s=fixture();GameWorld w;load(w,s,level);
   AmmoImpactNativeTestAccess::explosion(w,2,delayed?100:2,delayed?50:500);
-  AmmoImpactNativeTestAccess::visit(w,2,delayed?49:84);
-  need(w.actors()[1].vitals.shield==2.5f,"Explosion checks active cursor/delay before advancing: no early damage");
+  // 440cee -> 431ae0 advances before444ca0 consumes the current cursor.
+  // Eight28ms subframes start at cursor1: halfway cursor4 is reached at84ms.
+  AmmoImpactNativeTestAccess::visit(w,2,delayed?49:83);
+  need(w.actors()[1].vitals.shield==2.5f,"Explosion waits until the exact post-advance halfway/delay boundary");
   AmmoImpactNativeTestAccess::visit(w,2,1);
-  need(w.actors()[1].vitals.shield==1.5f,"Explosion exact delay or pre-advance halfway cursor triggers native radial");
+  need(w.actors()[1].vitals.shield==1.5f,"Explosion exact delay or post-advance halfway cursor triggers native radial");
   need(w.actors()[2].explosion&&w.actors()[2].explosion->damage==0&&w.actors()[2].explosion->remainingMs==-1,"Explosion consumes live payload after native radial callback");
   AmmoImpactNativeTestAccess::visit(w,2,1);need(w.actors()[1].vitals.shield==1.5f,"Explosion cannot apply consumed payload twice");
  }
