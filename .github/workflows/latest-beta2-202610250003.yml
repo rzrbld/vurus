@@ -1,0 +1,58 @@
+name: Make the second desktop Beta the latest release
+'on':
+  push:
+    branches:
+    - latest-beta2-202610250003
+    paths:
+    - .github/workflows/latest-beta2-202610250003.yml
+permissions:
+  contents: write
+concurrency:
+  group: latest-beta2-202610250003
+  cancel-in-progress: false
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+    - name: Verify releases and set desktop Latest
+      shell: python
+      run: "import os,json,hashlib,urllib.request\nfrom pathlib import Path\nSOURCE='b69096d74c933b7451ecaa8bd9b453f6016fd440'\n\
+        EXPECTED=[{'id': 423049188, 'tag': 'v202610242327-beta', 'title': 'Vurus 202610242327 Beta', 'body_sha256': '78d41ea2ed844b82b4aec09e9252eb2a64cbb2f3abcbe552ff4e41cf71e4989f',\
+        \ 'assets': [{'id': 673615027, 'name': 'SHA256SUMS.txt', 'digest': 'sha256:fa5cace32a5836b13e27552e71615f72ecbb2f7c957055cf437129f00a82dd2c',\
+        \ 'size': 354}, {'id': 673615035, 'name': 'vurus-darwin-arm64.zip', 'digest': 'sha256:7fb7c389402bebeffb8924fb5f99108bb379dc18c5ca1a37df5cfcac6be141b3',\
+        \ 'size': 4968152}, {'id': 673615026, 'name': 'vurus-darwin-x86_64.zip', 'digest': 'sha256:070a323969420e9b889d2f72a0b6520f8a9b76e5e28f21b2462cb8dde824d7e0',\
+        \ 'size': 5351996}, {'id': 673615028, 'name': 'vurus-linux.tar.gz', 'digest': 'sha256:78b982878996795019e1570a5e4fad35387df66aa0f3e066c3221b9e18b91722',\
+        \ 'size': 4552543}, {'id': 673615025, 'name': 'vurus-windows-amd64.zip', 'digest': 'sha256:261b722f4be4810d74262562529ee7f75fd6bace4d6c5d0666af555af8767e90',\
+        \ 'size': 4807328}]}, {'id': 423044597, 'tag': 'portmaster-v202610242327-beta', 'title': 'Vurus PortMaster 202610242327\
+        \ Beta', 'body_sha256': '7593df00fab0c604a5d27f6f51ce8b0e36c9cf8426690aedd3a6593232d8d54d', 'assets': [{'id': 673590115,\
+        \ 'name': 'SHA256SUMS.txt', 'digest': 'sha256:a9c3e4b80f6b8cb979b82546240ab8d06718f3b952d1f21263b421d96a9380db', 'size':\
+        \ 87}, {'id': 673590117, 'name': 'vurus-portmaster.zip', 'digest': 'sha256:5de82501f9af04bf057f10f01a77181a09f05dcef41e6d74a966240957bb4315',\
+        \ 'size': 4168027}]}]\nLATEST_BEFORE=421351775\ndef api(path,payload=None):\n req=urllib.request.Request('https://api.github.com/repos/'+os.environ['GH_REPO']+'/'+path,data=None\
+        \ if payload is None else json.dumps(payload).encode(),method='GET' if payload is None else 'PATCH',headers={'Authorization':'Bearer\
+        \ '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'})\n\
+        \ with urllib.request.urlopen(req,timeout=60) as response:return json.load(response)\ndef validate(r,e):\n assert\
+        \ r['id']==e['id'] and r['tag_name']==e['tag'] and r['name']==e['title'] and not r['draft'] and not r['prerelease']\n\
+        \ assert hashlib.sha256(r['body'].encode()).hexdigest()==e['body_sha256']\n assert sorted([{k:a[k] for k in ['id','name','digest','size']}\
+        \ for a in r['assets']],key=lambda a:a['id'])==sorted(e['assets'],key=lambda a:a['id'])\n ref=api('git/ref/tags/'+e['tag']);assert\
+        \ ref['object']['type']=='commit' and ref['object']['sha']==SOURCE\nbefore=[api('releases/'+str(e['id'])) for e in\
+        \ EXPECTED]\nfor r,e in zip(before,EXPECTED):validate(r,e)\nlatest=api('releases/latest');assert latest['id'] in {LATEST_BEFORE,EXPECTED[0]['id']}\n\
+        Path('verified-before.json').write_text(json.dumps({'releases':before,'latest':latest},indent=2))\nr=before[0];e=EXPECTED[0]\n\
+        assert not e['tag'].startswith('portmaster-')\nresult=api('releases/'+str(e['id']),{'tag_name':e['tag'],'target_commitish':SOURCE,'name':r['name'],'body':r['body'],'draft':False,'prerelease':False,'make_latest':'true'})\n\
+        validate(result,e)\nafter=[api('releases/'+str(e['id'])) for e in EXPECTED]\nfor r,e in zip(after,EXPECTED):validate(r,e)\n\
+        latest=api('releases/latest');assert latest['id']==EXPECTED[0]['id'] and latest['tag_name']==EXPECTED[0]['tag']\n\
+        Path('latest-result.json').write_text(json.dumps({'source':SOURCE,'latest':{'id':latest['id'],'tag':latest['tag_name'],'url':latest['html_url']},'releases':after,'assets_and_notes_unchanged':True},indent=2))\n\
+        print('LATEST '+latest['html_url'])\n"
+    - name: Retain metadata verification receipts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: beta2-latest-receipts
+        path: 'verified-before.json
+
+          latest-result.json'
+        if-no-files-found: warn
+        retention-days: 7
