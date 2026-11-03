@@ -9,9 +9,12 @@ cmake -S "$project_dir" -B "$build_dir" -DCMAKE_BUILD_TYPE=Release \
     -DBUILD_TESTING="$test_mode" -DVYRUZ_GLES=ON -DVYRUZ_PORTMASTER=ON \
     -DVURUS_BUILD_BENCHMARK=ON -DVURUS_BENCH_BUILD="${GITHUB_SHA:-unversioned}"
 cmake --build "$build_dir" --parallel "${VURUS_BUILD_JOBS:-4}"
-"$build_dir/vurus" --help
+# The SDK also contains Ubuntu's older SDL. Use the SDK library that matches
+# the build headers for smoke/tests only; no search path is shipped to devices.
+export LD_LIBRARY_PATH="/usr/local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+LD_BIND_NOW=1 "$build_dir/vurus" --help
 "$build_dir/vurus" --licenses > "$build_dir/licenses-smoke.txt"
-"$build_dir/vurus-bench" --help
+LD_BIND_NOW=1 "$build_dir/vurus-bench" --help
 "$build_dir/vurus-bench" --licenses > "$build_dir/benchmark-licenses-smoke.txt"
 if [ "$test_mode" = ON ]; then
     SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy \

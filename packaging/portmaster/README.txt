@@ -27,7 +27,7 @@ build. Gameplay effects remain enabled. See engine-README.txt for all options.
 
 This Beta is a normal optimized Release build, not a debug build.
 It requires aarch64 and native GLES 3.0; GLES 2-only devices are unsupported.
-This is a manual-install package for PortMaster-compatible firmware with SDL2
+This is a manual-install package for PortMaster-compatible firmware with SDL 2.0.18 or newer
 and native OpenGL ES 3.0 support. No additional graphics drivers are installed.
 Measured handheld benchmark results and settings:
 https://github.com/rzrbld/vurus#performance
