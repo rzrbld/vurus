@@ -16,6 +16,7 @@ on:
       - "packaging/README.txt"
       - "tools/build_portmaster.sh"
       - "tools/package_portmaster.sh"
+      - "tools/verify_portmaster_package.py"
       - "tools/package_benchmark.sh"
       - ".github/workflows/build-portmaster.yml"
   pull_request:
@@ -31,6 +32,7 @@ on:
       - "packaging/README.txt"
       - "tools/build_portmaster.sh"
       - "tools/package_portmaster.sh"
+      - "tools/verify_portmaster_package.py"
       - "tools/package_benchmark.sh"
       - ".github/workflows/build-portmaster.yml"
 permissions:
