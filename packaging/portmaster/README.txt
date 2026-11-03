@@ -21,17 +21,16 @@ Native SDL controller input uses PortMaster's mappings. Configure controls in
 Options. Start opens the game menu; use PortMaster's usual exit hotkey to quit.
 Options -> Video -> Advanced -> FPS counter enables a saved On/Off frame-rate
 and RSS memory overlay (default Off); no debug mode or SSH connection is needed.
-Default resolution is 640x480; other resolutions and adaptive HUD remain available.
+Default resolution is 640x480; native fixed-display fallback and adaptive HUD are supported.
 Optional CRT, bloom, sharpen and antialiasing shaders are unavailable in this
 build. Gameplay effects remain enabled. See engine-README.txt for all options.
 
 This Beta is a normal optimized Release build, not a debug build.
 It requires aarch64 and native GLES 3.0; GLES 2-only devices are unsupported.
-User-tested on Anbernic RG40XX H (H700,1GB RAM,muOS2410 Banana): roughly30-40FPS
-with FX and terrain effects disabled, dipping into the low20s in heavy battles.
-These are user observations, not guarantees for other devices. Long-session and
-repeated-level-transition validation continues. Not an official PortMaster
-catalog submission or acceptance.
+This is a manual-install package for PortMaster-compatible firmware with SDL2
+and native OpenGL ES 3.0 support. No additional graphics drivers are installed.
+Measured handheld benchmark results and settings:
+https://github.com/rzrbld/vurus#performance
 No original game assets, saves, settings, or graphics-driver libraries are bundled.
 Thanks to the original game's creators. Vurus and third-party notices are in
-LICENSE.md and LICENSES/.
+LICENSE.md and licenses/.

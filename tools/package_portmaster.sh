@@ -12,6 +12,10 @@ check_binary() {
         echo 'C++ runtime must be linked statically for this package.' >&2
         exit 1
     fi
+    if readelf -d "$1" | grep -Eq '\((RPATH|RUNPATH)\)'; then
+        echo 'PortMaster executables must not embed library search paths.' >&2
+        exit 1
+    fi
     cmake -DBINARY="$1" -DREADELF="$(command -v readelf)" \
         -DMAX_GLIBC=2.31 -P "$project_dir/cmake/CheckGlibc.cmake"
 }
@@ -26,7 +30,7 @@ mkdir -p "$out_dir"
 out_dir=$(CDPATH= cd -- "$out_dir" && pwd)
 staging=$(mktemp -d)
 trap 'rm -rf "$staging"' EXIT HUP INT TERM
-mkdir -p "$staging/vurus/LICENSES"
+mkdir -p "$staging/vurus/licenses"
 install -m 755 "$build_dir/vurus" "$staging/vurus/vurus.aarch64"
 if [ "$benchmark" = true ]; then
     install -m 755 "$build_dir/vurus-bench" "$staging/vurus/vurus-bench.aarch64"
@@ -38,20 +42,26 @@ install -m 755 "$project_dir/packaging/portmaster/Vurus.sh" "$staging/Vurus.sh"
 install -m 644 "$project_dir/packaging/portmaster/README.txt" "$staging/vurus/README.txt"
 install -m 644 "$project_dir/packaging/README.txt" "$staging/vurus/engine-README.txt"
 install -m 644 "$project_dir/LICENSE.md" "$staging/vurus/LICENSE.md"
+install -m 644 "$project_dir/LICENSE.md" "$staging/vurus/licenses/Vurus.txt"
+# The shared manuals also ship on desktop, whose license-directory names differ.
+sed -i 's|LICENSES/|licenses/|g; s|in LICENSES|in licenses|g' "$staging/vurus/engine-README.txt"
+if [ "$benchmark" = true ]; then
+    sed -i 's|benchmark-LICENSES/|licenses/|g' "$staging/vurus/benchmark-README.txt"
+fi
 for component in oxideav-indeo zlib mame-psgs; do
-    install -m 644 "$project_dir/third_party/$component/LICENSE" "$staging/vurus/LICENSES/$component.txt"
+    install -m 644 "$project_dir/third_party/$component/LICENSE" "$staging/vurus/licenses/$component.txt"
 done
-install -m 644 "$project_dir/third_party/mame-psgs/NOTICE" "$staging/vurus/LICENSES/MAME-PSGS-NOTICE.txt"
-install -m 644 "$project_dir/third_party/smaa/LICENSE.txt" "$staging/vurus/LICENSES/SMAA.txt"
-cp -R "$project_dir/third_party/oxideav-indeo/rust-licenses" "$staging/vurus/LICENSES/"
+install -m 644 "$project_dir/third_party/mame-psgs/NOTICE" "$staging/vurus/licenses/MAME-PSGS-NOTICE.txt"
+install -m 644 "$project_dir/third_party/smaa/LICENSE.txt" "$staging/vurus/licenses/SMAA.txt"
+cp -R "$project_dir/third_party/oxideav-indeo/rust-licenses" "$staging/vurus/licenses/"
 # libc++ is linked statically in the PortMaster builder.
 if [ ! -f /usr/share/doc/libc++1-18/copyright ]; then
     echo 'Package inside the PortMaster builder to include its C++ runtime notices.' >&2
     exit 1
 fi
-cp /usr/share/doc/libc++1-18/copyright "$staging/vurus/LICENSES/libc++.txt"
-cp /usr/share/doc/libc++abi1-18/copyright "$staging/vurus/LICENSES/libc++abi.txt"
-cp /usr/share/doc/gcc-9-base/copyright "$staging/vurus/LICENSES/GCC-runtime.txt"
+cp /usr/share/doc/libc++1-18/copyright "$staging/vurus/licenses/libc++.txt"
+cp /usr/share/doc/libc++abi1-18/copyright "$staging/vurus/licenses/libc++abi.txt"
+cp /usr/share/doc/gcc-9-base/copyright "$staging/vurus/licenses/GCC-runtime.txt"
 strip "$staging/vurus/vurus.aarch64"
 # A fresh archive avoids retaining stale entries from an older output.
 if [ "$benchmark" = true ]; then
@@ -59,5 +69,6 @@ if [ "$benchmark" = true ]; then
 else
     (cd "$staging" && zip -q -r package.zip Vurus.sh vurus)
 fi
+python3 "$project_dir/tools/verify_portmaster_package.py" "$staging/package.zip"
 mv "$staging/package.zip" "$out_dir/vurus-portmaster.zip"
 sha256sum "$out_dir/vurus-portmaster.zip"
