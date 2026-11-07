@@ -26,6 +26,8 @@ if [ ! -d "$GAMEDIR" ] && [ -n "${directory:-}" ]; then
 fi
 cd "$GAMEDIR" || exit 1
 exec > >(tee "$GAMEDIR/log.txt") 2>&1
+# ZIP extraction can drop the executable bit.
+$ESUDO chmod +x "$GAMEDIR/vurus.aarch64" 2>/dev/null || true
 if [ "${DEVICE_ARCH:-aarch64}" != aarch64 ]; then
     echo "This Vurus package requires aarch64 and OpenGL ES 3.0."
     exit 1

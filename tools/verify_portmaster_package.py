@@ -25,6 +25,7 @@ def verify(archive):
         required = {
             "Vurus.sh", "vurus/vurus.aarch64", "vurus/README.txt",
             "vurus/engine-README.txt", "vurus/LICENSE.md",
+            "vurus/port.json", "vurus/gameinfo.xml", "vurus/screenshot.png",
             "vurus/licenses/Vurus.txt", "vurus/licenses/oxideav-indeo.txt",
             "vurus/licenses/zlib.txt", "vurus/licenses/SMAA.txt",
             "vurus/licenses/mame-psgs.txt", "vurus/licenses/MAME-PSGS-NOTICE.txt",
@@ -42,7 +43,8 @@ def verify(archive):
             scripts.add("Vurus Benchmark.sh")
             engines.add("vurus/vurus-bench.aarch64")
         top = {"vurus"} | scripts
-        runtime = {"vurus.aarch64", "README.txt", "engine-README.txt", "LICENSE.md", "licenses"}
+        runtime = {"vurus.aarch64", "README.txt", "engine-README.txt", "LICENSE.md", "licenses",
+                   "port.json", "gameinfo.xml", "screenshot.png"}
         if benchmark:
             runtime.update({"vurus-bench.aarch64", "benchmark-README.txt"})
         forbidden = {"data", "saves", ".git", ".agents", ".codex", ".aws"}

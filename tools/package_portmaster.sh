@@ -40,6 +40,10 @@ if [ "$benchmark" = true ]; then
 fi
 install -m 755 "$project_dir/packaging/portmaster/Vurus.sh" "$staging/Vurus.sh"
 install -m 644 "$project_dir/packaging/portmaster/README.txt" "$staging/vurus/README.txt"
+# PortMaster metadata, in the port folder as PortMaster expects it.
+install -m 644 "$project_dir/packaging/portmaster/port.json" "$staging/vurus/port.json"
+install -m 644 "$project_dir/packaging/portmaster/gameinfo.xml" "$staging/vurus/gameinfo.xml"
+install -m 644 "$project_dir/packaging/portmaster/screenshot.png" "$staging/vurus/screenshot.png"
 install -m 644 "$project_dir/packaging/README.txt" "$staging/vurus/engine-README.txt"
 install -m 644 "$project_dir/LICENSE.md" "$staging/vurus/LICENSE.md"
 install -m 644 "$project_dir/LICENSE.md" "$staging/vurus/licenses/Vurus.txt"

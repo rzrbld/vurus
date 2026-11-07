@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gameList>
+  <game>
+    <path>./Vurus.sh</path>
+    <name>Vurus</name>
+    <desc>Native reimplementation of Vyruz: Destruction of the Untel Empire using your own original game resources. OpenGL ES 3.0 renderer, SDL2 controller input and audio; scales to any screen size and aspect.</desc>
+    <developer>Vurus port by rzrbld</developer>
+    <image>./vurus/screenshot.png</image>
+    <genre>Action</genre>
+    <players>1</players>
+  </game>
+</gameList>

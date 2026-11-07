@@ -1,0 +1,35 @@
+{
+  "version": 4,
+  "name": "vurus.zip",
+  "items": [
+    "Vurus.sh",
+    "vurus/"
+  ],
+  "items_opt": [
+    "Vurus Benchmark.sh"
+  ],
+  "attr": {
+    "title": "Vurus",
+    "porter": [
+      "rzrbld"
+    ],
+    "desc": "Native reimplementation of Vyruz: Destruction of the Untel Empire using the player's original game resources. OpenGL ES 3.0 renderer, SDL2 controller input and audio; scales to any screen size and aspect. Includes an optional benchmark launcher.",
+    "desc_md": null,
+    "inst": "Extract Vurus.sh and the vurus folder into the ports folder. Put your own original Vyruz ISO or single BIN/CUE inside vurus/, beside vurus.aarch64; on first launch the built-in importer creates vurus/data/. Saves and settings are kept beside the executable. Requires AArch64 firmware with OpenGL ES 3.0 and SDL 2.0.18 or newer.",
+    "inst_md": null,
+    "genres": [
+      "action"
+    ],
+    "image": null,
+    "rtr": false,
+    "exp": true,
+    "runtime": [],
+    "store": [],
+    "availability": "commercial",
+    "reqs": [],
+    "arch": [
+      "aarch64"
+    ],
+    "min_glibc": "2.30"
+  }
+}
